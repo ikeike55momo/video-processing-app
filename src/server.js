@@ -60,7 +60,22 @@ const PORT = process.env.PORT || 3000;
 let prisma;
 try {
   // Prismaクライアントの初期化前に環境変数を確認
+  console.log('Node.jsバージョン:', process.version);
   console.log('DATABASE_URL:', process.env.DATABASE_URL ? '設定されています' : '設定されていません');
+  console.log('プロセスの作業ディレクトリ:', process.cwd());
+  
+  // Prismaクライアントをインポートする前に、prisma generateを実行
+  const { execSync } = require('child_process');
+  console.log('prisma generateを実行します...');
+  try {
+    execSync('npx prisma generate --schema=./prisma/schema.prisma', { 
+      stdio: 'inherit',
+      env: { ...process.env, NODE_ENV: 'production' }
+    });
+    console.log('prisma generateが正常に完了しました');
+  } catch (genError) {
+    console.error('prisma generateの実行中にエラーが発生しました:', genError);
+  }
   
   // スキーマの場所を明示的に指定
   const { PrismaClient } = require('@prisma/client');
@@ -74,25 +89,7 @@ try {
   console.log('Prismaクライアントが正常に初期化されました');
 } catch (error) {
   console.error('Prismaクライアントの初期化に失敗しました:', error);
-  // 再度Prisma Clientを生成して初期化を試みる
-  try {
-    const { execSync } = require('child_process');
-    console.log('prisma generateを実行します...');
-    // スキーマの場所を明示的に指定
-    execSync('npx prisma generate --schema=./prisma/schema.prisma', { stdio: 'inherit' });
-    const { PrismaClient } = require('@prisma/client');
-    prisma = new PrismaClient({
-      datasources: {
-        db: {
-          url: process.env.DATABASE_URL
-        }
-      }
-    });
-    console.log('2回目の試行でPrismaクライアントが正常に初期化されました');
-  } catch (retryError) {
-    console.error('2回目のPrismaクライアント初期化にも失敗しました:', retryError);
-    process.exit(1); // 致命的なエラーなのでプロセスを終了
-  }
+  process.exit(1); // 致命的なエラーなのでプロセスを終了
 }
 // JSON形式のリクエストボディを解析
 app.use(express_1.default.json());

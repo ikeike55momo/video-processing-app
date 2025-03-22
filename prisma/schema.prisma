@@ -4,7 +4,9 @@
 generator client {
   provider        = "prisma-client-js"
   previewFeatures = ["metrics"]
-  engineType      = "binary"
+  // engineTypeを削除して、デフォルトのbinaryTypeを使用
+  // binaryTargetsを追加して、異なる環境でのサポートを確保
+  binaryTargets   = ["native", "rhel-openssl-1.0.x"]
 }
 
 datasource db {
