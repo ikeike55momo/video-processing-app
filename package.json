@@ -1,16 +1,16 @@
 {
   "name": "video-processing-render",
   "version": "1.0.0",
-  "main": "dist/server.js",
+  "main": "src/server.js",
   "scripts": {
-    "start": "node dist/server.js",
-    "build": "rimraf dist && mkdir -p dist dist/workers && cp -r src/*.js dist/ && cp -r src/workers/*.js dist/workers/ && echo 'JavaScriptファイルを直接コピーしました'",
-    "dev": "nodemon --exec ts-node src/server.ts",
+    "start": "node src/server.js",
+    "build": "echo 'ビルドプロセスをスキップし、既存のJavaScriptファイルを使用します'",
+    "dev": "nodemon src/server.js",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
-    "start:transcription": "node dist/workers/transcription.js",
-    "start:summary": "node dist/workers/summary.js",
-    "start:article": "node dist/workers/article.js"
+    "start:transcription": "node src/workers/transcription.js",
+    "start:summary": "node src/workers/summary.js",
+    "start:article": "node src/workers/article.js"
   },
   "keywords": [],
   "author": "",
