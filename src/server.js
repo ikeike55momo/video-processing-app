@@ -83,9 +83,22 @@ app.use(express_1.default.json());
 app.use(express_1.default.static('public'));
 // CORSミドルウェア
 app.use((req, res, next) => {
-    res.header('Access-Control-Allow-Origin', '*');
+    // 環境変数から許可するオリジンを取得、設定がなければ全てのオリジンを許可
+    const allowedOrigins = process.env.ALLOWED_ORIGINS 
+        ? process.env.ALLOWED_ORIGINS.split(',') 
+        : ['http://localhost:3000', 'https://video-processing-frontend.onrender.com'];
+    
+    const origin = req.headers.origin;
+    if (origin && (allowedOrigins.includes(origin) || allowedOrigins.includes('*'))) {
+        res.header('Access-Control-Allow-Origin', origin);
+    } else {
+        res.header('Access-Control-Allow-Origin', '*');
+    }
+    
     res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
     res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+    res.header('Access-Control-Allow-Credentials', 'true');
+    
     if (req.method === 'OPTIONS') {
         return res.sendStatus(204);
     }
