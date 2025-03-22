@@ -12,6 +12,8 @@ services:
         value: production
       - key: DATABASE_URL
         value: "postgresql://wado_wado_user:U5YqVgZ8xL4OaqGGybLqdJOs4ZwSIWqG@dpg-cve55ldrie7s73e158c0-a/wado_wado"
+      - key: DIRECT_URL
+        value: "postgresql://wado_wado_user:U5YqVgZ8xL4OaqGGybLqdJOs4ZwSIWqG@dpg-cve55ldrie7s73e158c0-a/wado_wado"
       - key: REDIS_URL
         fromService:
           type: redis
@@ -29,7 +31,39 @@ services:
         sync: false
       - key: OPENROUTER_API_KEY
         sync: false
+      - key: ALLOWED_ORIGINS
+        value: "https://video-processing-frontend.onrender.com"
     healthCheckPath: /api/healthcheck
+
+  # フロントエンドアプリケーション
+  - type: web
+    name: video-processing-frontend
+    env: node
+    plan: standard
+    buildCommand: cd frontend && npm install && npx prisma generate && npm run build
+    startCommand: cd frontend && npm start
+    autoDeploy: true
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        value: "postgresql://wado_wado_user:U5YqVgZ8xL4OaqGGybLqdJOs4ZwSIWqG@dpg-cve55ldrie7s73e158c0-a/wado_wado"
+      - key: DIRECT_URL
+        value: "postgresql://wado_wado_user:U5YqVgZ8xL4OaqGGybLqdJOs4ZwSIWqG@dpg-cve55ldrie7s73e158c0-a/wado_wado"
+      - key: NEXTAUTH_URL
+        value: "https://video-processing-frontend.onrender.com"
+      - key: NEXTAUTH_SECRET
+        sync: false
+      - key: NEXT_PUBLIC_API_URL
+        value: "https://video-processing-api.onrender.com"
+      - key: R2_ENDPOINT
+        sync: false
+      - key: R2_ACCESS_KEY_ID
+        sync: false
+      - key: R2_SECRET_ACCESS_KEY
+        sync: false
+      - key: R2_BUCKET_NAME
+        sync: false
 
   # バックグラウンドワーカー（文字起こし処理）
   - type: worker
@@ -43,6 +77,8 @@ services:
       - key: NODE_ENV
         value: production
       - key: DATABASE_URL
+        value: "postgresql://wado_wado_user:U5YqVgZ8xL4OaqGGybLqdJOs4ZwSIWqG@dpg-cve55ldrie7s73e158c0-a/wado_wado"
+      - key: DIRECT_URL
         value: "postgresql://wado_wado_user:U5YqVgZ8xL4OaqGGybLqdJOs4ZwSIWqG@dpg-cve55ldrie7s73e158c0-a/wado_wado"
       - key: REDIS_URL
         fromService:
@@ -75,6 +111,8 @@ services:
         value: production
       - key: DATABASE_URL
         value: "postgresql://wado_wado_user:U5YqVgZ8xL4OaqGGybLqdJOs4ZwSIWqG@dpg-cve55ldrie7s73e158c0-a/wado_wado"
+      - key: DIRECT_URL
+        value: "postgresql://wado_wado_user:U5YqVgZ8xL4OaqGGybLqdJOs4ZwSIWqG@dpg-cve55ldrie7s73e158c0-a/wado_wado"
       - key: REDIS_URL
         fromService:
           type: redis
@@ -97,6 +135,8 @@ services:
       - key: NODE_ENV
         value: production
       - key: DATABASE_URL
+        value: "postgresql://wado_wado_user:U5YqVgZ8xL4OaqGGybLqdJOs4ZwSIWqG@dpg-cve55ldrie7s73e158c0-a/wado_wado"
+      - key: DIRECT_URL
         value: "postgresql://wado_wado_user:U5YqVgZ8xL4OaqGGybLqdJOs4ZwSIWqG@dpg-cve55ldrie7s73e158c0-a/wado_wado"
       - key: REDIS_URL
         fromService:
