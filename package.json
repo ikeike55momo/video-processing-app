@@ -1,0 +1,35 @@
+{
+  "name": "video-processing-render",
+  "version": "1.0.0",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "build": "tsc",
+    "dev": "nodemon src/index.js",
+    "prisma:generate": "prisma generate",
+    "prisma:migrate": "prisma migrate dev",
+    "start:transcription": "node src/workers/transcription.js",
+    "start:summary": "node src/workers/summary.js",
+    "start:article": "node src/workers/article.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": "Video processing application with Render and Cloudflare R2",
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.758.0",
+    "@aws-sdk/s3-request-presigner": "^3.758.0",
+    "@prisma/client": "^6.5.0",
+    "@types/express": "^5.0.1",
+    "@types/node": "^22.13.10",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "prisma": "^6.5.0",
+    "redis": "^4.7.0",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.8.2"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.0"
+  }
+}

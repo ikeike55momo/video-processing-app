@@ -1,0 +1,121 @@
+services:
+  # WebサービスとしてのAPIサービス
+  - type: web
+    name: video-processing-api
+    env: node
+    plan: standard
+    buildCommand: npm install && npm run build
+    startCommand: npm start
+    autoDeploy: true
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        value: "postgresql://wado_wado_user:U5YqVgZ8xL4OaqGGybLqdJOs4ZwSIWqG@dpg-cve55ldrie7s73e158c0-a/wado_wado"
+      - key: REDIS_URL
+        fromService:
+          type: redis
+          name: video-processing-queue
+          property: connectionString
+      - key: R2_ENDPOINT
+        sync: false
+      - key: R2_ACCESS_KEY_ID
+        sync: false
+      - key: R2_SECRET_ACCESS_KEY
+        sync: false
+      - key: R2_BUCKET_NAME
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: OPENROUTER_API_KEY
+        sync: false
+    healthCheckPath: /api/healthcheck
+
+  # バックグラウンドワーカー（文字起こし処理）
+  - type: worker
+    name: transcription-worker
+    env: node
+    plan: standard-plus # より多くのリソースが必要なプラン
+    buildCommand: npm install && npm run build
+    startCommand: node dist/workers/transcription.js
+    autoDeploy: true
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        value: "postgresql://wado_wado_user:U5YqVgZ8xL4OaqGGybLqdJOs4ZwSIWqG@dpg-cve55ldrie7s73e158c0-a/wado_wado"
+      - key: REDIS_URL
+        fromService:
+          type: redis
+          name: video-processing-queue
+          property: connectionString
+      - key: R2_ENDPOINT
+        sync: false
+      - key: R2_ACCESS_KEY_ID
+        sync: false
+      - key: R2_SECRET_ACCESS_KEY
+        sync: false
+      - key: R2_BUCKET_NAME
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: WORKER_TYPE
+        value: transcription
+
+  # 要約ワーカー
+  - type: worker
+    name: summary-worker
+    env: node
+    plan: standard
+    buildCommand: npm install && npm run build
+    startCommand: node dist/workers/summary.js
+    autoDeploy: true
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        value: "postgresql://wado_wado_user:U5YqVgZ8xL4OaqGGybLqdJOs4ZwSIWqG@dpg-cve55ldrie7s73e158c0-a/wado_wado"
+      - key: REDIS_URL
+        fromService:
+          type: redis
+          name: video-processing-queue
+          property: connectionString
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: WORKER_TYPE
+        value: summary
+
+  # 記事生成ワーカー
+  - type: worker
+    name: article-worker
+    env: node
+    plan: standard
+    buildCommand: npm install && npm run build
+    startCommand: node dist/workers/article.js
+    autoDeploy: true
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        value: "postgresql://wado_wado_user:U5YqVgZ8xL4OaqGGybLqdJOs4ZwSIWqG@dpg-cve55ldrie7s73e158c0-a/wado_wado"
+      - key: REDIS_URL
+        fromService:
+          type: redis
+          name: video-processing-queue
+          property: connectionString
+      - key: OPENROUTER_API_KEY
+        sync: false
+      - key: WORKER_TYPE
+        value: article
+
+  # Redisキュー
+  - type: redis
+    name: video-processing-queue
+    plan: starter
+    ipAllowList:
+      - source: 10.0.0.0/8  # 内部ネットワークのみ許可
+        description: internal-network
+      - source: 172.16.0.0/12
+        description: internal-network
+      - source: 192.168.0.0/16
+        description: internal-network
