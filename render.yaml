@@ -4,8 +4,8 @@ services:
     name: video-processing-api
     env: node
     plan: standard
-    buildCommand: npm install && npx prisma generate && npm run build
-    startCommand: npm start
+    buildCommand: yarn install && yarn prisma:generate && yarn build
+    startCommand: yarn start
     autoDeploy: true
     envVars:
       - key: NODE_ENV
@@ -36,8 +36,8 @@ services:
     name: transcription-worker
     env: node
     plan: standard-plus # より多くのリソースが必要なプラン
-    buildCommand: npm install && npx prisma generate && npm run build
-    startCommand: node dist/workers/transcription.js
+    buildCommand: yarn install && yarn prisma:generate && yarn build
+    startCommand: yarn start:transcription
     autoDeploy: true
     envVars:
       - key: NODE_ENV
@@ -67,8 +67,8 @@ services:
     name: summary-worker
     env: node
     plan: standard
-    buildCommand: npm install && npx prisma generate && npm run build
-    startCommand: node dist/workers/summary.js
+    buildCommand: yarn install && yarn prisma:generate && yarn build
+    startCommand: yarn start:summary
     autoDeploy: true
     envVars:
       - key: NODE_ENV
@@ -90,8 +90,8 @@ services:
     name: article-worker
     env: node
     plan: standard
-    buildCommand: npm install && npx prisma generate && npm run build
-    startCommand: node dist/workers/article.js
+    buildCommand: yarn install && yarn prisma:generate && yarn build
+    startCommand: yarn start:article
     autoDeploy: true
     envVars:
       - key: NODE_ENV
