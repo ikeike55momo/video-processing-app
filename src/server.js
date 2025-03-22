@@ -56,7 +56,27 @@ dotenv.config();
 const app = (0, express_1.default)();
 const PORT = process.env.PORT || 3000;
 // Prismaクライアントの初期化
-const prisma = new client_1.PrismaClient();
+// 注: Prismaクライアントの初期化を確実にするための修正
+let prisma;
+try {
+  const { PrismaClient } = require('@prisma/client');
+  prisma = new PrismaClient();
+  console.log('Prismaクライアントが正常に初期化されました');
+} catch (error) {
+  console.error('Prismaクライアントの初期化に失敗しました:', error);
+  // 再度Prisma Clientを生成して初期化を試みる
+  try {
+    const { execSync } = require('child_process');
+    console.log('prisma generateを実行します...');
+    execSync('npx prisma generate', { stdio: 'inherit' });
+    const { PrismaClient } = require('@prisma/client');
+    prisma = new PrismaClient();
+    console.log('2回目の試行でPrismaクライアントが正常に初期化されました');
+  } catch (retryError) {
+    console.error('2回目のPrismaクライアント初期化にも失敗しました:', retryError);
+    process.exit(1); // 致命的なエラーなのでプロセスを終了
+  }
+}
 // JSON形式のリクエストボディを解析
 app.use(express_1.default.json());
 // CORSミドルウェア
