@@ -59,8 +59,18 @@ const PORT = process.env.PORT || 3000;
 // 注: Prismaクライアントの初期化を確実にするための修正
 let prisma;
 try {
+  // Prismaクライアントの初期化前に環境変数を確認
+  console.log('DATABASE_URL:', process.env.DATABASE_URL ? '設定されています' : '設定されていません');
+  
+  // スキーマの場所を明示的に指定
   const { PrismaClient } = require('@prisma/client');
-  prisma = new PrismaClient();
+  prisma = new PrismaClient({
+    datasources: {
+      db: {
+        url: process.env.DATABASE_URL
+      }
+    }
+  });
   console.log('Prismaクライアントが正常に初期化されました');
 } catch (error) {
   console.error('Prismaクライアントの初期化に失敗しました:', error);
@@ -68,9 +78,16 @@ try {
   try {
     const { execSync } = require('child_process');
     console.log('prisma generateを実行します...');
-    execSync('npx prisma generate', { stdio: 'inherit' });
+    // スキーマの場所を明示的に指定
+    execSync('npx prisma generate --schema=./prisma/schema.prisma', { stdio: 'inherit' });
     const { PrismaClient } = require('@prisma/client');
-    prisma = new PrismaClient();
+    prisma = new PrismaClient({
+      datasources: {
+        db: {
+          url: process.env.DATABASE_URL
+        }
+      }
+    });
     console.log('2回目の試行でPrismaクライアントが正常に初期化されました');
   } catch (retryError) {
     console.error('2回目のPrismaクライアント初期化にも失敗しました:', retryError);
