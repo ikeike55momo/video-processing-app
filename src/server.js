@@ -308,5 +308,10 @@ app.post('/api/records/:id/retry', (req, res) => __awaiter(void 0, void 0, void 
         });
     }
 }));
-// indexからインポートされるため、サーバー起動部分は削除
-exports.default = app;
+// サーバーを起動
+app.listen(PORT, () => {
+  console.log(`サーバーが起動しました。ポート: ${PORT}`);
+});
+
+// モジュールとしてもエクスポート（他のファイルからインポートできるように）
+module.exports = app;
