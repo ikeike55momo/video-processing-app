@@ -4,7 +4,7 @@
   "main": "dist/server.js",
   "scripts": {
     "start": "node dist/server.js",
-    "build": "rimraf dist && echo 'Running TypeScript compiler...' && tsc --listFiles && echo 'TypeScript compilation complete' && ls -la dist || echo 'dist directory not created' && mkdir -p dist/workers && cp -r src/*.js dist/ || true && cp -r src/workers/*.js dist/workers/ || true",
+    "build": "rimraf dist && mkdir -p dist dist/workers && cp -r src/*.js dist/ && cp -r src/workers/*.js dist/workers/ && echo 'JavaScriptファイルを直接コピーしました'",
     "dev": "nodemon --exec ts-node src/server.ts",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
