@@ -3,14 +3,14 @@
   "version": "1.0.0",
   "main": "src/server.js",
   "scripts": {
-    "start": "prisma generate && node src/server.js",
-    "build": "prisma generate",
-    "dev": "prisma generate && nodemon src/server.js",
-    "prisma:generate": "prisma generate",
-    "prisma:migrate": "prisma migrate dev",
-    "start:transcription": "prisma generate && node src/workers/transcription.js",
-    "start:summary": "prisma generate && node src/workers/summary.js",
-    "start:article": "prisma generate && node src/workers/article.js"
+    "start": "prisma generate --schema=./prisma/schema.prisma && node src/server.js",
+    "build": "prisma generate --schema=./prisma/schema.prisma",
+    "dev": "prisma generate --schema=./prisma/schema.prisma && nodemon src/server.js",
+    "prisma:generate": "prisma generate --schema=./prisma/schema.prisma",
+    "prisma:migrate": "prisma migrate dev --schema=./prisma/schema.prisma",
+    "start:transcription": "prisma generate --schema=./prisma/schema.prisma && node src/workers/transcription.js",
+    "start:summary": "prisma generate --schema=./prisma/schema.prisma && node src/workers/summary.js",
+    "start:article": "prisma generate --schema=./prisma/schema.prisma && node src/workers/article.js"
   },
   "keywords": [],
   "author": "",
