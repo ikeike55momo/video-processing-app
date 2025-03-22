@@ -4,7 +4,7 @@
   "main": "src/server.js",
   "scripts": {
     "start": "node src/server.js",
-    "build": "echo 'ビルドプロセスをスキップし、既存のJavaScriptファイルを使用します'",
+    "build": "prisma generate && echo 'Prismaクライアントを生成しました'",
     "dev": "nodemon src/server.js",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
