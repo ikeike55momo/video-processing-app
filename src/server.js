@@ -79,6 +79,8 @@ try {
 }
 // JSON形式のリクエストボディを解析
 app.use(express_1.default.json());
+// 静的ファイルの提供（publicフォルダがある場合）
+app.use(express_1.default.static('public'));
 // CORSミドルウェア
 app.use((req, res, next) => {
     res.header('Access-Control-Allow-Origin', '*');
@@ -89,6 +91,22 @@ app.use((req, res, next) => {
     }
     next();
 });
+
+// ルートパスへのアクセスに対応
+app.get('/', (req, res) => {
+    res.status(200).json({
+        message: 'Video Processing API',
+        version: '1.0.0',
+        endpoints: {
+            health: '/api/health',
+            healthcheck: '/api/healthcheck',
+            uploadUrl: '/api/upload-url',
+            process: '/api/process',
+            records: '/api/records/:id'
+        }
+    });
+});
+
 // ヘルスチェックエンドポイント
 app.get('/api/health', (req, res) => {
     res.status(200).json({ status: 'ok', timestamp: new Date().toISOString() });
