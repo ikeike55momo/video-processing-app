@@ -1,8 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
-import { ProcessingPipeline } from '@/app/services/processing-pipeline';
 import prisma from '@/lib/prisma';
-const pipeline = new ProcessingPipeline();
 
 export async function POST(req: NextRequest) {
   try {
@@ -58,6 +56,8 @@ export async function POST(req: NextRequest) {
     });
 
     // 処理パイプラインを同期的に実行
+    const ProcessingPipeline = (await import('@/app/services/processing-pipeline')).ProcessingPipeline;
+    const pipeline = new ProcessingPipeline();
     try {
       await pipeline.retryProcessing(record.id);
       console.log('処理パイプラインが正常に完了しました');

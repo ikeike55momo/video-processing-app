@@ -1,8 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
-import { ProcessingPipeline } from '@/app/services/processing-pipeline';
 import prisma from '@/lib/prisma';
-const pipeline = new ProcessingPipeline();
 
 export async function POST(req: NextRequest) {
   try {
@@ -28,6 +26,10 @@ export async function POST(req: NextRequest) {
     // デバッグ情報
     console.log('処理開始リクエスト:', { fileUrl });
     console.log('処理開始時刻:', new Date().toISOString());
+
+    // 動的インポート
+    const { ProcessingPipeline } = await import('@/app/services/processing-pipeline');
+    const pipeline = new ProcessingPipeline();
 
     try {
       // レコードの検索（デバッグ用に例外処理を追加）

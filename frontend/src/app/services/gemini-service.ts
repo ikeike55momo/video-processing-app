@@ -34,10 +34,26 @@ export class GeminiService {
     this.model = modelName;
     
     // Google Cloud Storageの初期化
-    const credentials = JSON.parse(
-      Buffer.from(process.env.GCP_CREDENTIALS_BASE64 || '', 'base64').toString()
-    );
-    this.storage = new Storage({ credentials });
+    try {
+      const credentialsBase64 = process.env.GCP_CREDENTIALS_BASE64;
+      if (!credentialsBase64) {
+        throw new Error('GCP_CREDENTIALS_BASE64環境変数が設定されていません');
+      }
+      
+      const credentials = JSON.parse(
+        Buffer.from(credentialsBase64, 'base64').toString()
+      );
+      this.storage = new Storage({ credentials });
+    } catch (error) {
+      console.error('Google Cloud Storage初期化エラー:', error);
+      // 開発環境では仮のストレージオブジェクトを作成
+      if (process.env.NODE_ENV === 'development') {
+        console.warn('開発環境用の仮のストレージオブジェクトを使用します');
+        this.storage = new Storage();
+      } else {
+        throw new Error('Google Cloud Storageの初期化に失敗しました: ' + (error instanceof Error ? error.message : '不明なエラー'));
+      }
+    }
     
     console.log(`Geminiモデルを初期化: ${this.model}`);
   }

@@ -1,8 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
-import { ProcessingPipeline } from '@/app/services/processing-pipeline';
 import prisma from '@/lib/prisma';
-const pipeline = new ProcessingPipeline();
 
 export async function POST(req: NextRequest, { params }: { params: { id: string } }) {
   try {
@@ -74,31 +72,55 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
       },
     });
 
-    // 処理パイプラインを同期的に実行
+    // 処理パイプラインを非同期で実行（動的インポート）
     try {
+      // サーバーサイドでのみ実行されるコード
+      const { ProcessingPipeline } = await import('@/app/services/processing-pipeline');
+      const pipeline = new ProcessingPipeline();
+      
+      // ステップに応じた前提条件チェック
+      if (step === 3 && !record.transcript_text) {
+        return NextResponse.json(
+          { error: '文字起こし結果がありません。文字起こしから再試行してください。' },
+          { status: 400 }
+        );
+      }
+
+      if (step === 4 && !record.summary_text) {
+        return NextResponse.json(
+          { error: '要約結果がありません。要約から再試行してください。' },
+          { status: 400 }
+        );
+      }
+
+      // ステップに応じた処理を実行
       await pipeline.retryFromStep(recordId, step);
       console.log(`ステップ ${step} からの処理パイプラインが正常に完了しました`);
-    } catch (pipelineError) {
-      console.error(`ステップ ${step} からの再試行エラー:`, pipelineError);
+
+      const stepNames = {
+        1: 'アップロード',
+        2: '文字起こし',
+        3: '要約',
+        4: '記事生成'
+      };
+
+      return NextResponse.json({ 
+        success: true, 
+        message: `${stepNames[step as keyof typeof stepNames]}から処理を再開しました`, 
+        recordId: record.id,
+        step: step
+      });
+    } catch (error) {
+      console.error(`ステップ ${step} の処理エラー:`, error);
+      return NextResponse.json(
+        { error: `ステップ ${step} の処理に失敗しました: ${error instanceof Error ? error.message : '不明なエラー'}` },
+        { status: 500 }
+      );
     }
-
-    const stepNames = {
-      1: 'アップロード',
-      2: '文字起こし',
-      3: '要約',
-      4: '記事生成'
-    };
-
-    return NextResponse.json({ 
-      success: true, 
-      message: `${stepNames[step as keyof typeof stepNames]}から処理を再開しました`, 
-      recordId: record.id,
-      step: step
-    });
   } catch (error) {
-    console.error('ステップ再試行エラー:', error);
+    console.error('ステップ処理エラー:', error);
     return NextResponse.json(
-      { error: '処理の再開に失敗しました' },
+      { error: '処理に失敗しました' },
       { status: 500 }
     );
   }
