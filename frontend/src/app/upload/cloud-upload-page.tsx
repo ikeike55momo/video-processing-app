@@ -73,7 +73,7 @@ export default function CloudUploadPage() {
         },
         body: JSON.stringify({
           fileName: file.name,
-          fileType: file.type,
+          contentType: file.type,
         }),
       });
 
