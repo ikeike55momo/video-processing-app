@@ -34,8 +34,21 @@ export async function generateUploadUrl(fileName: string, contentType: string) {
       Key: key,
       ContentType: contentType,
     });
-    const signedUrl = await getSignedUrl(s3Client, command, { expiresIn: 3600 });
-    return { url: signedUrl, key, bucket: R2_BUCKET_NAME };
+    
+    // CORSヘッダーを含む署名付きURLを生成
+    const signedUrl = await getSignedUrl(s3Client, command, { 
+      expiresIn: 3600,
+      // 追加のヘッダーを指定
+      unhoistableHeaders: new Set(['host']),
+    });
+    
+    return { 
+      url: signedUrl, 
+      key, 
+      bucket: R2_BUCKET_NAME,
+      // クライアント側で使用するためのファイルURLを追加
+      fileUrl: `uploads/${key}`
+    };
   } catch (error) {
     console.error('Error generating upload URL:', error);
     throw error;

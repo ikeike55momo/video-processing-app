@@ -125,7 +125,12 @@ export default function CloudUploadPage() {
       xhr.timeout = 7200000;
 
       xhr.open("PUT", signedUrl, true);
+      
+      // Content-Typeヘッダーを設定
       xhr.setRequestHeader("Content-Type", file.type);
+      
+      // CORSを有効にする
+      xhr.withCredentials = false;
 
       // 進捗イベントのリスナー
       xhr.upload.onprogress = (event) => {
@@ -142,7 +147,7 @@ export default function CloudUploadPage() {
           console.log("アップロード成功:", xhr.status);
           resolve();
         } else {
-          console.error("アップロード失敗:", xhr.status, xhr.statusText);
+          console.error("アップロード失敗:", xhr.status, xhr.statusText, xhr.responseText);
           reject(new Error(`アップロード失敗: ${xhr.status} ${xhr.statusText}`));
         }
       };
@@ -150,6 +155,8 @@ export default function CloudUploadPage() {
       // エラーハンドラー
       xhr.onerror = (e) => {
         console.error("アップロードエラー:", e);
+        console.error("署名付きURL:", signedUrl);
+        console.error("ファイル情報:", { name: file.name, type: file.type, size: file.size });
         reject(new Error("アップロード中にネットワークエラーが発生しました"));
       };
 
@@ -166,7 +173,7 @@ export default function CloudUploadPage() {
       };
 
       // ファイル送信
-      console.log("アップロード開始:", file.name, file.size);
+      console.log("アップロード開始:", file.name, file.size, "URL:", signedUrl.substring(0, 100) + "...");
       xhr.send(file);
     });
   };
