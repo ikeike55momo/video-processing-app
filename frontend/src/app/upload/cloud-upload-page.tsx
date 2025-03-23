@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { useSession } from "next-auth/react";
+import { uploadMultipart } from "@/lib/storage";
 
 export default function CloudUploadPage() {
   const { data: session, status } = useSession();
@@ -11,6 +12,7 @@ export default function CloudUploadPage() {
   const [uploading, setUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
   const [error, setError] = useState("");
+  const [uploadStage, setUploadStage] = useState<string>("");
 
   // セッションチェック
   if (status === "loading") {
@@ -44,10 +46,10 @@ export default function CloudUploadPage() {
       return;
     }
 
-    // ファイルサイズチェック (6GB = 6 * 1024 * 1024 * 1024 bytes)
-    const maxSize = 6 * 1024 * 1024 * 1024;
+    // ファイルサイズチェック (最大サイズを拡大: 25GB = 25 * 1024 * 1024 * 1024 bytes)
+    const maxSize = 25 * 1024 * 1024 * 1024;
     if (selectedFile.size > maxSize) {
-      setError("ファイルサイズは6GB以下にしてください");
+      setError("ファイルサイズは25GB以下にしてください");
       return;
     }
 
@@ -64,8 +66,9 @@ export default function CloudUploadPage() {
     try {
       setUploading(true);
       setUploadProgress(0);
+      setUploadStage("準備中...");
 
-      // 署名付きURLの取得
+      // 署名付きURLの取得（ファイルサイズを含める）
       const response = await fetch("/api/upload-url", {
         method: "POST",
         headers: {
@@ -74,6 +77,7 @@ export default function CloudUploadPage() {
         body: JSON.stringify({
           fileName: file.name,
           contentType: file.type,
+          fileSize: file.size, // ファイルサイズを送信
         }),
       });
 
@@ -81,13 +85,33 @@ export default function CloudUploadPage() {
         throw new Error("署名付きURLの取得に失敗しました");
       }
 
-      const { url, fileUrl } = await response.json();
+      const result = await response.json();
+      let fileUrl: string;
 
-      // ファイルのアップロード（進捗表示付き）
-      await uploadFileWithProgress(file, url);
+      // アップロード方法の選択
+      if (result.isMultipart) {
+        // マルチパートアップロードの場合
+        setUploadStage("マルチパートアップロード準備中...");
+        console.log("マルチパートアップロードを開始します", result);
+        
+        // マルチパートアップロードの実行
+        const uploadResult = await uploadMultipart(file, result, (progress) => {
+          setUploadProgress(progress);
+          console.log(`マルチパートアップロード進捗: ${progress}%`);
+        });
+        
+        fileUrl = uploadResult.fileUrl;
+        console.log("マルチパートアップロード完了:", fileUrl);
+      } else {
+        // 通常のアップロード
+        setUploadStage("アップロード中...");
+        await uploadFileWithProgress(file, result.url);
+        fileUrl = result.fileUrl;
+      }
 
-      // Cloud Run処理開始リクエスト
-      const processResponse = await fetch("/api/cloud-process", {
+      // 処理開始リクエスト
+      setUploadStage("処理を開始中...");
+      const processResponse = await fetch("/api/process-cloud", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -98,7 +122,7 @@ export default function CloudUploadPage() {
       });
 
       if (!processResponse.ok) {
-        throw new Error("Cloud Run処理の開始に失敗しました");
+        throw new Error("処理の開始に失敗しました");
       }
 
       const { recordId } = await processResponse.json();
@@ -116,13 +140,13 @@ export default function CloudUploadPage() {
     }
   };
 
-  // 進捗表示付きアップロード（大きなファイル対応）
+  // 進捗表示付きアップロード（小さなファイル用）
   const uploadFileWithProgress = (file: File, signedUrl: string) => {
     return new Promise<void>((resolve, reject) => {
       const xhr = new XMLHttpRequest();
 
-      // タイムアウトを設定（2時間 = 7200000ミリ秒）
-      xhr.timeout = 7200000;
+      // タイムアウトを設定（4時間 = 14400000ミリ秒）
+      xhr.timeout = 14400000;
 
       xhr.open("PUT", signedUrl, true);
       
@@ -183,23 +207,23 @@ export default function CloudUploadPage() {
       <div className="mx-auto max-w-4xl">
         <header className="mb-8 flex justify-between items-center">
           <div>
-            <h1 className="text-3xl font-bold text-slate-800">動画アップロード (Cloud Run)</h1>
+            <h1 className="text-3xl font-bold text-slate-800">動画アップロード（Cloud Run処理）</h1>
             <p className="text-slate-600">
-              MP4形式の動画ファイル（最大6GB）をアップロードしてCloud Runで処理します
+              MP4形式の動画ファイル（最大25GB）をアップロードしてください
             </p>
           </div>
           <div className="flex space-x-4">
+            <button
+              onClick={() => router.push("/upload")}
+              className="rounded-md bg-green-600 px-4 py-2 text-white hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2"
+            >
+              Vercel処理を使用
+            </button>
             <button
               onClick={() => router.push("/results")}
               className="rounded-md bg-blue-600 px-4 py-2 text-white hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
             >
               処理済み動画を表示
-            </button>
-            <button
-              onClick={() => router.push("/logs")}
-              className="rounded-md bg-slate-600 px-4 py-2 text-white hover:bg-slate-700 focus:outline-none focus:ring-2 focus:ring-slate-500 focus:ring-offset-2"
-            >
-              システムログを表示
             </button>
           </div>
         </header>
@@ -214,12 +238,12 @@ export default function CloudUploadPage() {
           <div className="mb-6">
             <div className="flex justify-between items-center mb-4">
               <h2 className="text-xl font-semibold text-slate-800">Cloud Run処理</h2>
-              <div className="bg-blue-100 text-blue-800 text-xs font-medium px-2.5 py-0.5 rounded">
+              <div className="bg-green-100 text-green-800 text-xs font-medium px-2.5 py-0.5 rounded">
                 タイムアウトなし
               </div>
             </div>
             <p className="text-slate-600 mb-4">
-              Cloud Runを使用して処理を行います。Vercelのタイムアウト制限（10秒）がなく、大きなファイルも処理できます。
+              Google Cloud Runを使用して処理を行います。処理時間に制限がなく、大きなファイルも処理できます。
             </p>
           </div>
 
@@ -239,7 +263,7 @@ export default function CloudUploadPage() {
               className="mt-1 block w-full rounded-md border border-slate-300 px-3 py-2 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-blue-500"
             />
             <p className="mt-2 text-sm text-slate-500">
-              MP4形式の動画ファイルを選択してください（最大6GB）
+              MP4形式の動画ファイルを選択してください（最大25GB）
             </p>
           </div>
 
@@ -258,7 +282,7 @@ export default function CloudUploadPage() {
           {uploading && (
             <div className="mb-6">
               <h3 className="mb-2 text-md font-medium text-slate-700">
-                アップロード進捗: {uploadProgress}%
+                {uploadStage} - 進捗: {uploadProgress}%
               </h3>
               <div className="h-2 w-full rounded-full bg-slate-200">
                 <div
@@ -274,7 +298,7 @@ export default function CloudUploadPage() {
             disabled={!file || uploading}
             className="w-full rounded-md bg-blue-600 px-4 py-2 text-white hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:bg-blue-300"
           >
-            {uploading ? "アップロード中..." : "アップロードしてCloud Run処理を開始"}
+            {uploading ? "アップロード中..." : "アップロードして処理を開始"}
           </button>
         </div>
       </div>

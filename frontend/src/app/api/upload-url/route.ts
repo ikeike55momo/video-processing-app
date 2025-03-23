@@ -1,15 +1,43 @@
-import { NextResponse } from 'next/server';
-import { generateUploadUrl } from '@/lib/storage';
+import { NextRequest, NextResponse } from "next/server";
+import { getServerSession } from "next-auth";
+import { authOptions } from "../auth/[...nextauth]/route";
+import { generateUploadUrl, generateAppropriateUploadUrl } from "@/lib/storage";
 
-export async function POST(request: Request) {
+export async function POST(request: NextRequest) {
   try {
-    const { fileName, contentType } = await request.json();
-    if (!fileName || !contentType) {
-      return NextResponse.json({ error: 'Missing fileName or contentType' }, { status: 400 });
+    // セッションの確認
+    const session = await getServerSession(authOptions);
+    if (!session) {
+      return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
     }
-    const uploadInfo = await generateUploadUrl(fileName, contentType);
-    return NextResponse.json(uploadInfo);
+
+    // リクエストボディの取得
+    const { fileName, contentType, fileSize } = await request.json();
+
+    // 必須パラメータの確認
+    if (!fileName || !contentType) {
+      return NextResponse.json(
+        { error: "fileName と contentType は必須です" },
+        { status: 400 }
+      );
+    }
+
+    // ファイルサイズに基づいて適切なアップロード方法を選択
+    let result;
+    if (fileSize && fileSize > 0) {
+      // ファイルサイズが指定されている場合は適切な方法を選択
+      result = await generateAppropriateUploadUrl(fileName, contentType, fileSize);
+    } else {
+      // 従来の方法（小さいファイル用）
+      result = await generateUploadUrl(fileName, contentType);
+    }
+
+    return NextResponse.json(result);
   } catch (error) {
-    return NextResponse.json({ error: error instanceof Error ? error.message : 'Unknown error' }, { status: 500 });
+    console.error("アップロードURL生成エラー:", error);
+    return NextResponse.json(
+      { error: "アップロードURLの生成に失敗しました" },
+      { status: 500 }
+    );
   }
 }
