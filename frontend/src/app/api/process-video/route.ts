@@ -1,10 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
 import { PrismaClient } from '@prisma/client';
-import { ProcessingPipeline } from '@/app/services/processing-pipeline';
 
 const prisma = new PrismaClient();
-const pipeline = new ProcessingPipeline();
 
 export async function POST(req: NextRequest) {
   try {
@@ -41,12 +39,20 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // 処理パイプラインを非同期で実行
-    // 実際の実装では、ここでキューにジョブを追加するなどの処理を行う
-    // 今回はデモのため、直接処理を開始
-    pipeline.processVideo(recordId).catch(error => {
-      console.error('処理パイプラインエラー:', error);
-    });
+    // 処理パイプラインを非同期で実行（動的インポート）
+    try {
+      // サーバーサイドでのみ実行されるコード
+      const { ProcessingPipeline } = await import('@/app/services/processing-pipeline');
+      const pipeline = new ProcessingPipeline();
+      
+      // 非同期で処理を実行
+      pipeline.processVideo(recordId).catch(error => {
+        console.error('処理パイプラインエラー:', error);
+      });
+    } catch (error) {
+      console.error('パイプラインのインポートエラー:', error);
+      // エラーが発生してもレスポンスは返す（処理は非同期なので）
+    }
 
     return NextResponse.json({ 
       success: true, 

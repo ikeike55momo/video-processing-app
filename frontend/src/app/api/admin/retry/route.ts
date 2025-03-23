@@ -1,8 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
-import { ProcessingPipeline } from '@/app/services/processing-pipeline';
 import prisma from '@/lib/prisma';
-const pipeline = new ProcessingPipeline();
 
 export async function POST(req: NextRequest) {
   try {
@@ -49,10 +47,20 @@ export async function POST(req: NextRequest) {
       },
     });
 
-    // 処理パイプラインを非同期で実行
-    pipeline.retryProcessing(record.id).catch(error => {
-      console.error('処理パイプラインエラー:', error);
-    });
+    // 処理パイプラインを非同期で実行（動的インポート）
+    try {
+      // サーバーサイドでのみ実行されるコード
+      const { ProcessingPipeline } = await import('@/app/services/processing-pipeline');
+      const pipeline = new ProcessingPipeline();
+      
+      // 非同期で処理を実行
+      pipeline.retryProcessing(record.id).catch(error => {
+        console.error('処理パイプラインエラー:', error);
+      });
+    } catch (error) {
+      console.error('パイプラインのインポートエラー:', error);
+      // エラーが発生してもレスポンスは返す（処理は非同期なので）
+    }
 
     return NextResponse.json({ 
       success: true, 
