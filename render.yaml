@@ -39,13 +39,13 @@ services:
         value: "https://video-processing-frontend.onrender.com"
     healthCheckPath: /api/healthcheck
 
-  # フロントエンドアプリケーション
+  # フロントエンドアプリケーション（新しい名前で作成）
   - type: web
     name: video-processing-frontend
     env: node
     nodeVersion: 18
     plan: standard
-    buildCommand: cd frontend && npm install && npx prisma generate --schema=./prisma/schema.prisma && npm run build
+    buildCommand: cd frontend && npm install && npm run build
     startCommand: cd frontend && npm start
     rootDir: .
     autoDeploy: true
