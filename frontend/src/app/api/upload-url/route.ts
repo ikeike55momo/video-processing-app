@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
-import { authOptions } from "../auth/[...nextauth]/route";
+import { authOptions } from "@/lib/auth";
 import { generateUploadUrl, generateAppropriateUploadUrl } from "@/lib/storage";
 
 export async function POST(request: NextRequest) {
