@@ -5,7 +5,7 @@ services:
     nodeVersion: 18
     buildCommand: npm install && npx prisma generate --schema=./prisma/schema.prisma && npm run build
     startCommand: npm start
-    rootDir: .
+    rootDir: frontend
     envVars:
       - key: NODE_ENV
         value: production
@@ -18,7 +18,7 @@ services:
       - key: NEXTAUTH_SECRET
         sync: false
       - key: NEXT_PUBLIC_API_URL
-        value: "https://video-processing-api.onrender.com"
+        value: "https://video-processing-app.onrender.com"
       - key: R2_ENDPOINT
         sync: false
       - key: R2_ACCESS_KEY_ID
