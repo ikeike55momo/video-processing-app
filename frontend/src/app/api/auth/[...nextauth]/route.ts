@@ -1,8 +1,10 @@
-import NextAuth from "next-auth";
+import NextAuth, { NextAuthOptions } from "next-auth";
 import CredentialsProvider from "next-auth/providers/credentials";
 import { PrismaAdapter } from "@auth/prisma-adapter";
 import { compare } from "bcrypt";
 import prisma from "@/lib/prisma";
+import { JWT } from "next-auth/jwt";
+import { Session } from "next-auth";
 
 // 本番環境では実際のユーザーデータベースと連携する必要があります
 // 現在はデモ用の固定ユーザーを使用しています
@@ -30,7 +32,12 @@ const DEMO_USERS = [
   },
 ];
 
-const handler = NextAuth({
+// カスタムJWT型の定義
+type CustomJWT = JWT & {
+  role?: string;
+};
+
+const authOptions: NextAuthOptions = {
   providers: [
     CredentialsProvider({
       name: "Credentials",
@@ -62,6 +69,7 @@ const handler = NextAuth({
           return null;
         }
 
+        // ユーザー情報を返す（パスワードは除外）
         return {
           id: user.id,
           name: user.name,
@@ -72,7 +80,7 @@ const handler = NextAuth({
     }),
   ],
   session: {
-    strategy: "jwt",
+    strategy: "jwt" as const,
   },
   secret: process.env.NEXTAUTH_SECRET,
   pages: {
@@ -80,21 +88,21 @@ const handler = NextAuth({
   },
   callbacks: {
     async jwt({ token, user }) {
-      if (user && 'role' in user) {
-        token.role = user.role as string;
+      if (user) {
+        token.role = user.role;
       }
       return token;
     },
     async session({ session, token }) {
       if (session.user) {
         session.user.id = token.sub as string;
-        if ('role' in token) {
-          session.user.role = token.role as string;
-        }
+        session.user.role = token.role as string;
       }
       return session;
     },
   },
-});
+};
+
+const handler = NextAuth(authOptions);
 
 export { handler as GET, handler as POST };

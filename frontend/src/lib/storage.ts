@@ -13,13 +13,24 @@ if (typeof window === 'undefined' && (!R2_ENDPOINT || !R2_ACCESS_KEY_ID || !R2_S
 
 // R2はS3互換APIを利用するため、S3Clientを設定します
 const s3Client = new S3Client({
-  region: "auto",
+  region: "ap-southeast-1",
   endpoint: R2_ENDPOINT,
   credentials: {
     accessKeyId: R2_ACCESS_KEY_ID || '',
     secretAccessKey: R2_SECRET_ACCESS_KEY || '',
   },
   forcePathStyle: true, // パススタイルのURLを強制
+});
+
+// R2設定のデバッグログ
+console.log('R2設定:', {
+  endpoint: R2_ENDPOINT,
+  bucket: R2_BUCKET_NAME,
+  // 機密情報なので完全には表示しない
+  accessKeyIdPrefix: R2_ACCESS_KEY_ID ? R2_ACCESS_KEY_ID.substring(0, 5) + '...' : undefined,
+  secretKeyExists: !!R2_SECRET_ACCESS_KEY,
+  region: "ap-southeast-1",
+  forcePathStyle: true
 });
 
 /**
@@ -203,7 +214,15 @@ export async function generateAppropriateUploadUrl(fileName: string, contentType
  */
 export async function generateMultipartUploadUrls(fileName: string, contentType: string, fileSize: number) {
   try {
+    console.log('マルチパートアップロード開始:', { 
+      fileName, 
+      contentType, 
+      fileSize,
+      bucket: R2_BUCKET_NAME
+    });
+    
     const key = `uploads/${Date.now()}-${fileName}`;
+    console.log('生成されたキー:', key);
     
     // マルチパートアップロードの開始
     const createCommand = new CreateMultipartUploadCommand({
@@ -212,101 +231,97 @@ export async function generateMultipartUploadUrls(fileName: string, contentType:
       ContentType: contentType,
     });
     
-    const { UploadId } = await s3Client.send(createCommand);
+    console.log('マルチパートアップロードコマンド作成:', {
+      bucket: R2_BUCKET_NAME,
+      key,
+      contentType
+    });
     
-    if (!UploadId) {
-      throw new Error('マルチパートアップロードの初期化に失敗しました');
+    let uploadId: string;
+    try {
+      const response = await s3Client.send(createCommand);
+      console.log('アップロードID取得成功:', response.UploadId);
+      
+      if (!response.UploadId) {
+        console.error('UploadIdが取得できませんでした');
+        throw new Error('マルチパートアップロードの初期化に失敗しました');
+      }
+      
+      uploadId = response.UploadId;
+    } catch (error) {
+      console.error('マルチパートアップロードの初期化に失敗しました:', error);
+      throw error;
     }
     
     // パートサイズの最適化（ファイルサイズに基づいて調整）
     // Cloudflare R2の制限: 最小パートサイズ5MB、最大10,000パート
-    const MIN_PART_SIZE = 5 * 1024 * 1024; // 5MB（R2の最小パートサイズ）
-    const MAX_PARTS = 10000; // R2の最大パート数
+    const MIN_PART_SIZE = 5 * 1024 * 1024; // 5MB
+    const MAX_PARTS = 10000;
     
-    // ファイルサイズに基づいて最適なパートサイズを計算
-    // 目標: パート数を減らしつつ、各パートが大きすぎないようにする
-    let partSize = 0;
+    // 最適なパートサイズを計算（最小5MB、最大ファイルサイズ/10000）
+    let partSize = Math.max(MIN_PART_SIZE, Math.ceil(fileSize / MAX_PARTS));
     
-    if (fileSize <= 1 * 1024 * 1024 * 1024) { // 1GB以下
-      partSize = 10 * 1024 * 1024; // 10MB
-    } else if (fileSize <= 10 * 1024 * 1024 * 1024) { // 10GB以下
-      partSize = 50 * 1024 * 1024; // 50MB
-    } else if (fileSize <= 50 * 1024 * 1024 * 1024) { // 50GB以下
-      partSize = 100 * 1024 * 1024; // 100MB
-    } else { // 50GB超
-      // 最大パート数に収まるように最小パートサイズを計算
-      partSize = Math.max(MIN_PART_SIZE, Math.ceil(fileSize / MAX_PARTS));
-    }
+    // パートサイズを5MBの倍数に調整
+    partSize = Math.ceil(partSize / MIN_PART_SIZE) * MIN_PART_SIZE;
     
-    // パート数の計算
+    console.log('パートサイズ計算:', {
+      fileSize,
+      partSize,
+      estimatedParts: Math.ceil(fileSize / partSize)
+    });
+    
+    // 必要なパート数を計算
     const partCount = Math.ceil(fileSize / partSize);
     
-    // 最大10000パートまで
-    if (partCount > MAX_PARTS) {
-      throw new Error(`ファイルが大きすぎます（最大${MAX_PARTS}パート）。Cloudflareのプランアップグレードが必要かもしれません。`);
-    }
-    
-    console.log(`マルチパートアップロード設定: ファイルサイズ=${fileSize}バイト, パートサイズ=${partSize}バイト, パート数=${partCount}`);
-    
-    // 各パートの署名付きURLを生成
+    // 各パートのアップロードURLを生成
     const partUrls = [];
     
     for (let i = 1; i <= partCount; i++) {
       const uploadPartCommand = new UploadPartCommand({
         Bucket: R2_BUCKET_NAME,
         Key: key,
-        UploadId,
+        UploadId: uploadId,
         PartNumber: i,
       });
       
-      const signedUrl = await getSignedUrl(s3Client, uploadPartCommand, { 
-        expiresIn: 12 * 3600, // 12時間（大きなファイルのアップロードに十分な時間）
-        unhoistableHeaders: new Set(['host']),
-      });
-      
+      const signedUrl = await getSignedUrl(s3Client, uploadPartCommand, { expiresIn: 3600 });
       partUrls.push({
         url: signedUrl,
-        partNumber: i,
+        partNumber: i
       });
     }
     
-    // 完了用のコマンドを準備
+    console.log(`${partCount}個のパートURLを生成しました`);
+    
+    // 完了と中止用のコマンドを作成
     const completeCommand = new CompleteMultipartUploadCommand({
       Bucket: R2_BUCKET_NAME,
       Key: key,
-      UploadId,
+      UploadId: uploadId,
       MultipartUpload: {
         Parts: [] // クライアント側で各パートのETagを追加
       }
     });
     
-    // 中止用のコマンドを準備
     const abortCommand = new AbortMultipartUploadCommand({
       Bucket: R2_BUCKET_NAME,
       Key: key,
-      UploadId,
+      UploadId: uploadId,
     });
     
     // 完了と中止用のURLを生成
-    const completeUrl = await getSignedUrl(s3Client, completeCommand, { 
-      expiresIn: 24 * 3600, // 24時間（大きなファイルのアップロードに十分な時間）
-      unhoistableHeaders: new Set(['host']),
-    });
-    
-    const abortUrl = await getSignedUrl(s3Client, abortCommand, { 
-      expiresIn: 24 * 3600, // 24時間
-      unhoistableHeaders: new Set(['host']),
-    });
+    const completeUrl = await getSignedUrl(s3Client, completeCommand, { expiresIn: 24 * 3600 });
+    const abortUrl = await getSignedUrl(s3Client, abortCommand, { expiresIn: 24 * 3600 });
     
     return {
       isMultipart: true,
       key,
       bucket: R2_BUCKET_NAME,
-      uploadId: UploadId,
+      uploadId,
       partUrls,
       completeUrl,
       abortUrl,
-      partSize: partSize,
+      partSize,
       fileUrl: `uploads/${key}`
     };
   } catch (error) {
