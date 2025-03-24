@@ -9,6 +9,8 @@ import axios from 'axios';
 import { S3Client, GetObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { exec } from 'child_process';
+import ffmpeg from 'fluent-ffmpeg';
+import ffmpegInstaller from '@ffmpeg-installer/ffmpeg';
 
 /**
  * Gemini AIサービスクラス
@@ -32,6 +34,9 @@ export class GeminiService {
     // 環境変数からモデル名を取得（デフォルトはgemini-2.0-flash）
     const modelName = process.env.GEMINI_MODEL || 'gemini-2.0-flash';
     this.model = modelName;
+    
+    // ffmpegのパスを設定
+    ffmpeg.setFfmpegPath(ffmpegInstaller.path);
     
     // Cloudflare R2の初期化
     try {
@@ -128,42 +133,44 @@ export class GeminiService {
           const fileSizeInMB = stats.size / (1024 * 1024);
           console.log(`ファイルサイズ: ${fileSizeInMB.toFixed(2)} MB`);
           
-          // 音声データのみを抽出して処理する
-          console.log('動画から音声データのみを抽出します');
+          // 動画から音声を抽出
+          console.log('動画から音声を抽出します');
+          const audioFilePath = path.join(tempDir, 'audio.mp3');
           
-          // 音声データを抽出するためのストリーミング処理
-          // 最大10MBずつ読み込んで処理する
-          const CHUNK_SIZE = 10 * 1024 * 1024; // 10MB
-          const fileSize = stats.size;
-          const fileHandle = await fs.promises.open(localFilePath, 'r');
+          // ffmpegを使用して音声を抽出
+          await new Promise<void>((resolve, reject) => {
+            ffmpeg(localFilePath)
+              .output(audioFilePath)
+              .noVideo()
+              .audioCodec('libmp3lame')
+              .audioBitrate('128k')
+              .on('end', () => {
+                console.log('音声抽出完了');
+                resolve();
+              })
+              .on('error', (err) => {
+                console.error('音声抽出エラー:', err);
+                reject(new Error(`音声抽出に失敗しました: ${err.message}`));
+              })
+              .run();
+          });
           
-          const transcriptParts: string[] = [];
-          let position = 0;
+          // 音声ファイルのサイズを確認
+          const audioStats = fs.statSync(audioFilePath);
+          const audioSizeInMB = audioStats.size / (1024 * 1024);
+          console.log(`音声ファイルサイズ: ${audioSizeInMB.toFixed(2)} MB`);
           
-          // ファイルを小さなチャンクに分けて処理
-          while (position < fileSize) {
-            const buffer = Buffer.alloc(Math.min(CHUNK_SIZE, fileSize - position));
-            const { bytesRead } = await fileHandle.read(buffer, 0, buffer.length, position);
-            
-            if (bytesRead === 0) break;
-            
-            // 実際に読み込んだサイズに合わせてバッファを調整
-            const chunk = buffer.slice(0, bytesRead);
-            
-            // 音声データとして処理（実際には動画データの一部だが、Geminiは処理可能）
-            console.log(`チャンク処理: ${position}-${position + bytesRead} (${bytesRead} bytes)`);
-            const chunkBase64 = chunk.toString('base64');
-            const transcript = await this.processAudioChunk(chunkBase64);
-            transcriptParts.push(transcript);
-            
-            position += bytesRead;
-            console.log(`処理進捗: ${Math.round((position / fileSize) * 100)}%`);
-          }
+          // 音声ファイルをBase64エンコード
+          const audioBase64 = fs.readFileSync(audioFilePath).toString('base64');
+          console.log('音声ファイルをBase64エンコードしました');
           
-          await fileHandle.close();
+          // 文字起こし処理
+          const transcript = await this.processAudioChunk(audioBase64);
+          const transcriptParts = [transcript];
           
           // 一時ファイルを削除
           fs.unlinkSync(localFilePath);
+          fs.unlinkSync(audioFilePath);
           fs.rmdirSync(tempDir, { recursive: true });
           
           // 全ての文字起こし結果を結合
@@ -252,42 +259,44 @@ export class GeminiService {
       const fileSizeInMB = stats.size / (1024 * 1024);
       console.log(`ファイルサイズ: ${fileSizeInMB.toFixed(2)} MB`);
       
-      // 音声データのみを抽出して処理する
-      console.log('動画から音声データのみを抽出します');
+      // 動画から音声を抽出
+      console.log('動画から音声を抽出します');
+      const audioFilePath = path.join(tempDir, 'audio.mp3');
       
-      // 音声データを抽出するためのストリーミング処理
-      // 最大10MBずつ読み込んで処理する
-      const CHUNK_SIZE = 10 * 1024 * 1024; // 10MB
-      const fileSize = stats.size;
-      const fileHandle = await fs.promises.open(localFilePath, 'r');
+      // ffmpegを使用して音声を抽出
+      await new Promise<void>((resolve, reject) => {
+        ffmpeg(localFilePath)
+          .output(audioFilePath)
+          .noVideo()
+          .audioCodec('libmp3lame')
+          .audioBitrate('128k')
+          .on('end', () => {
+            console.log('音声抽出完了');
+            resolve();
+          })
+          .on('error', (err) => {
+            console.error('音声抽出エラー:', err);
+            reject(new Error(`音声抽出に失敗しました: ${err.message}`));
+          })
+          .run();
+      });
       
-      const transcriptParts: string[] = [];
-      let position = 0;
+      // 音声ファイルのサイズを確認
+      const audioStats = fs.statSync(audioFilePath);
+      const audioSizeInMB = audioStats.size / (1024 * 1024);
+      console.log(`音声ファイルサイズ: ${audioSizeInMB.toFixed(2)} MB`);
       
-      // ファイルを小さなチャンクに分けて処理
-      while (position < fileSize) {
-        const buffer = Buffer.alloc(Math.min(CHUNK_SIZE, fileSize - position));
-        const { bytesRead } = await fileHandle.read(buffer, 0, buffer.length, position);
-        
-        if (bytesRead === 0) break;
-        
-        // 実際に読み込んだサイズに合わせてバッファを調整
-        const chunk = buffer.slice(0, bytesRead);
-        
-        // 音声データとして処理（実際には動画データの一部だが、Geminiは処理可能）
-        console.log(`チャンク処理: ${position}-${position + bytesRead} (${bytesRead} bytes)`);
-        const chunkBase64 = chunk.toString('base64');
-        const transcript = await this.processAudioChunk(chunkBase64);
-        transcriptParts.push(transcript);
-        
-        position += bytesRead;
-        console.log(`処理進捗: ${Math.round((position / fileSize) * 100)}%`);
-      }
+      // 音声ファイルをBase64エンコード
+      const audioBase64 = fs.readFileSync(audioFilePath).toString('base64');
+      console.log('音声ファイルをBase64エンコードしました');
       
-      await fileHandle.close();
+      // 文字起こし処理
+      const transcript = await this.processAudioChunk(audioBase64);
+      const transcriptParts = [transcript];
       
       // 一時ファイルを削除
       fs.unlinkSync(localFilePath);
+      fs.unlinkSync(audioFilePath);
       fs.rmdirSync(tempDir, { recursive: true });
       
       // 全ての文字起こし結果を結合
@@ -313,8 +322,8 @@ export class GeminiService {
     
     promptText += `\n\n## 文字起こしの指示
 1. 全ての言葉を省略せず、一言一句正確に文字起こししてください
-2. 専門用語や固有名詞は特に注意して正確に書き起こしてください
-3. 話者を識別し、適切にラベル付けしてください（「講師：」「参加者A：」など）
+2. 専門用語や固有名詞のスペルや表記を統一し、正確にしてください
+3. 話者の区別を明確にし、一貫性のある形式で表示してください（例：「講師：」「参加者A：」など）
 4. 聞き取れない部分は[不明]と記録してください
 5. 音声の特徴（笑い、ため息、強調など）も[笑い]のように記録してください
 6. 言い間違いや言い直しも忠実に書き起こしてください
