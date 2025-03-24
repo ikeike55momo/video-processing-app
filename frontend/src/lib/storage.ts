@@ -28,13 +28,13 @@ console.log('環境変数チェック:', {
 
 // R2はS3互換APIを利用するため、S3Clientを設定します
 const s3Client = new S3Client({
-  region: "us-east-1", // Cloudflare R2のデフォルトリージョン
+  region: "auto", // Cloudflare R2のデフォルトリージョン
   endpoint: R2_ENDPOINT,
   credentials: {
     accessKeyId: R2_ACCESS_KEY_ID,
     secretAccessKey: R2_SECRET_ACCESS_KEY,
   },
-  forcePathStyle: false, // バケット名をホスト名の一部として使用
+  forcePathStyle: true, // バケット名をパスの一部として使用
 });
 
 // R2設定のデバッグログ
@@ -44,8 +44,8 @@ console.log('R2設定:', {
   // 機密情報なので完全には表示しない
   accessKeyIdPrefix: R2_ACCESS_KEY_ID ? R2_ACCESS_KEY_ID.substring(0, 5) + '...' : undefined,
   secretKeyExists: !!R2_SECRET_ACCESS_KEY,
-  region: "us-east-1",
-  forcePathStyle: false
+  region: "auto",
+  forcePathStyle: true
 });
 
 /**
