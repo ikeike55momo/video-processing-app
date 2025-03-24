@@ -241,124 +241,119 @@ export async function generateAppropriateUploadUrl(fileName: string, contentType
  * @returns マルチパートアップロードURL情報
  */
 export async function generateMultipartUploadUrls(fileName: string, contentType: string, fileSize: number) {
+  console.log(`マルチパートアップロード開始: {
+    fileName: '${fileName}',
+    contentType: '${contentType}',
+    fileSize: ${fileSize},
+    bucket: '${R2_BUCKET_NAME}'
+  }`);
+
   try {
-    console.log('マルチパートアップロード開始:', { 
-      fileName, 
-      contentType, 
-      fileSize,
-      bucket: R2_BUCKET_NAME
-    });
-    
-    // 安全なキーを生成
+    // 安全なキー名を生成
     const key = createSafeKey(fileName);
-    console.log('生成されたキー:', key);
-    
-    // マルチパートアップロードの開始
-    const createCommand = new CreateMultipartUploadCommand({
-      Bucket: R2_BUCKET_NAME,
-      Key: key,
-      ContentType: contentType,
-    });
-    
-    console.log('マルチパートアップロードコマンド作成:', {
-      bucket: R2_BUCKET_NAME,
-      key,
-      contentType
-    });
-    
-    let uploadId: string;
-    try {
-      const response = await s3Client.send(createCommand);
-      console.log('アップロードID取得成功:', response.UploadId);
-      
-      if (!response.UploadId) {
-        console.error('UploadIdが取得できませんでした');
-        throw new Error('マルチパートアップロードの初期化に失敗しました');
-      }
-      
-      uploadId = response.UploadId;
-    } catch (error) {
-      console.error('マルチパートアップロードの初期化に失敗しました:', error);
-      throw error;
-    }
-    
-    // パートサイズの最適化（ファイルサイズに基づいて調整）
-    // Cloudflare R2の制限: 最小パートサイズ5MB、最大10,000パート
-    const MIN_PART_SIZE = 5 * 1024 * 1024; // 5MB
+    console.log(`生成されたキー: ${key}`);
+
+    // パート数の計算（最大10000パート、最小5MBのパートサイズ）
     const MAX_PARTS = 10000;
-    
-    // 最適なパートサイズを計算（最小5MB、最大ファイルサイズ/10000）
-    let partSize = Math.max(MIN_PART_SIZE, Math.ceil(fileSize / MAX_PARTS));
-    
-    // パートサイズを5MBの倍数に調整
-    partSize = Math.ceil(partSize / MIN_PART_SIZE) * MIN_PART_SIZE;
-    
-    console.log('パートサイズ計算:', {
-      fileSize,
-      partSize,
-      estimatedParts: Math.ceil(fileSize / partSize)
-    });
-    
-    // 必要なパート数を計算
+    const MIN_PART_SIZE = 5 * 1024 * 1024; // 5MB
+    let partSize = Math.ceil(fileSize / MAX_PARTS);
+    partSize = Math.max(partSize, MIN_PART_SIZE);
     const partCount = Math.ceil(fileSize / partSize);
-    
-    // 各パートのアップロードURLを生成
-    const partUrls = [];
-    
-    for (let i = 1; i <= partCount; i++) {
-      const uploadPartCommand = new UploadPartCommand({
+
+    console.log(`マルチパートアップロード設定: {
+      partSize: ${partSize} バイト,
+      partCount: ${partCount},
+      totalSize: ${fileSize} バイト
+    }`);
+
+    // マルチパートアップロードの初期化
+    console.log(`マルチパートアップロードコマンド作成: {
+      bucket: '${R2_BUCKET_NAME}',
+      key: '${key}',
+      contentType: '${contentType}'
+    }`);
+
+    try {
+      // マルチパートアップロードの作成
+      const createCommand = new CreateMultipartUploadCommand({
         Bucket: R2_BUCKET_NAME,
         Key: key,
-        UploadId: uploadId,
-        PartNumber: i,
+        ContentType: contentType,
       });
-      
-      const signedUrl = await generatePresignedUrl(uploadPartCommand, 12 * 3600); // 12時間有効
-      partUrls.push({
-        url: signedUrl,
-        partNumber: i
-      });
-    }
-    
-    console.log(`${partCount}個のパートURLを生成しました`);
-    
-    // 完了と中止用のコマンドを作成
-    const completeCommand = new CompleteMultipartUploadCommand({
-      Bucket: R2_BUCKET_NAME,
-      Key: key,
-      UploadId: uploadId,
-      MultipartUpload: {
-        Parts: [] // クライアント側で各パートのETagを追加
+
+      const { UploadId } = await s3Client.send(createCommand);
+      if (!UploadId) {
+        throw new Error('マルチパートアップロードIDの取得に失敗しました');
       }
-    });
-    
-    const abortCommand = new AbortMultipartUploadCommand({
-      Bucket: R2_BUCKET_NAME,
-      Key: key,
-      UploadId: uploadId,
-    });
-    
-    // 完了と中止用のURLを生成
-    const completeUrl = await generatePresignedUrl(completeCommand, 24 * 3600); // 24時間有効
-    const abortUrl = await generatePresignedUrl(abortCommand, 24 * 3600); // 24時間有効
-    
-    // 公開アクセス用URLを使用してファイルURLを構築
-    const fileUrl = `${R2_PUBLIC_URL}/${key}`;
-    
-    return {
-      isMultipart: true,
-      key,
-      bucket: R2_BUCKET_NAME,
-      uploadId,
-      partUrls,
-      completeUrl,
-      abortUrl,
-      partSize,
-      fileUrl
-    };
+
+      console.log(`マルチパートアップロードID取得成功: ${UploadId}`);
+
+      // 各パートのアップロードURLを生成
+      const partUrls = [];
+      for (let partNumber = 1; partNumber <= partCount; partNumber++) {
+        const uploadPartCommand = new UploadPartCommand({
+          Bucket: R2_BUCKET_NAME,
+          Key: key,
+          UploadId,
+          PartNumber: partNumber,
+        });
+
+        const signedUrl = await generatePresignedUrl(uploadPartCommand, 24 * 3600); // 24時間有効
+        partUrls.push({
+          url: signedUrl,
+          partNumber,
+        });
+      }
+
+      console.log(`パートURL生成完了: ${partUrls.length}個のURLを生成`);
+
+      // 完了および中止用のURLを生成
+      const completeCommand = new CompleteMultipartUploadCommand({
+        Bucket: R2_BUCKET_NAME,
+        Key: key,
+        UploadId,
+      });
+
+      const abortCommand = new AbortMultipartUploadCommand({
+        Bucket: R2_BUCKET_NAME,
+        Key: key,
+        UploadId,
+      });
+
+      const completeUrl = await generatePresignedUrl(completeCommand, 24 * 3600); // 24時間有効
+      const abortUrl = await generatePresignedUrl(abortCommand, 24 * 3600); // 24時間有効
+      
+      // 公開アクセス用URLを使用してファイルURLを構築
+      const fileUrl = `${R2_PUBLIC_URL}/${key}`;
+      
+      console.log(`マルチパートアップロードURL生成完了: {
+        key: '${key}',
+        uploadId: '${UploadId}',
+        partCount: ${partUrls.length},
+        fileUrl: '${fileUrl}'
+      }`);
+      
+      return {
+        isMultipart: true,
+        key,
+        bucket: R2_BUCKET_NAME,
+        uploadId: UploadId,
+        partUrls,
+        completeUrl,
+        abortUrl,
+        partSize,
+        fileUrl
+      };
+    } catch (error) {
+      console.error('マルチパートアップロードの初期化に失敗しました:', error);
+      
+      // 通常のアップロードにフォールバック
+      console.log('通常のアップロードにフォールバックします');
+      return await generateUploadUrl(fileName, contentType);
+    }
   } catch (error) {
     console.error('マルチパートアップロードURL生成エラー:', error);
-    throw error;
+    throw new Error('マルチパートアップロードURLの生成に失敗しました: ' + (error instanceof Error ? error.message : String(error)));
   }
 }
 
