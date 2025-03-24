@@ -9,7 +9,11 @@ import axios from 'axios';
 import { S3Client, GetObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { exec } from 'child_process';
-import ffmpeg from 'fluent-ffmpeg';
+
+// ffmpegのインポート
+const ffmpeg = require('fluent-ffmpeg');
+const ffmpegPath = require('ffmpeg-static');
+ffmpeg.setFfmpegPath(ffmpegPath);
 
 /**
  * Gemini AIサービスクラス
@@ -151,7 +155,7 @@ export class GeminiService {
           console.log('文字起こし完了');
           
           return fullTranscript;
-        } catch (downloadError) {
+        } catch (downloadError: any) {
           console.error('公開URLからのダウンロードエラー:', downloadError);
           throw new Error(`公開URLからのダウンロードに失敗しました: ${downloadError.message}`);
         }
