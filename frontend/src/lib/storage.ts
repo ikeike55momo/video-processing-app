@@ -13,7 +13,7 @@ if (typeof window === 'undefined' && (!R2_ENDPOINT || !R2_ACCESS_KEY_ID || !R2_S
 
 // R2はS3互換APIを利用するため、S3Clientを設定します
 const s3Client = new S3Client({
-  region: "ap-southeast-1",
+  region: "auto",
   endpoint: R2_ENDPOINT,
   credentials: {
     accessKeyId: R2_ACCESS_KEY_ID || '',
@@ -29,7 +29,7 @@ console.log('R2設定:', {
   // 機密情報なので完全には表示しない
   accessKeyIdPrefix: R2_ACCESS_KEY_ID ? R2_ACCESS_KEY_ID.substring(0, 5) + '...' : undefined,
   secretKeyExists: !!R2_SECRET_ACCESS_KEY,
-  region: "ap-southeast-1",
+  region: "auto",
   forcePathStyle: true
 });
 
@@ -40,28 +40,24 @@ console.log('R2設定:', {
 export async function generateUploadUrl(fileName: string, contentType: string) {
   try {
     const key = `uploads/${Date.now()}-${fileName}`;
+    
     const command = new PutObjectCommand({
       Bucket: R2_BUCKET_NAME,
       Key: key,
       ContentType: contentType,
     });
     
-    // CORSヘッダーを含む署名付きURLを生成
-    const signedUrl = await getSignedUrl(s3Client, command, { 
-      expiresIn: 3600,
-      // 追加のヘッダーを指定
-      unhoistableHeaders: new Set(['host']),
-    });
+    // 署名付きURLを生成（1時間有効）
+    const signedUrl = await generatePresignedUrl(command, 3600);
     
-    return { 
-      url: signedUrl, 
-      key, 
-      bucket: R2_BUCKET_NAME,
-      // クライアント側で使用するためのファイルURLを追加
+    return {
+      isMultipart: false,
+      url: signedUrl,
+      key,
       fileUrl: `uploads/${key}`
     };
   } catch (error) {
-    console.error('Error generating upload URL:', error);
+    console.error('アップロードURL生成エラー:', error);
     throw error;
   }
 }
@@ -76,7 +72,7 @@ export async function getDownloadUrl(key: string) {
       Bucket: R2_BUCKET_NAME,
       Key: key,
     });
-    return await getSignedUrl(s3Client, command, { expiresIn: 3600 });
+    return await generatePresignedUrl(command, 3600);
   } catch (error) {
     console.error('Error generating download URL:', error);
     throw error;
@@ -284,7 +280,7 @@ export async function generateMultipartUploadUrls(fileName: string, contentType:
         PartNumber: i,
       });
       
-      const signedUrl = await getSignedUrl(s3Client, uploadPartCommand, { expiresIn: 3600 });
+      const signedUrl = await generatePresignedUrl(uploadPartCommand, 12 * 3600); // 12時間有効
       partUrls.push({
         url: signedUrl,
         partNumber: i
@@ -310,8 +306,8 @@ export async function generateMultipartUploadUrls(fileName: string, contentType:
     });
     
     // 完了と中止用のURLを生成
-    const completeUrl = await getSignedUrl(s3Client, completeCommand, { expiresIn: 24 * 3600 });
-    const abortUrl = await getSignedUrl(s3Client, abortCommand, { expiresIn: 24 * 3600 });
+    const completeUrl = await generatePresignedUrl(completeCommand, 24 * 3600); // 24時間有効
+    const abortUrl = await generatePresignedUrl(abortCommand, 24 * 3600); // 24時間有効
     
     return {
       isMultipart: true,
@@ -482,4 +478,19 @@ function generateCompleteMultipartBody(parts: { ETag: string; PartNumber: number
   
   xml += '</CompleteMultipartUpload>';
   return xml;
+}
+
+// 署名付きURLを生成する関数
+async function generatePresignedUrl(command: any, expiresIn: number = 3600) {
+  try {
+    const url = await getSignedUrl(s3Client, command, { 
+      expiresIn,
+      // Cloudflare R2との互換性のために必要な設定
+      unhoistableHeaders: new Set(['host']),
+    });
+    return url;
+  } catch (error) {
+    console.error('署名付きURL生成エラー:', error);
+    throw error;
+  }
 }
