@@ -5,20 +5,19 @@ import * as os from 'os';
 import * as util from 'util';
 import * as stream from 'stream';
 import * as crypto from 'crypto';
+import axios from 'axios';
 import { S3Client, GetObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
-import axios from 'axios';
+import { exec } from 'child_process';
+import ffmpeg from 'fluent-ffmpeg';
 
-// ffmpegのインポート
-const ffmpeg = require('fluent-ffmpeg');
-const ffmpegPath = require('ffmpeg-static');
-ffmpeg.setFfmpegPath(ffmpegPath);
-
-// Gemini AIサービスクラス
+/**
+ * Gemini AIサービスクラス
+ */
 export class GeminiService {
   private genAI: GoogleGenerativeAI;
   private model: string;
-  private s3Client: any; // S3Clientの型をanyに変更
+  private s3Client: any;
   private pipeline = util.promisify(stream.pipeline);
 
   constructor() {
@@ -74,10 +73,14 @@ export class GeminiService {
     console.log(`Geminiモデルを初期化: ${this.model}`);
   }
 
-  // 文字起こし処理
+  /**
+   * 文字起こし処理
+   * @param fileUrl ファイルのURL
+   * @returns 文字起こし結果
+   */
   async transcribeAudio(fileUrl: string): Promise<string> {
     try {
-      console.log(`音声/動画ファイルの文字起こしを開始: ${fileUrl}`);
+      console.log(`文字起こし処理を開始: ${fileUrl}`);
       
       // ファイルURLからバケット名とキーを抽出
       let bucketName: string;
@@ -86,7 +89,75 @@ export class GeminiService {
       // R2のURLからバケット名とキーを抽出
       const r2BucketName = process.env.R2_BUCKET_NAME || 'video-processing';
       
-      if (fileUrl.includes('r2.cloudflarestorage.com')) {
+      // Cloudflare R2の公開URLの場合（pub-で始まるドメイン）
+      if (fileUrl.includes('pub-') && fileUrl.includes('.r2.dev')) {
+        console.log(`Cloudflare R2公開URL検出: ${fileUrl}`);
+        bucketName = r2BucketName;
+        
+        // URLからパスを抽出
+        const urlObj = new URL(fileUrl);
+        // パスの先頭の/を削除
+        key = urlObj.pathname.startsWith('/') ? urlObj.pathname.substring(1) : urlObj.pathname;
+        
+        console.log(`R2公開URL解析結果: バケット=${bucketName}, キー=${key}`);
+        
+        // 公開URLの場合は直接ダウンロード
+        try {
+          // 一時ディレクトリを作成
+          const tempDir = path.join(os.tmpdir(), 'video-processing-' + crypto.randomBytes(6).toString('hex'));
+          fs.mkdirSync(tempDir, { recursive: true });
+          
+          // ファイルをダウンロード
+          const localFilePath = path.join(tempDir, path.basename(key));
+          console.log(`公開URLからファイルをダウンロード中: ${localFilePath}`);
+          
+          const response = await axios({
+            method: 'get',
+            url: fileUrl,
+            responseType: 'stream'
+          });
+          
+          await this.pipeline(
+            response.data,
+            fs.createWriteStream(localFilePath)
+          );
+          
+          console.log(`公開URLからのダウンロード完了: ${localFilePath}`);
+          
+          // ファイルサイズを確認
+          const stats = fs.statSync(localFilePath);
+          const fileSizeInMB = stats.size / (1024 * 1024);
+          console.log(`ファイルサイズ: ${fileSizeInMB.toFixed(2)} MB`);
+          
+          // 大きなファイルの場合は分割処理
+          let transcriptParts: string[] = [];
+          
+          if (fileSizeInMB > 20) {
+            console.log('ファイルサイズが大きいため、分割処理を実行します');
+            transcriptParts = await this.processLargeFile(localFilePath);
+          } else {
+            // 小さなファイルの場合は直接処理
+            const audioBase64 = fs.readFileSync(localFilePath).toString('base64');
+            const transcript = await this.processAudioChunk(audioBase64);
+            transcriptParts.push(transcript);
+          }
+          
+          // 一時ファイルを削除
+          fs.unlinkSync(localFilePath);
+          fs.rmdirSync(tempDir, { recursive: true });
+          
+          // 全ての文字起こし結果を結合
+          const fullTranscript = transcriptParts.join('\n\n');
+          console.log('文字起こし完了');
+          
+          return fullTranscript;
+        } catch (downloadError) {
+          console.error('公開URLからのダウンロードエラー:', downloadError);
+          throw new Error(`公開URLからのダウンロードに失敗しました: ${downloadError.message}`);
+        }
+      }
+      // R2の完全なURLの場合
+      else if (fileUrl.includes('r2.cloudflarestorage.com')) {
         // R2の完全なURLからキーを抽出
         const urlObj = new URL(fileUrl);
         const pathParts = urlObj.pathname.split('/');
