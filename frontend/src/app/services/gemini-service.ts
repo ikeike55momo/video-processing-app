@@ -412,5 +412,95 @@ export class GeminiService {
     return promptText;
   }
 
+  /**
+   * 文字起こし結果の整形・改善処理
+   * @param text 文字起こし結果のテキスト
+   * @returns 整形・改善されたテキスト
+   */
+  async enhanceTranscript(text: string): Promise<string> {
+    try {
+      const model = this.genAI.getGenerativeModel({ model: this.model });
+      
+      const prompt = `あなたはAI・機械学習分野の専門家で、文字起こしデータの整形と改善を行う専門家です。以下のAIスクールセミナーの文字起こしテキストを整形・改善してください。
+
+## 整形・改善の指示
+1. 話者の区別を明確にし、一貫性のある形式で表示してください（例：「講師：」「参加者A：」など）
+2. 専門用語や固有名詞のスペルや表記を統一し、正確にしてください
+3. 文脈から明らかな言い間違いや言い淀みは適切に修正してください
+4. 不完全な文や中断された文は可能な限り完成させてください
+5. [不明]とマークされた部分は、文脈から推測できる場合は適切な内容で補完してください
+6. 重複した内容や冗長な表現を整理してください
+7. 段落分けを適切に行い、読みやすさを向上させてください
+
+## 専門用語・固有名詞リスト
+以下のAI・機械学習用語や固有名詞の表記を統一してください:
+- LLM / 大規模言語モデル / Large Language Model → LLM（大規模言語モデル）
+- ファインチューニング / fine-tuning / 微調整 → ファインチューニング
+- プロンプトエンジニアリング / prompt engineering → プロンプトエンジニアリング
+- トークン / token → トークン
+- Gemini / ジェミナイ → Gemini
+- Claude / クロード → Claude
+- GPT / ジーピーティー → GPT
+- RAG / 検索拡張生成 / Retrieval-Augmented Generation → RAG（検索拡張生成）
+
+${text}
+
+元の文字起こしの内容や意味を変えないように注意してください。話者の発言内容を忠実に保ちながら、読みやすさと正確さを向上させることが目的です。整形・改善された文字起こしを出力してください。`;
+      
+      const result = await model.generateContent(prompt);
+      const response = await result.response;
+      const enhancedText = response.text();
+      
+      return enhancedText;
+    } catch (error: any) {
+      console.error('文字起こし整形・改善エラー:', error);
+      // エラーが発生した場合は元のテキストをそのまま返す
+      return text;
+    }
+  }
+
+  /**
+   * 要約処理
+   * @param text 文字起こし結果のテキスト
+   * @returns 要約されたテキスト
+   */
+  async summarizeText(text: string): Promise<string> {
+    try {
+      const model = this.genAI.getGenerativeModel({ model: this.model });
+      
+      const prompt = `あなたはAI・機械学習分野の専門家で、高度な要約スキルを持っています。以下のAIスクールセミナーの文字起こしテキストを要約してください。
+
+## 要約の指示
+1. セミナーの主要なトピックと重要なポイントを明確に抽出してください
+2. 専門用語や技術的な概念を正確に保持してください
+3. 講師の説明、例示、デモンストレーションの要点を含めてください
+4. 質疑応答から得られた重要な洞察を含めてください
+5. 論理的な構造を維持し、トピック間の関連性を示してください
+6. 技術的な正確さを保ちながら、簡潔で理解しやすい表現を使用してください
+
+## 専門用語の保持
+以下の専門用語や概念が出てきた場合は、要約に必ず含めてください：
+- LLM（大規模言語モデル）の仕組みと応用
+- ファインチューニングの手法と効果
+- プロンプトエンジニアリングの技術
+- RAG（検索拡張生成）の実装方法
+- AIモデルの評価指標と改善方法
+- 最新のAIモデル（Gemini、Claude、GPTなど）の特徴と違い
+
+${text}
+
+要約は日本語で、元のテキストの重要なポイントを含め、約500語の長さにしてください。この要約はAI技術を学ぶ学生や専門家のための教材として使用されるため、技術的な正確さと教育的価値を重視してください。`;
+      
+      const result = await model.generateContent(prompt);
+      const response = await result.response;
+      const summary = response.text();
+      
+      return summary;
+    } catch (error: any) {
+      console.error('要約エラー:', error);
+      throw new Error('要約処理に失敗しました');
+    }
+  }
+
   // ... (以下のコードは変更なし)
 }
