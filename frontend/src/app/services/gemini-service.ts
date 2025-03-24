@@ -10,11 +10,6 @@ import { S3Client, GetObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { exec } from 'child_process';
 
-// ffmpegのインポート
-const ffmpeg = require('fluent-ffmpeg');
-const ffmpegPath = require('ffmpeg-static');
-ffmpeg.setFfmpegPath(ffmpegPath);
-
 /**
  * Gemini AIサービスクラス
  */
@@ -133,18 +128,11 @@ export class GeminiService {
           const fileSizeInMB = stats.size / (1024 * 1024);
           console.log(`ファイルサイズ: ${fileSizeInMB.toFixed(2)} MB`);
           
-          // 大きなファイルの場合は分割処理
-          let transcriptParts: string[] = [];
-          
-          if (fileSizeInMB > 20) {
-            console.log('ファイルサイズが大きいため、分割処理を実行します');
-            transcriptParts = await this.processLargeFile(localFilePath);
-          } else {
-            // 小さなファイルの場合は直接処理
-            const audioBase64 = fs.readFileSync(localFilePath).toString('base64');
-            const transcript = await this.processAudioChunk(audioBase64);
-            transcriptParts.push(transcript);
-          }
+          // ファイルサイズに関わらず直接処理する
+          console.log('ファイルを直接処理します');
+          const audioBase64 = fs.readFileSync(localFilePath).toString('base64');
+          const transcript = await this.processAudioChunk(audioBase64);
+          const transcriptParts = [transcript];
           
           // 一時ファイルを削除
           fs.unlinkSync(localFilePath);
@@ -236,18 +224,11 @@ export class GeminiService {
       const fileSizeInMB = stats.size / (1024 * 1024);
       console.log(`ファイルサイズ: ${fileSizeInMB.toFixed(2)} MB`);
       
-      // 大きなファイルの場合は分割処理
-      let transcriptParts: string[] = [];
-      
-      if (fileSizeInMB > 20) {
-        console.log('ファイルサイズが大きいため、分割処理を実行します');
-        transcriptParts = await this.processLargeFile(localFilePath);
-      } else {
-        // 小さなファイルの場合は直接処理
-        const audioBase64 = fs.readFileSync(localFilePath).toString('base64');
-        const transcript = await this.processAudioChunk(audioBase64);
-        transcriptParts.push(transcript);
-      }
+      // ファイルサイズに関わらず直接処理する
+      console.log('ファイルを直接処理します');
+      const audioBase64 = fs.readFileSync(localFilePath).toString('base64');
+      const transcript = await this.processAudioChunk(audioBase64);
+      const transcriptParts = [transcript];
       
       // 一時ファイルを削除
       fs.unlinkSync(localFilePath);
@@ -262,58 +243,6 @@ export class GeminiService {
       console.error('文字起こしエラー:', error);
       throw new Error(`文字起こし処理に失敗しました: ${error.message}`);
     }
-  }
-  
-  // 大きなファイルを分割して処理
-  private async processLargeFile(filePath: string): Promise<string[]> {
-    const tempDir = path.dirname(filePath);
-    const baseName = path.basename(filePath, path.extname(filePath));
-    const segmentDuration = 5 * 60; // 5分ごとに分割
-    const outputPattern = path.join(tempDir, `${baseName}_segment_%03d.mp3`);
-    
-    return new Promise((resolve, reject) => {
-      ffmpeg(filePath)
-        .outputOptions([
-          `-f segment`,
-          `-segment_time ${segmentDuration}`,
-          `-c:a libmp3lame`,
-          `-q:a 4`
-        ])
-        .output(outputPattern)
-        .on('end', async () => {
-          try {
-            // 分割されたファイルを取得
-            const segmentFiles = fs.readdirSync(tempDir)
-              .filter(file => file.startsWith(`${baseName}_segment_`))
-              .sort();
-            
-            console.log(`ファイルを${segmentFiles.length}個のセグメントに分割しました`);
-            
-            // 各セグメントを処理
-            const transcriptParts: string[] = [];
-            
-            for (let i = 0; i < segmentFiles.length; i++) {
-              const segmentPath = path.join(tempDir, segmentFiles[i]);
-              console.log(`セグメント ${i+1}/${segmentFiles.length} を処理中: ${segmentPath}`);
-              
-              const audioBase64 = fs.readFileSync(segmentPath).toString('base64');
-              const transcript = await this.processAudioChunk(audioBase64, i+1, segmentFiles.length);
-              transcriptParts.push(transcript);
-              
-              // 処理後にセグメントファイルを削除
-              fs.unlinkSync(segmentPath);
-            }
-            
-            resolve(transcriptParts);
-          } catch (error: any) {
-            reject(error);
-          }
-        })
-        .on('error', (err: any) => {
-          reject(new Error(`ファイル分割エラー: ${err.message}`));
-        })
-        .run();
-    });
   }
   
   // 音声チャンクを処理
