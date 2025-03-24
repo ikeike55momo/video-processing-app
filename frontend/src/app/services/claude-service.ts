@@ -37,6 +37,7 @@ export class ClaudeService {
         throw new Error('有効なOpenRouter APIキーがありません');
       }
 
+      // OpenRouter APIのリクエスト形式に合わせて修正
       const response = await fetch(this.apiUrl, {
         method: 'POST',
         headers: {
@@ -68,7 +69,9 @@ export class ClaudeService {
               
               記事は日本語で作成し、専門用語がある場合は簡潔に説明を加えてください。`
             }
-          ]
+          ],
+          max_tokens: 4000,
+          temperature: 0.7
         })
       });
 
@@ -82,7 +85,14 @@ export class ClaudeService {
       });
 
       if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
+        const errorText = await response.text();
+        let errorData = {};
+        try {
+          errorData = JSON.parse(errorText);
+        } catch (e) {
+          errorData = { rawText: errorText };
+        }
+        
         console.error('OpenRouter API エラーレスポンス:', {
           status: response.status,
           statusText: response.statusText,
