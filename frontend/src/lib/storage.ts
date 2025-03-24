@@ -1,25 +1,40 @@
 import { S3Client, PutObjectCommand, GetObjectCommand, CreateMultipartUploadCommand, UploadPartCommand, CompleteMultipartUploadCommand, AbortMultipartUploadCommand } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 
-const R2_ENDPOINT = process.env.R2_ENDPOINT;
-const R2_ACCESS_KEY_ID = process.env.R2_ACCESS_KEY_ID;
-const R2_SECRET_ACCESS_KEY = process.env.R2_SECRET_ACCESS_KEY;
-const R2_BUCKET_NAME = process.env.R2_BUCKET_NAME;
+const R2_ENDPOINT = process.env.R2_ENDPOINT || '';
+const R2_ACCESS_KEY_ID = process.env.R2_ACCESS_KEY_ID || '';
+const R2_SECRET_ACCESS_KEY = process.env.R2_SECRET_ACCESS_KEY || '';
+const R2_BUCKET_NAME = process.env.R2_BUCKET_NAME || '';
+const R2_PUBLIC_URL = process.env.R2_PUBLIC_URL || 'https://pub-70c06e6cdf134c4ea4d0adf14d3a6b16.r2.dev';
 
 // 環境変数のチェック（サーバーサイドでのみ実行）
 if (typeof window === 'undefined' && (!R2_ENDPOINT || !R2_ACCESS_KEY_ID || !R2_SECRET_ACCESS_KEY || !R2_BUCKET_NAME)) {
   console.error('Missing R2 configuration. Please check your .env file.');
 }
 
+// デバッグ用に環境変数の存在を確認
+console.log('環境変数チェック:', {
+  hasAccessKey: !!R2_ACCESS_KEY_ID,
+  hasSecretKey: !!R2_SECRET_ACCESS_KEY,
+  hasEndpoint: !!R2_ENDPOINT,
+  hasBucket: !!R2_BUCKET_NAME,
+  hasPublicUrl: !!R2_PUBLIC_URL,
+  accessKeyLength: R2_ACCESS_KEY_ID.length,
+  secretKeyLength: R2_SECRET_ACCESS_KEY.length,
+  endpoint: R2_ENDPOINT,
+  bucket: R2_BUCKET_NAME,
+  publicUrl: R2_PUBLIC_URL
+});
+
 // R2はS3互換APIを利用するため、S3Clientを設定します
 const s3Client = new S3Client({
-  region: "auto",
+  region: "us-east-1", // Cloudflare R2のデフォルトリージョン
   endpoint: R2_ENDPOINT,
   credentials: {
-    accessKeyId: R2_ACCESS_KEY_ID || '',
-    secretAccessKey: R2_SECRET_ACCESS_KEY || '',
+    accessKeyId: R2_ACCESS_KEY_ID,
+    secretAccessKey: R2_SECRET_ACCESS_KEY,
   },
-  forcePathStyle: true, // パススタイルのURLを強制
+  forcePathStyle: false, // バケット名をホスト名の一部として使用
 });
 
 // R2設定のデバッグログ
@@ -29,9 +44,21 @@ console.log('R2設定:', {
   // 機密情報なので完全には表示しない
   accessKeyIdPrefix: R2_ACCESS_KEY_ID ? R2_ACCESS_KEY_ID.substring(0, 5) + '...' : undefined,
   secretKeyExists: !!R2_SECRET_ACCESS_KEY,
-  region: "auto",
-  forcePathStyle: true
+  region: "us-east-1",
+  forcePathStyle: false
 });
+
+/**
+ * ファイル名を安全なキーに変換する関数
+ * @param fileName オリジナルのファイル名
+ * @returns 安全なキー名
+ */
+function createSafeKey(fileName: string) {
+  // 日本語などの文字を含むファイル名をエンコード
+  const timestamp = Date.now();
+  const safeName = encodeURIComponent(fileName).replace(/%/g, '');
+  return `uploads/${timestamp}-${safeName}`;
+}
 
 /**
  * ファイル名とコンテンツタイプを指定して、署名付きアップロードURLを生成します。
@@ -39,7 +66,9 @@ console.log('R2設定:', {
  */
 export async function generateUploadUrl(fileName: string, contentType: string) {
   try {
-    const key = `uploads/${Date.now()}-${fileName}`;
+    // 安全なキーを生成
+    const key = createSafeKey(fileName);
+    console.log('生成されたキー（通常アップロード）:', key);
     
     const command = new PutObjectCommand({
       Bucket: R2_BUCKET_NAME,
@@ -50,11 +79,14 @@ export async function generateUploadUrl(fileName: string, contentType: string) {
     // 署名付きURLを生成（1時間有効）
     const signedUrl = await generatePresignedUrl(command, 3600);
     
+    // 公開アクセス用URLを使用してファイルURLを構築
+    const fileUrl = `${R2_PUBLIC_URL}/${key}`;
+    
     return {
       isMultipart: false,
       url: signedUrl,
       key,
-      fileUrl: `uploads/${key}`
+      fileUrl: fileUrl
     };
   } catch (error) {
     console.error('アップロードURL生成エラー:', error);
@@ -217,7 +249,8 @@ export async function generateMultipartUploadUrls(fileName: string, contentType:
       bucket: R2_BUCKET_NAME
     });
     
-    const key = `uploads/${Date.now()}-${fileName}`;
+    // 安全なキーを生成
+    const key = createSafeKey(fileName);
     console.log('生成されたキー:', key);
     
     // マルチパートアップロードの開始
@@ -309,6 +342,9 @@ export async function generateMultipartUploadUrls(fileName: string, contentType:
     const completeUrl = await generatePresignedUrl(completeCommand, 24 * 3600); // 24時間有効
     const abortUrl = await generatePresignedUrl(abortCommand, 24 * 3600); // 24時間有効
     
+    // 公開アクセス用URLを使用してファイルURLを構築
+    const fileUrl = `${R2_PUBLIC_URL}/${key}`;
+    
     return {
       isMultipart: true,
       key,
@@ -318,7 +354,7 @@ export async function generateMultipartUploadUrls(fileName: string, contentType:
       completeUrl,
       abortUrl,
       partSize,
-      fileUrl: `uploads/${key}`
+      fileUrl
     };
   } catch (error) {
     console.error('マルチパートアップロードURL生成エラー:', error);
