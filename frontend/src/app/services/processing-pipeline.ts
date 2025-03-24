@@ -17,44 +17,29 @@ export class ProcessingPipeline {
     try {
       console.log(`[${recordId}] 処理パイプラインを開始します...`);
       
-      // 一時的なレコードIDかどうかを確認
-      const isTempRecord = recordId.startsWith('temp-');
+      // レコードの取得
+      const record = await prisma.record.findUnique({
+        where: { id: recordId },
+      });
       
-      let record;
-      let fileUrl;
-      
-      if (isTempRecord) {
-        console.log(`[${recordId}] 一時的なレコードIDが検出されました。デバッグモードで処理を続行します。`);
-        // 一時的なレコードの場合はダミーのファイルURLを使用
-        fileUrl = 'gs://wadotaem-tool/dummy-file.mp4';
-      } else {
-        // レコードの取得
-        try {
-          record = await prisma.record.findUnique({
-            where: { id: recordId },
-          });
-          
-          if (!record) {
-            console.log(`[${recordId}] レコードが見つかりません。デバッグモードで処理を続行します。`);
-            // レコードが見つからない場合はダミーのファイルURLを使用
-            fileUrl = 'gs://wadotaem-tool/dummy-file.mp4';
-          } else {
-            console.log(`[${recordId}] レコードが見つかりました:`, record);
-          console.log(`[${recordId}] ファイルURL:`, record.file_url);
-            fileUrl = record.file_url;
-            
-            // ステータスをPROCESSINGに更新
-            await prisma.record.update({
-              where: { id: recordId },
-              data: { status: 'PROCESSING' },
-            });
-          }
-        } catch (dbError) {
-          console.error(`[${recordId}] データベースエラー:`, dbError);
-          // データベースエラーの場合はダミーのファイルURLを使用
-          fileUrl = 'gs://wadotaem-tool/dummy-file.mp4';
-        }
+      if (!record) {
+        throw new Error(`レコードが見つかりません: ${recordId}`);
       }
+      
+      console.log(`[${recordId}] レコードが見つかりました:`, record);
+      console.log(`[${recordId}] ファイルURL:`, record.file_url);
+      
+      if (!record.file_url) {
+        throw new Error('ファイルURLが設定されていません');
+      }
+      
+      const fileUrl = record.file_url;
+      
+      // ステータスをPROCESSINGに更新
+      await prisma.record.update({
+        where: { id: recordId },
+        data: { status: 'PROCESSING' },
+      });
 
       // 1. 文字起こし処理
       console.log(`[${recordId}] 文字起こし処理を開始します...`);
@@ -64,18 +49,24 @@ export class ProcessingPipeline {
         transcript = await this.geminiService.transcribeAudio(fileUrl);
         console.log(`[${recordId}] 文字起こし処理が成功しました`);
         
-        // レコードが存在する場合のみデータベースを更新
-        if (!isTempRecord && record) {
-          await prisma.record.update({
-            where: { id: recordId },
-            data: { transcript_text: transcript },
-          });
-          console.log(`[${recordId}] 文字起こし結果をデータベースに保存しました`);
-        }
+        await prisma.record.update({
+          where: { id: recordId },
+          data: { transcript_text: transcript },
+        });
+        console.log(`[${recordId}] 文字起こし結果をデータベースに保存しました`);
       } catch (transcriptError) {
         console.error(`[${recordId}] 文字起こし処理エラー:`, transcriptError);
-        // エラーが発生した場合はダミーの文字起こし結果を使用
-        transcript = "これはダミーの文字起こし結果です。実際の処理ではGemini APIを使用して文字起こしを行います。";
+        
+        // エラー情報をデータベースに保存
+        await prisma.record.update({
+          where: { id: recordId },
+          data: { 
+            error: transcriptError instanceof Error ? transcriptError.message : '文字起こし処理中にエラーが発生しました',
+            status: 'ERROR'
+          },
+        });
+        
+        throw transcriptError;
       }
       console.log(`[${recordId}] 文字起こし処理が完了しました`);
 
@@ -86,14 +77,11 @@ export class ProcessingPipeline {
         enhancedTranscript = await this.geminiService.enhanceTranscript(transcript);
         console.log(`[${recordId}] 文字起こし結果の整形・改善処理が成功しました`);
         
-        // レコードが存在する場合のみデータベースを更新
-        if (!isTempRecord && record) {
-          await prisma.record.update({
-            where: { id: recordId },
-            data: { transcript_text: enhancedTranscript },
-          });
-          console.log(`[${recordId}] 整形・改善された文字起こし結果をデータベースに保存しました`);
-        }
+        await prisma.record.update({
+          where: { id: recordId },
+          data: { transcript_text: enhancedTranscript },
+        });
+        console.log(`[${recordId}] 整形・改善された文字起こし結果をデータベースに保存しました`);
       } catch (enhanceError) {
         console.error(`[${recordId}] 文字起こし結果の整形・改善処理エラー:`, enhanceError);
         // エラーが発生した場合は元の文字起こし結果を使用
@@ -108,18 +96,24 @@ export class ProcessingPipeline {
         summary = await this.geminiService.summarizeText(enhancedTranscript);
         console.log(`[${recordId}] 要約処理が成功しました`);
         
-        // レコードが存在する場合のみデータベースを更新
-        if (!isTempRecord && record) {
-          await prisma.record.update({
-            where: { id: recordId },
-            data: { summary_text: summary },
-          });
-          console.log(`[${recordId}] 要約結果をデータベースに保存しました`);
-        }
+        await prisma.record.update({
+          where: { id: recordId },
+          data: { summary_text: summary },
+        });
+        console.log(`[${recordId}] 要約結果をデータベースに保存しました`);
       } catch (summaryError) {
         console.error(`[${recordId}] 要約処理エラー:`, summaryError);
-        // エラーが発生した場合はダミーの要約結果を使用
-        summary = "これはダミーの要約結果です。実際の処理ではGemini APIを使用して要約を行います。";
+        
+        // エラー情報をデータベースに保存
+        await prisma.record.update({
+          where: { id: recordId },
+          data: { 
+            error: summaryError instanceof Error ? summaryError.message : '要約処理中にエラーが発生しました',
+            status: 'ERROR'
+          },
+        });
+        
+        throw summaryError;
       }
       console.log(`[${recordId}] 要約処理が完了しました`);
 
@@ -130,41 +124,35 @@ export class ProcessingPipeline {
       try {
         // OpenRouter APIキーの確認
         const openrouterApiKey = process.env.OPENROUTER_API_KEY;
-        if (!openrouterApiKey || openrouterApiKey.includes('e9e4a0e1a9e4a0e1')) {
-          console.warn(`[${recordId}] OpenRouter APIキーが設定されていないか、デフォルト値のままです。`);
+        if (!openrouterApiKey) {
+          throw new Error('OpenRouter APIキーが設定されていません');
         }
         
         article = await this.claudeService.generateArticle(summary);
         console.log(`[${recordId}] 記事生成処理が成功しました`);
         
-        // レコードが存在する場合のみデータベースを更新
-        if (!isTempRecord && record) {
-          await prisma.record.update({
-            where: { id: recordId },
-            data: { 
-              article_text: article,
-              status: 'DONE'
-            },
-          });
-          console.log(`[${recordId}] 記事生成結果をデータベースに保存しました`);
-        }
+        await prisma.record.update({
+          where: { id: recordId },
+          data: { 
+            article_text: article,
+            status: 'DONE'
+          },
+        });
+        console.log(`[${recordId}] 記事生成結果をデータベースに保存しました`);
       } catch (articleError) {
         console.error(`[${recordId}] 記事生成処理エラー:`, articleError);
-        console.error(`[${recordId}] エラーの詳細:`, JSON.stringify(articleError, null, 2));
+        console.error(`[${recordId}] エラーの詳細:`, {});
         
         // エラー情報をデータベースに保存
-        if (!isTempRecord && record) {
-          await prisma.record.update({
-            where: { id: recordId },
-            data: { 
-              error: articleError instanceof Error ? articleError.message : '記事生成処理中にエラーが発生しました',
-              status: 'ERROR'
-            },
-          });
-        }
+        await prisma.record.update({
+          where: { id: recordId },
+          data: { 
+            error: articleError instanceof Error ? articleError.message : '記事生成処理中にエラーが発生しました',
+            status: 'ERROR'
+          },
+        });
         
-        // エラーが発生した場合はダミーの記事生成結果を使用
-        article = "これはダミーの記事です。実際の処理ではClaude APIを使用して記事生成を行います。";
+        throw articleError;
       }
       console.log(`[${recordId}] 記事生成処理が完了しました`);
 
@@ -172,14 +160,18 @@ export class ProcessingPipeline {
     } catch (error) {
       console.error(`処理パイプラインエラー [${recordId}]:`, error);
       
-      // エラー情報を保存
-      await prisma.record.update({
-        where: { id: recordId },
-        data: { 
-          status: 'ERROR',
-          error: error instanceof Error ? error.message : '不明なエラーが発生しました'
-        },
-      });
+      try {
+        // エラー情報を保存
+        await prisma.record.update({
+          where: { id: recordId },
+          data: { 
+            status: 'ERROR',
+            error: error instanceof Error ? error.message : '不明なエラーが発生しました'
+          },
+        });
+      } catch (dbError) {
+        console.error(`データベース更新エラー [${recordId}]:`, dbError);
+      }
       
       throw error;
     }
@@ -201,12 +193,12 @@ export class ProcessingPipeline {
         where: { id: recordId },
         data: { 
           status: 'PROCESSING',
-          error: null
+          error: null // エラー情報をクリア
         },
       });
 
-      // 処理パイプラインを再実行
-      await this.processVideo(recordId);
+      // 処理を再実行
+      return this.processVideo(recordId);
     } catch (error) {
       console.error(`再試行エラー [${recordId}]:`, error);
       throw error;

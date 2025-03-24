@@ -15,25 +15,34 @@ export class ClaudeService {
     this.apiUrl = 'https://openrouter.ai/api/v1/chat/completions';
     // 最新のモデル名を使用
     this.model = 'anthropic/claude-3.7-sonnet';
+    
+    console.log('ClaudeService初期化完了 - APIキー:', this.apiKey ? `${this.apiKey.substring(0, 5)}...` : '未設定');
   }
 
   // 要約から記事を生成
   async generateArticle(summary: string): Promise<string> {
     try {
       // デバッグ情報
+      const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://vpa.ririaru-stg.cloud';
+      
       console.log('OpenRouter API リクエスト準備:', {
         apiUrl: this.apiUrl,
         model: this.model,
-        apiKey: this.apiKey ? '設定済み' : '未設定',
-        appUrl: process.env.NEXT_PUBLIC_APP_URL || 'https://vpa.ririaru-stg.cloud'
+        apiKey: this.apiKey ? `${this.apiKey.substring(0, 5)}...` : '未設定',
+        appUrl: appUrl
       });
+
+      // APIキーを再確認
+      if (!this.apiKey || this.apiKey.trim() === '') {
+        throw new Error('有効なOpenRouter APIキーがありません');
+      }
 
       const response = await fetch(this.apiUrl, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${this.apiKey}`,
-          'HTTP-Referer': process.env.NEXT_PUBLIC_APP_URL || 'https://vpa.ririaru-stg.cloud',
+          'Authorization': `Bearer ${this.apiKey.trim()}`,
+          'HTTP-Referer': appUrl,
           'X-Title': 'Video Processing App'
         },
         body: JSON.stringify({
@@ -61,6 +70,15 @@ export class ClaudeService {
             }
           ]
         })
+      });
+
+      // レスポンスヘッダーを確認（デバッグ用）
+      console.log('OpenRouter API レスポンスヘッダー:', {
+        status: response.status,
+        statusText: response.statusText,
+        // ヘッダーの一部だけを表示（イテレーターを使わない）
+        contentType: response.headers.get('content-type'),
+        server: response.headers.get('server')
       });
 
       if (!response.ok) {

@@ -84,26 +84,46 @@ export class GeminiService {
       let key: string;
       
       // R2のURLからバケット名とキーを抽出
-      if (fileUrl.startsWith('https://') && fileUrl.includes('.r2.cloudflarestorage.com')) {
-        const r2BucketName = process.env.R2_BUCKET_NAME || 'video-processing';
-        const urlParts = new URL(fileUrl);
-        key = urlParts.pathname.substring(1); // 先頭の'/'を削除
+      const r2BucketName = process.env.R2_BUCKET_NAME || 'video-processing';
+      
+      if (fileUrl.includes('r2.cloudflarestorage.com')) {
+        // R2の完全なURLからキーを抽出
+        const urlObj = new URL(fileUrl);
+        const pathParts = urlObj.pathname.split('/');
+        // 最初の空の部分とバケット名を除去
+        pathParts.shift(); // 先頭の空文字を削除
+        if (pathParts[0] === r2BucketName) {
+          pathParts.shift(); // バケット名を削除
+        }
+        key = pathParts.join('/');
         bucketName = r2BucketName;
+        console.log(`R2 URL解析結果: バケット=${bucketName}, キー=${key}`);
       } 
       // 従来のGCS形式のURLからキーを抽出（互換性のため）
       else if (fileUrl.startsWith('gs://')) {
         const gcsMatch = fileUrl.match(/gs:\/\/([^\/]+)\/(.+)/);
         if (!gcsMatch) {
-          throw new Error('無効なファイルURL形式です');
+          throw new Error('無効なファイルURL形式です: ' + fileUrl);
         }
-        bucketName = process.env.R2_BUCKET_NAME || 'video-processing';
+        bucketName = r2BucketName;
         key = gcsMatch[2];
+        console.log(`GCS URL解析結果: バケット=${bucketName}, キー=${key}`);
+      }
+      // アップロードされたファイルの場合（uploads/timestamp-filename形式）
+      else if (fileUrl.includes('uploads/')) {
+        bucketName = r2BucketName;
+        // キーをそのまま使用
+        key = fileUrl.startsWith('/') ? fileUrl.substring(1) : fileUrl;
+        console.log(`アップロードファイル解析結果: バケット=${bucketName}, キー=${key}`);
       }
       // 通常のパス形式の場合
       else {
-        bucketName = process.env.R2_BUCKET_NAME || 'video-processing';
+        bucketName = r2BucketName;
         key = fileUrl.startsWith('/') ? fileUrl.substring(1) : fileUrl;
+        console.log(`通常パス解析結果: バケット=${bucketName}, キー=${key}`);
       }
+      
+      console.log(`R2からファイルを取得: バケット=${bucketName}, キー=${key}`);
       
       // 一時ディレクトリを作成
       const tempDir = path.join(os.tmpdir(), 'video-processing-' + crypto.randomBytes(6).toString('hex'));
@@ -120,6 +140,7 @@ export class GeminiService {
       });
       
       const signedUrl = await getSignedUrl(this.s3Client, command, { expiresIn: 3600 });
+      console.log(`署名付きURL生成: ${signedUrl.substring(0, 100)}...`);
       
       // ファイルをダウンロード
       const response = await axios({
