@@ -1,11 +1,13 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
-import { Storage } from '@google-cloud/storage';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import * as util from 'util';
 import * as stream from 'stream';
 import * as crypto from 'crypto';
+import { S3Client, GetObjectCommand } from '@aws-sdk/client-s3';
+import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
+import axios from 'axios';
 
 // ffmpegのインポート
 const ffmpeg = require('fluent-ffmpeg');
@@ -16,7 +18,7 @@ ffmpeg.setFfmpegPath(ffmpegPath);
 export class GeminiService {
   private genAI: GoogleGenerativeAI;
   private model: string;
-  private storage: Storage;
+  private s3Client: any; // S3Clientの型をanyに変更
   private pipeline = util.promisify(stream.pipeline);
 
   constructor() {
@@ -33,25 +35,39 @@ export class GeminiService {
     const modelName = process.env.GEMINI_MODEL || 'gemini-2.0-flash';
     this.model = modelName;
     
-    // Google Cloud Storageの初期化
+    // Cloudflare R2の初期化
     try {
-      const credentialsBase64 = process.env.GCP_CREDENTIALS_BASE64;
-      if (!credentialsBase64) {
-        throw new Error('GCP_CREDENTIALS_BASE64環境変数が設定されていません');
+      const r2Endpoint = process.env.R2_ENDPOINT;
+      const r2AccessKeyId = process.env.R2_ACCESS_KEY_ID;
+      const r2SecretAccessKey = process.env.R2_SECRET_ACCESS_KEY;
+      
+      if (!r2Endpoint || !r2AccessKeyId || !r2SecretAccessKey) {
+        throw new Error('R2の環境変数（R2_ENDPOINT, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY）が設定されていません');
       }
       
-      const credentials = JSON.parse(
-        Buffer.from(credentialsBase64, 'base64').toString()
-      );
-      this.storage = new Storage({ credentials });
+      this.s3Client = new S3Client({
+        region: 'auto',
+        endpoint: r2Endpoint,
+        credentials: {
+          accessKeyId: r2AccessKeyId,
+          secretAccessKey: r2SecretAccessKey
+        }
+      });
     } catch (error) {
-      console.error('Google Cloud Storage初期化エラー:', error);
-      // 開発環境では仮のストレージオブジェクトを作成
+      console.error('Cloudflare R2初期化エラー:', error);
+      // 開発環境では仮のクライアントオブジェクトを作成
       if (process.env.NODE_ENV === 'development') {
-        console.warn('開発環境用の仮のストレージオブジェクトを使用します');
-        this.storage = new Storage();
+        console.warn('開発環境用の仮のR2クライアントオブジェクトを使用します');
+        this.s3Client = new S3Client({
+          region: 'auto',
+          endpoint: 'https://example.com',
+          credentials: {
+            accessKeyId: 'dummy',
+            secretAccessKey: 'dummy'
+          }
+        });
       } else {
-        throw new Error('Google Cloud Storageの初期化に失敗しました: ' + (error instanceof Error ? error.message : '不明なエラー'));
+        throw new Error('Cloudflare R2の初期化に失敗しました: ' + (error instanceof Error ? error.message : '不明なエラー'));
       }
     }
     
@@ -59,33 +75,61 @@ export class GeminiService {
   }
 
   // 文字起こし処理
-  async transcribeAudio(audioUrl: string): Promise<string> {
+  async transcribeAudio(fileUrl: string): Promise<string> {
     try {
-      console.log(`音声/動画ファイルの文字起こしを開始: ${audioUrl}`);
+      console.log(`音声/動画ファイルの文字起こしを開始: ${fileUrl}`);
       
-      // Google Cloud Storageから動画/音声ファイルを取得
-      const gcsMatch = audioUrl.match(/gs:\/\/([^\/]+)\/(.+)/);
-      if (!gcsMatch) {
-        throw new Error('無効なGCS URL形式です');
+      // ファイルURLからバケット名とキーを抽出
+      let bucketName: string;
+      let key: string;
+      
+      // R2のURLからバケット名とキーを抽出
+      if (fileUrl.startsWith('https://') && fileUrl.includes('.r2.cloudflarestorage.com')) {
+        const r2BucketName = process.env.R2_BUCKET_NAME || 'video-processing';
+        const urlParts = new URL(fileUrl);
+        key = urlParts.pathname.substring(1); // 先頭の'/'を削除
+        bucketName = r2BucketName;
+      } 
+      // 従来のGCS形式のURLからキーを抽出（互換性のため）
+      else if (fileUrl.startsWith('gs://')) {
+        const gcsMatch = fileUrl.match(/gs:\/\/([^\/]+)\/(.+)/);
+        if (!gcsMatch) {
+          throw new Error('無効なファイルURL形式です');
+        }
+        bucketName = process.env.R2_BUCKET_NAME || 'video-processing';
+        key = gcsMatch[2];
       }
-      
-      const bucketName = gcsMatch[1];
-      const fileName = gcsMatch[2];
+      // 通常のパス形式の場合
+      else {
+        bucketName = process.env.R2_BUCKET_NAME || 'video-processing';
+        key = fileUrl.startsWith('/') ? fileUrl.substring(1) : fileUrl;
+      }
       
       // 一時ディレクトリを作成
       const tempDir = path.join(os.tmpdir(), 'video-processing-' + crypto.randomBytes(6).toString('hex'));
       fs.mkdirSync(tempDir, { recursive: true });
       
       // ファイルをダウンロード
-      const localFilePath = path.join(tempDir, path.basename(fileName));
-      console.log(`ファイルをダウンロード中: ${localFilePath}`);
+      const localFilePath = path.join(tempDir, path.basename(key));
+      console.log(`ファイルをダウンロード中: ${localFilePath} (バケット: ${bucketName}, キー: ${key})`);
       
-      const bucket = this.storage.bucket(bucketName);
-      const file = bucket.file(fileName);
+      // 署名付きURLを生成
+      const command = new GetObjectCommand({
+        Bucket: bucketName,
+        Key: key
+      });
+      
+      const signedUrl = await getSignedUrl(this.s3Client, command, { expiresIn: 3600 });
       
       // ファイルをダウンロード
+      const response = await axios({
+        method: 'get',
+        url: signedUrl,
+        responseType: 'stream'
+      });
+      
       await this.pipeline(
-        file.createReadStream(),
+        response.data,
         fs.createWriteStream(localFilePath)
       );
       

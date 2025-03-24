@@ -514,12 +514,18 @@ function generateCompleteMultipartBody(parts: { ETag: string; PartNumber: number
 // 署名付きURLを生成する関数
 async function generatePresignedUrl(command: any, expiresIn: number = 3600) {
   try {
-    const url = await getSignedUrl(s3Client, command, { 
+    // CORSヘッダーを含める
+    return await getSignedUrl(s3Client, command, { 
       expiresIn,
-      // Cloudflare R2との互換性のために必要な設定
-      unhoistableHeaders: new Set(['host']),
+      // CORSヘッダーを追加
+      requestOptions: {
+        headers: {
+          'Access-Control-Allow-Origin': '*',
+          'Access-Control-Allow-Methods': 'GET, PUT, POST, DELETE',
+          'Access-Control-Allow-Headers': '*'
+        }
+      }
     });
-    return url;
   } catch (error) {
     console.error('署名付きURL生成エラー:', error);
     throw error;
