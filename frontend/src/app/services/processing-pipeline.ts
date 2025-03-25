@@ -1,15 +1,18 @@
 import { GeminiService } from './gemini-service';
 import { ClaudeService } from './claude-service';
+import { TranscriptionService } from './transcription-service';
 import prisma from '@/lib/prisma';
 
 // AI処理パイプラインを管理するクラス
 export class ProcessingPipeline {
   private geminiService: GeminiService;
   private claudeService: ClaudeService;
+  private transcriptionService: TranscriptionService;
 
   constructor() {
     this.geminiService = new GeminiService();
     this.claudeService = new ClaudeService();
+    this.transcriptionService = new TranscriptionService();
   }
 
   // 処理パイプラインを実行
@@ -41,13 +44,14 @@ export class ProcessingPipeline {
         data: { status: 'PROCESSING' },
       });
 
-      // 1. 文字起こし処理
-      console.log(`[${recordId}] 文字起こし処理を開始します...`);
+      // 1. 高精度文字起こし処理（Gemini FlashとSpeech-to-Textの組み合わせ）
+      console.log(`[${recordId}] 高精度文字起こし処理を開始します...`);
       console.log(`[${recordId}] 使用するファイルURL:`, fileUrl);
       let transcript;
       try {
-        transcript = await this.geminiService.transcribeAudio(fileUrl);
-        console.log(`[${recordId}] 文字起こし処理が成功しました`);
+        // 新しいTranscriptionServiceを使用
+        transcript = await this.transcriptionService.transcribeAudio(fileUrl);
+        console.log(`[${recordId}] 高精度文字起こし処理が成功しました`);
         
         await prisma.record.update({
           where: { id: recordId },
@@ -57,16 +61,30 @@ export class ProcessingPipeline {
       } catch (transcriptError) {
         console.error(`[${recordId}] 文字起こし処理エラー:`, transcriptError);
         
-        // エラー情報をデータベースに保存
-        await prisma.record.update({
-          where: { id: recordId },
-          data: { 
-            error: transcriptError instanceof Error ? transcriptError.message : '文字起こし処理中にエラーが発生しました',
-            status: 'ERROR'
-          },
-        });
-        
-        throw transcriptError;
+        // フォールバック: 従来のGemini文字起こしを試行
+        try {
+          console.log(`[${recordId}] フォールバック: 従来のGemini文字起こしを試行します...`);
+          transcript = await this.geminiService.transcribeAudio(fileUrl);
+          
+          await prisma.record.update({
+            where: { id: recordId },
+            data: { transcript_text: transcript },
+          });
+          console.log(`[${recordId}] フォールバック文字起こし結果をデータベースに保存しました`);
+        } catch (fallbackError) {
+          console.error(`[${recordId}] フォールバック文字起こし処理エラー:`, fallbackError);
+          
+          // エラー情報をデータベースに保存
+          await prisma.record.update({
+            where: { id: recordId },
+            data: { 
+              error: fallbackError instanceof Error ? fallbackError.message : '文字起こし処理中にエラーが発生しました',
+              status: 'ERROR'
+            },
+          });
+          
+          throw fallbackError;
+        }
       }
       console.log(`[${recordId}] 文字起こし処理が完了しました`);
 
@@ -238,7 +256,7 @@ export class ProcessingPipeline {
         case 2: // 文字起こしからやり直し
           console.log(`[${recordId}] 文字起こし処理を開始します...`);
           try {
-            const transcript = await this.geminiService.transcribeAudio(fileUrl);
+            const transcript = await this.transcriptionService.transcribeAudio(fileUrl);
             console.log(`[${recordId}] 文字起こし処理が成功しました`);
             
             await prisma.record.update({
