@@ -75,53 +75,51 @@ export class TranscriptionService {
         console.log(`音声抽出完了: ${audioFilePath}`);
       }
       
-      // Gemini Flashでの文字起こし
-      console.log('Gemini Flashでの文字起こしを開始');
-      const geminiTranscript = await this.transcribeWithGemini(audioFilePath);
-      console.log('Gemini Flashでの文字起こし完了');
+      // 両方の文字起こしを並列で実行
+      console.log('Gemini FlashとCloud Speech-to-Textでの文字起こしを並列で開始');
+      const [geminiPromise, speechToTextPromise] = await Promise.allSettled([
+        this.transcribeWithGemini(audioFilePath),
+        this.transcribeWithSpeechToText(audioFilePath)
+      ]);
       
-      let speechToTextTranscript = '';
-      let speechToTextError: Error | null = null;
+      // 結果の取得
+      const geminiTranscript = geminiPromise.status === 'fulfilled' ? geminiPromise.value : '';
+      const speechToTextTranscript = speechToTextPromise.status === 'fulfilled' ? speechToTextPromise.value : '';
       
-      // Cloud Speech-to-Textでの文字起こし（エラーを捕捉）
-      try {
-        console.log('Cloud Speech-to-Textでの文字起こしを開始');
-        speechToTextTranscript = await this.transcribeWithSpeechToText(audioFilePath);
-        console.log('Cloud Speech-to-Textでの文字起こし完了');
-      } catch (sttError: unknown) {
-        speechToTextError = sttError as Error;
-        console.error('Cloud Speech-to-Textでの文字起こしはスキップされます:', sttError instanceof Error ? sttError.message : String(sttError));
+      // 結果のログ出力
+      console.log(`Gemini Flash結果: ${geminiPromise.status === 'fulfilled' ? '成功' : '失敗'}`);
+      console.log(`Cloud Speech-to-Text結果: ${speechToTextPromise.status === 'fulfilled' ? '成功' : '失敗'}`);
+      
+      // エラーログ
+      if (geminiPromise.status === 'rejected') {
+        console.error('Gemini Flashでの文字起こしに失敗:', geminiPromise.reason);
+      }
+      if (speechToTextPromise.status === 'rejected') {
+        console.error('Cloud Speech-to-Textでの文字起こしに失敗:', speechToTextPromise.reason);
       }
       
-      // Speech-to-Textが失敗した場合はGemini結果のみを返す
-      if (speechToTextError || !speechToTextTranscript) {
-        console.log('Gemini Flashの結果のみを使用します');
-        return geminiTranscript;
+      // どちらか一方でも成功していれば処理を続行
+      if (geminiTranscript || speechToTextTranscript) {
+        // 両方成功した場合はマージ
+        if (geminiTranscript && speechToTextTranscript) {
+          try {
+            console.log('両方の文字起こし結果をマージします');
+            return await this.mergeTranscripts(geminiTranscript, speechToTextTranscript);
+          } catch (mergeError: unknown) {
+            console.error('マージ処理中にエラーが発生しました:', mergeError);
+            // マージに失敗した場合はGemini結果を優先
+            return geminiTranscript || speechToTextTranscript;
+          }
+        }
+        // どちらか一方のみ成功した場合はその結果を返す
+        return geminiTranscript || speechToTextTranscript;
       }
       
-      // 両方の結果をマージ
-      console.log('両方の文字起こし結果をマージします');
-      try {
-        const mergedTranscript = await this.mergeTranscripts(geminiTranscript, speechToTextTranscript);
-        return mergedTranscript;
-      } catch (mergeError: unknown) {
-        console.error('マージ処理中にエラーが発生しました:', mergeError);
-        // マージに失敗した場合はGemini結果を優先
-        return geminiTranscript;
-      }
+      // 両方失敗した場合はエラー
+      throw new Error('すべての文字起こし方法が失敗しました');
     } catch (error: unknown) {
       console.error('文字起こし処理中にエラーが発生しました:', error);
-      
-      // どちらかの結果が得られていれば返す（Gemini優先）
-      try {
-        // Gemini Flashでの文字起こし（再試行）
-        console.log('Gemini Flashでの文字起こしを再試行');
-        const geminiTranscript = await this.transcribeWithGemini(localFilePath);
-        return geminiTranscript;
-      } catch (retryError: unknown) {
-        console.error('Gemini Flashでの再試行に失敗:', retryError);
-        throw new Error('すべての文字起こし方法が失敗しました');
-      }
+      throw error instanceof Error ? error : new Error(String(error));
     } finally {
       // 一時ファイルの削除
       this.cleanupTempFiles(tempFiles);
@@ -297,6 +295,7 @@ export class TranscriptionService {
           '-acodec flac',       // FLACエンコーダを使用
           '-ar 16000',          // サンプルレート16kHz（Speech-to-Textの推奨値）
           '-ac 1',              // モノラルチャンネル
+          '-sample_fmt s16',    // 16ビット形式を明示的に指定
           '-f flac'             // 明示的にFLAC形式を指定
         ])
         .output(outputPath)
