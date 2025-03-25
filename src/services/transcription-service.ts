@@ -45,97 +45,147 @@ export class TranscriptionService {
   }
 
   // 音声ファイルを文字起こし（フォールバックメカニズム付き）
-  public async transcribeAudio(audioPath: string): Promise<string> {
-    console.log(`ファイルURLから文字起こしを開始: ${audioPath}`);
+  async transcribeAudio(audioPath: string): Promise<string> {
+    console.log(`文字起こし処理を開始: ${audioPath}`);
     
     try {
-      // 1. まず高精度な二重文字起こしを試みる
+      // 第1段階: 高精度処理を試行（Gemini + Speech-to-Text）
       try {
-        return await this.processLocalFile(audioPath);
-      } catch (error) {
-        console.log('高精度文字起こしに失敗、フォールバック処理を開始します:', error);
+        const transcription = await this.processLocalFile(audioPath);
+        // 成功した場合は一時ファイルをクリーンアップして結果を返す
+        this.cleanupAllTempFiles();
+        return transcription;
+      } catch (localError: unknown) {
+        console.error('ローカルファイル処理エラー:', localError);
+        throw new Error(`ローカルファイル処理に失敗しました: ${localError instanceof Error ? localError.message : String(localError)}`);
+      }
+    } catch (error: unknown) {
+      console.error(`文字起こし処理エラー:`, error);
+      
+      // 第2段階: Geminiのみで文字起こしを試行
+      console.log(`フォールバック: 従来のGemini文字起こしを試します...`);
+      
+      try {
+        const fallbackTranscription = await this.transcribeWithGemini(audioPath);
         
-        // 2. 次にGemini Flashのみを試みる
+        if (fallbackTranscription && fallbackTranscription.trim().length > 0) {
+          console.log(`フォールバック成功: Geminiでの文字起こしが完了しました`);
+          // 成功した場合は一時ファイルをクリーンアップして結果を返す
+          this.cleanupAllTempFiles();
+          return fallbackTranscription;
+        } else {
+          throw new Error('フォールバック文字起こし結果が空です');
+        }
+      } catch (fallbackError: unknown) {
+        console.error(`フォールバック文字起こしエラー:`, fallbackError);
+        
+        // 第3段階: Speech-to-Textのみで文字起こしを試行
+        console.log(`最終フォールバック: Speech-to-Textのみで文字起こしを試します...`);
+        
         try {
-          const transcription = await this.transcribeWithGemini(audioPath);
-          if (transcription && transcription.trim().length > 0) {
-            return transcription;
-          }
-          throw new Error('Gemini文字起こし結果が空でした');
-        } catch (geminiError) {
-          console.log('Gemini文字起こしに失敗、Speech-to-Textにフォールバックします:', geminiError);
+          // 一時ディレクトリの作成
+          const tempDir = path.join(os.tmpdir(), 'speech-fallback-' + crypto.randomBytes(6).toString('hex'));
+          fs.mkdirSync(tempDir, { recursive: true });
           
-          // 3. 最後にCloud Speech-to-Textのみを試みる
+          // ファイルのダウンロード
+          const localFilePath = await this.downloadFile(audioPath, tempDir);
+          console.log(`Speech-to-Text用にファイルをダウンロードしました: ${localFilePath}`);
+          
+          // ファイル形式を確認
+          const fileExt = path.extname(localFilePath).toLowerCase();
+          let audioFilePath = localFilePath;
+          
+          // 動画ファイルの場合は音声を抽出
+          if (['.mp4', '.mov', '.avi', '.mkv', '.webm'].includes(fileExt)) {
+            console.log('動画ファイルから音声を抽出します');
+            audioFilePath = path.join(tempDir, `audio-${crypto.randomBytes(4).toString('hex')}.mp3`);
+            await this.extractAudioFromVideo(localFilePath, audioFilePath);
+            console.log(`音声抽出完了: ${audioFilePath}`);
+          }
+          
+          // Speech-to-Textで文字起こし
+          const speechTranscription = await this.transcribeWithSpeechToText(audioFilePath);
+          
+          if (speechTranscription && speechTranscription.trim().length > 0) {
+            console.log(`最終フォールバック成功: Speech-to-Textでの文字起こしが完了しました`);
+            // 成功した場合は一時ファイルをクリーンアップして結果を返す
+            this.cleanupAllTempFiles();
+            return speechTranscription;
+          } else {
+            throw new Error('Speech-to-Text文字起こし結果が空です');
+          }
+        } catch (speechError: unknown) {
+          console.error(`Speech-to-Text文字起こしエラー:`, speechError);
+          // すべての一時ファイルをクリーンアップ
+          this.cleanupAllTempFiles();
+          throw new Error(`すべての文字起こし方法が失敗しました: ${error instanceof Error ? error.message : String(error)}`);
+        }
+      }
+    }
+  }
+
+  // 一時ファイル削除関数
+  private cleanupTempFiles(filePaths: string[]): void {
+    for (const filePath of filePaths) {
+      try {
+        if (fs.existsSync(filePath)) {
+          fs.unlinkSync(filePath);
+          console.log(`一時ファイルを削除しました: ${filePath}`);
+        }
+      } catch (cleanupError: unknown) {
+        console.error(`一時ファイル ${filePath} の削除に失敗しました:`, cleanupError);
+      }
+    }
+  }
+
+  // すべての一時ファイルを削除する関数
+  private cleanupAllTempFiles(): void {
+    try {
+      // 一時ディレクトリのパターン
+      const tempDirPattern = /video-processing-[a-z0-9]+/;
+      
+      // /tmpディレクトリ内のファイルを検索
+      const tempDir = os.tmpdir();
+      const files = fs.readdirSync(tempDir);
+      
+      // video-processing関連の一時ディレクトリを検索して削除
+      for (const file of files) {
+        if (tempDirPattern.test(file)) {
+          const fullPath = path.join(tempDir, file);
           try {
-            // 動画ファイルの場合は音声を抽出する必要がある
-            const fileExt = path.extname(audioPath).toLowerCase();
-            const tempDir = path.join(os.tmpdir(), 'transcription-' + crypto.randomBytes(6).toString('hex'));
-            fs.mkdirSync(tempDir, { recursive: true });
-            
-            let localFilePath = '';
-            let audioFilePath = '';
-            const tempFiles: string[] = [];
-            
-            try {
-              // ファイルのダウンロード
-              localFilePath = await this.downloadFile(audioPath, tempDir);
-              tempFiles.push(localFilePath);
-              console.log(`フォールバック: ファイルのダウンロード完了: ${localFilePath}`);
-              
-              audioFilePath = localFilePath;
-              
-              // 動画ファイルの場合は音声を抽出
-              if (['.mp4', '.mov', '.avi', '.mkv', '.webm'].includes(fileExt)) {
-                console.log('フォールバック: 動画ファイルから音声を抽出します');
-                audioFilePath = path.join(tempDir, `audio-${crypto.randomBytes(4).toString('hex')}.mp3`);
-                tempFiles.push(audioFilePath);
-                await this.extractAudioFromVideo(localFilePath, audioFilePath);
-                console.log(`フォールバック: 音声抽出完了: ${audioFilePath}`);
-              }
-              
-              // Speech-to-Textで文字起こし
-              const transcription = await this.transcribeWithSpeechToText(audioFilePath);
-              
-              // 一時ファイルの削除
-              this.cleanupTempFiles(tempFiles);
-              
-              // 一時ディレクトリの削除
-              try {
-                if (tempDir && fs.existsSync(tempDir)) {
-                  fs.rmdirSync(tempDir, { recursive: true });
-                }
-              } catch (cleanupError) {
-                console.error('フォールバック: 一時ディレクトリの削除に失敗しました:', cleanupError);
-              }
-              
-              if (transcription && transcription.trim().length > 0) {
-                return transcription;
-              }
-              throw new Error('Speech-to-Text文字起こし結果が空でした');
-            } catch (processingError) {
-              // 一時ファイルの削除
-              this.cleanupTempFiles(tempFiles);
-              
-              // 一時ディレクトリの削除
-              try {
-                if (tempDir && fs.existsSync(tempDir)) {
-                  fs.rmdirSync(tempDir, { recursive: true });
-                }
-              } catch (cleanupError) {
-                console.error('フォールバック: 一時ディレクトリの削除に失敗しました:', cleanupError);
-              }
-              
-              throw processingError;
+            // ディレクトリの場合は再帰的に削除
+            if (fs.statSync(fullPath).isDirectory()) {
+              this.removeDirectoryRecursive(fullPath);
+              console.log(`一時ディレクトリを削除しました: ${fullPath}`);
+            } else {
+              fs.unlinkSync(fullPath);
+              console.log(`一時ファイルを削除しました: ${fullPath}`);
             }
-          } catch (speechError) {
-            console.error('すべての文字起こし方法が失敗しました', speechError);
-            throw new Error(`すべての文字起こし方法が失敗しました: ${speechError instanceof Error ? speechError.message : String(speechError)}`);
+          } catch (err) {
+            console.error(`一時ファイル/ディレクトリの削除に失敗しました: ${fullPath}`, err);
           }
         }
       }
     } catch (error) {
-      console.error('文字起こしエラー:', error);
-      throw new Error(`文字起こし処理に失敗しました: ${error instanceof Error ? error.message : String(error)}`);
+      console.error('一時ファイルのクリーンアップ中にエラーが発生しました:', error);
+    }
+  }
+
+  // ディレクトリを再帰的に削除する関数
+  private removeDirectoryRecursive(dirPath: string): void {
+    if (fs.existsSync(dirPath)) {
+      fs.readdirSync(dirPath).forEach((file) => {
+        const curPath = path.join(dirPath, file);
+        if (fs.statSync(curPath).isDirectory()) {
+          // 再帰的にサブディレクトリを削除
+          this.removeDirectoryRecursive(curPath);
+        } else {
+          // ファイルを削除
+          fs.unlinkSync(curPath);
+        }
+      });
+      // 空になったディレクトリを削除
+      fs.rmdirSync(dirPath);
     }
   }
 
@@ -336,17 +386,70 @@ export class TranscriptionService {
     });
   }
 
-  // 一時ファイル削除関数
-  private cleanupTempFiles(filePaths: string[]): void {
-    for (const filePath of filePaths) {
+  // Google Cloud Speech-to-Textを使用した文字起こし
+  private async transcribeWithSpeechToText(audioPath: string): Promise<string> {
+    let wavPath = '';
+    try {
+      console.log(`Cloud Speech-to-Textを使用して文字起こしを開始: ${audioPath}`);
+      
+      // 音声ファイルをWAV形式に変換
+      wavPath = audioPath.replace(/\.[^/.]+$/, '') + '.wav';
+      
       try {
-        if (fs.existsSync(filePath)) {
-          fs.unlinkSync(filePath);
-          console.log(`一時ファイルを削除しました: ${filePath}`);
-        }
-      } catch (cleanupError: unknown) {
-        console.error(`一時ファイル ${filePath} の削除に失敗しました:`, cleanupError);
+        // 元の音声ファイルから直接WAVに変換
+        await this.convertAudioToWav(audioPath, wavPath);
+        console.log(`WAVに変換完了: ${wavPath}`);
+      } catch (convErr: unknown) {
+        console.error('音声フォーマット変換エラー:', convErr);
+        throw new Error(`音声ファイルの変換に失敗しました: ${convErr instanceof Error ? convErr.message : String(convErr)}`);
       }
+      
+      // WAVファイルの内容を読み込み
+      const audioBytes = fs.readFileSync(wavPath).toString('base64');
+      
+      // 処理が終わったらすぐに一時ファイルを削除
+      this.cleanupTempFiles([wavPath]);
+      
+      // Speech-to-Text APIリクエストの設定
+      const request = {
+        audio: {
+          content: audioBytes,
+        },
+        config: {
+          encoding: 'LINEAR16' as const, // WAVファイルのエンコーディング
+          sampleRateHertz: 16000,
+          languageCode: 'ja-JP',
+          model: 'default',
+          enableAutomaticPunctuation: true,
+          useEnhanced: true,
+          audioChannelCount: 1,
+        },
+      };
+      
+      // Speech-to-Text APIを呼び出し
+      const [response] = await this.speechClient.recognize(request);
+      
+      if (!response || !response.results || response.results.length === 0) {
+        console.warn('Speech-to-Text: 文字起こし結果が空です');
+        return '';
+      }
+      
+      // 結果を結合
+      const transcription = response.results
+        .map((result: any) => result.alternatives && result.alternatives[0] ? result.alternatives[0].transcript : '')
+        .join('\n')
+        .trim();
+      
+      console.log('Cloud Speech-to-Textでの文字起こしが完了しました');
+      
+      return transcription;
+    } catch (error: unknown) {
+      console.error('Speech-to-Text文字起こしエラー:', error);
+      // エラーが発生した場合も一時ファイルを削除
+      if (wavPath) {
+        this.cleanupTempFiles([wavPath]);
+      }
+      throw new Error(`Speech-to-Text文字起こしエラー: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 
@@ -400,68 +503,6 @@ export class TranscriptionService {
     } catch (error: unknown) {
       console.error('Gemini APIでの文字起こし中にエラーが発生しました:', error);
       throw error instanceof Error ? error : new Error(String(error));
-    }
-  }
-
-  // Google Cloud Speech-to-Textを使用した文字起こし
-  private async transcribeWithSpeechToText(audioPath: string): Promise<string> {
-    try {
-      console.log(`Cloud Speech-to-Textを使用して文字起こしを開始: ${audioPath}`);
-      
-      // 音声ファイルをWAV形式に変換
-      const wavPath = audioPath.replace(/\.[^/.]+$/, '') + '.wav';
-      
-      try {
-        // 元の音声ファイルから直接WAVに変換
-        await this.convertAudioToWav(audioPath, wavPath);
-        console.log(`WAVに変換完了: ${wavPath}`);
-      } catch (convErr: unknown) {
-        console.error('音声フォーマット変換エラー:', convErr);
-        throw new Error(`音声ファイルの変換に失敗しました: ${convErr instanceof Error ? convErr.message : String(convErr)}`);
-      }
-      
-      // WAVファイルの内容を読み込み
-      const audioBytes = fs.readFileSync(wavPath).toString('base64');
-      
-      // Speech-to-Text APIリクエストの設定
-      const request = {
-        audio: {
-          content: audioBytes,
-        },
-        config: {
-          encoding: 'LINEAR16' as const, // WAVファイルのエンコーディング
-          sampleRateHertz: 16000,
-          languageCode: 'ja-JP',
-          model: 'default',
-          enableAutomaticPunctuation: true,
-          useEnhanced: true,
-          audioChannelCount: 1,
-        },
-      };
-      
-      // Speech-to-Text APIを呼び出し
-      const [response] = await this.speechClient.recognize(request);
-      
-      if (!response || !response.results || response.results.length === 0) {
-        console.warn('Speech-to-Text: 文字起こし結果が空です');
-        return '';
-      }
-      
-      // 結果を結合
-      const transcription = response.results
-        .map((result: any) => result.alternatives && result.alternatives[0] ? result.alternatives[0].transcript : '')
-        .join('\n')
-        .trim();
-      
-      console.log('Cloud Speech-to-Textでの文字起こしが完了しました');
-      
-      // 一時音声ファイルを削除
-      this.cleanupTempFiles([wavPath]);
-      
-      return transcription;
-    } catch (error: unknown) {
-      console.error('Speech-to-Text文字起こしエラー:', error);
-      throw new Error(`Speech-to-Text文字起こしエラー: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 
