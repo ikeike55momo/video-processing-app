@@ -48,6 +48,7 @@ export class TranscriptionService {
   async transcribeAudio(fileUrl: string): Promise<string> {
     let localFilePath = '';
     let tempDir = '';
+    let tempFiles: string[] = [];
     
     try {
       console.log(`文字起こし処理を開始: ${fileUrl}`);
@@ -58,6 +59,7 @@ export class TranscriptionService {
       
       // ファイルのダウンロード
       localFilePath = await this.downloadFile(fileUrl, tempDir);
+      tempFiles.push(localFilePath);
       console.log(`ファイルのダウンロード完了: ${localFilePath}`);
       
       // ファイル形式を確認
@@ -68,6 +70,7 @@ export class TranscriptionService {
       if (['.mp4', '.mov', '.avi', '.mkv', '.webm'].includes(fileExt)) {
         console.log('動画ファイルから音声を抽出します');
         audioFilePath = path.join(tempDir, `audio-${crypto.randomBytes(4).toString('hex')}.mp3`);
+        tempFiles.push(audioFilePath);
         await this.extractAudioFromVideo(localFilePath, audioFilePath);
         console.log(`音声抽出完了: ${audioFilePath}`);
       }
@@ -77,44 +80,59 @@ export class TranscriptionService {
       const geminiTranscript = await this.transcribeWithGemini(audioFilePath);
       console.log('Gemini Flashでの文字起こし完了');
       
-      // Cloud Speech-to-Textでの文字起こし
-      console.log('Cloud Speech-to-Textでの文字起こしを開始');
-      const speechToTextTranscript = await this.transcribeWithSpeechToText(audioFilePath);
-      console.log('Cloud Speech-to-Textでの文字起こし完了');
+      let speechToTextTranscript = '';
+      let speechToTextError: Error | null = null;
+      
+      // Cloud Speech-to-Textでの文字起こし（エラーを捕捉）
+      try {
+        console.log('Cloud Speech-to-Textでの文字起こしを開始');
+        speechToTextTranscript = await this.transcribeWithSpeechToText(audioFilePath);
+        console.log('Cloud Speech-to-Textでの文字起こし完了');
+      } catch (sttError: unknown) {
+        speechToTextError = sttError as Error;
+        console.error('Cloud Speech-to-Textでの文字起こしはスキップされます:', sttError instanceof Error ? sttError.message : String(sttError));
+      }
+      
+      // Speech-to-Textが失敗した場合はGemini結果のみを返す
+      if (speechToTextError || !speechToTextTranscript) {
+        console.log('Gemini Flashの結果のみを使用します');
+        return geminiTranscript;
+      }
       
       // 両方の結果をマージ
       console.log('両方の文字起こし結果をマージします');
-      const mergedTranscript = await this.mergeTranscripts(geminiTranscript, speechToTextTranscript);
-      
-      return mergedTranscript;
-    } catch (error) {
+      try {
+        const mergedTranscript = await this.mergeTranscripts(geminiTranscript, speechToTextTranscript);
+        return mergedTranscript;
+      } catch (mergeError: unknown) {
+        console.error('マージ処理中にエラーが発生しました:', mergeError);
+        // マージに失敗した場合はGemini結果を優先
+        return geminiTranscript;
+      }
+    } catch (error: unknown) {
       console.error('文字起こし処理中にエラーが発生しました:', error);
       
-      // エラー発生時、どちらかの結果が得られていれば返す
-      if (error instanceof Error && error.message === 'MERGE_FAILED') {
-        try {
-          // Gemini Flashでの文字起こし（再試行）
-          console.log('Gemini Flashでの文字起こしを再試行');
-          const geminiTranscript = await this.transcribeWithGemini(localFilePath);
-          return geminiTranscript;
-        } catch (retryError) {
-          console.error('Gemini Flashでの再試行に失敗:', retryError);
-          throw new Error('すべての文字起こし方法が失敗しました');
-        }
+      // どちらかの結果が得られていれば返す（Gemini優先）
+      try {
+        // Gemini Flashでの文字起こし（再試行）
+        console.log('Gemini Flashでの文字起こしを再試行');
+        const geminiTranscript = await this.transcribeWithGemini(localFilePath);
+        return geminiTranscript;
+      } catch (retryError: unknown) {
+        console.error('Gemini Flashでの再試行に失敗:', retryError);
+        throw new Error('すべての文字起こし方法が失敗しました');
       }
-      
-      throw error;
     } finally {
       // 一時ファイルの削除
+      this.cleanupTempFiles(tempFiles);
+      
+      // 一時ディレクトリの削除
       try {
-        if (localFilePath && fs.existsSync(localFilePath)) {
-          fs.unlinkSync(localFilePath);
-        }
         if (tempDir && fs.existsSync(tempDir)) {
           fs.rmdirSync(tempDir, { recursive: true });
         }
-      } catch (cleanupError) {
-        console.error('一時ファイルの削除に失敗しました:', cleanupError);
+      } catch (cleanupError: unknown) {
+        console.error('一時ディレクトリの削除に失敗しました:', cleanupError);
       }
     }
   }
@@ -227,10 +245,40 @@ export class TranscriptionService {
           console.log('音声抽出が完了しました');
           resolve();
         })
-        .on('error', (err: Error) => {
+        .on('error', (err: unknown) => {
           console.error('音声抽出中にエラーが発生しました:', err);
           reject(err);
         });
+    });
+  }
+
+  // 音声ファイルをWAVに変換する関数
+  private async convertAudioToWav(inputPath: string, outputPath: string): Promise<void> {
+    return new Promise((resolve, reject) => {
+      console.log(`音声ファイルをWAVに変換: ${inputPath} -> ${outputPath}`);
+      
+      const ffmpeg = require('fluent-ffmpeg');
+      const ffmpegPath = require('ffmpeg-static');
+      ffmpeg.setFfmpegPath(ffmpegPath);
+      
+      ffmpeg(inputPath)
+        .outputOptions([
+          '-vn',                // 映像を除去
+          '-acodec pcm_s16le',  // PCM 16bit LEエンコード（WAV標準）
+          '-ar 16000',          // サンプルレート16kHz
+          '-ac 1',              // モノラルチャンネル
+          '-f wav'              // WAV形式を明示的に指定
+        ])
+        .output(outputPath)
+        .on('end', () => {
+          console.log('WAVへの変換が完了しました');
+          resolve();
+        })
+        .on('error', (err: unknown) => {
+          console.error('WAVへの変換中にエラーが発生しました:', err);
+          reject(err);
+        })
+        .run();
     });
   }
 
@@ -248,18 +296,44 @@ export class TranscriptionService {
           '-vn',                // 映像を除去（既に音声ファイルの場合も安全）
           '-acodec flac',       // FLACエンコーダを使用
           '-ar 16000',          // サンプルレート16kHz（Speech-to-Textの推奨値）
-          '-ac 1'               // モノラルチャンネル
+          '-ac 1',              // モノラルチャンネル
+          '-f flac'             // 明示的にFLAC形式を指定
         ])
-        .save(outputPath)
-        .on('end', () => {
-          console.log('FLACへの変換が完了しました');
-          resolve();
+        .output(outputPath)
+        .on('start', (commandLine: string) => {
+          console.log('FFmpeg実行コマンド:', commandLine);
         })
-        .on('error', (err: Error) => {
+        .on('end', () => {
+          // ファイルの存在と最小サイズを確認
+          if (fs.existsSync(outputPath) && fs.statSync(outputPath).size > 100) {
+            console.log('FLACへの変換が完了しました');
+            resolve();
+          } else {
+            const error = new Error('変換されたFLACファイルが無効です');
+            console.error(error);
+            reject(error);
+          }
+        })
+        .on('error', (err: unknown) => {
           console.error('FLACへの変換中にエラーが発生しました:', err);
           reject(err);
-        });
+        })
+        .run();
     });
+  }
+
+  // 一時ファイル削除関数
+  private cleanupTempFiles(filePaths: string[]): void {
+    for (const filePath of filePaths) {
+      try {
+        if (fs.existsSync(filePath)) {
+          fs.unlinkSync(filePath);
+          console.log(`一時ファイルを削除しました: ${filePath}`);
+        }
+      } catch (cleanupError: unknown) {
+        console.error(`一時ファイル ${filePath} の削除に失敗しました:`, cleanupError);
+      }
+    }
   }
 
   // Gemini APIを使用した文字起こし
@@ -309,9 +383,9 @@ export class TranscriptionService {
       
       console.log('Gemini APIでの文字起こしが完了しました');
       return transcription;
-    } catch (error) {
+    } catch (error: unknown) {
       console.error('Gemini APIでの文字起こし中にエラーが発生しました:', error);
-      throw error;
+      throw error instanceof Error ? error : new Error(String(error));
     }
   }
 
@@ -320,10 +394,27 @@ export class TranscriptionService {
     try {
       console.log(`Cloud Speech-to-Textを使用して文字起こしを開始: ${audioPath}`);
       
-      // 音声ファイルをFLAC形式に変換
+      // 音声ファイルを直接WAV形式に変換
+      const wavPath = audioPath.replace(/\.[^/.]+$/, '') + '.wav';
       const flacPath = audioPath.replace(/\.[^/.]+$/, '') + '.flac';
-      await this.convertAudioToFlac(audioPath, flacPath);
-      console.log(`FLACに変換完了: ${flacPath}`);
+      
+      try {
+        // まずWAVに変換（安定性のため中間フォーマットとして使用）
+        await this.convertAudioToWav(audioPath, wavPath);
+        console.log(`WAVに変換完了: ${wavPath}`);
+        
+        // WAVからFLACに変換
+        await this.convertAudioToFlac(wavPath, flacPath);
+        console.log(`FLACに変換完了: ${flacPath}`);
+      } catch (convErr: unknown) {
+        console.error('音声フォーマット変換エラー:', convErr);
+        throw new Error(`音声フォーマット変換に失敗しました: ${convErr instanceof Error ? convErr.message : String(convErr)}`);
+      }
+      
+      // ファイル存在確認
+      if (!fs.existsSync(flacPath) || fs.statSync(flacPath).size < 100) {
+        throw new Error('変換されたFLACファイルが見つからないか無効です');
+      }
       
       // FLAC音声ファイルを読み込み
       const audioBytes = fs.readFileSync(flacPath).toString('base64');
@@ -355,20 +446,19 @@ export class TranscriptionService {
       
       console.log('Cloud Speech-to-Textでの文字起こしが完了しました');
       
-      // 一時FLAC音声ファイルを削除
-      try {
-        if (fs.existsSync(flacPath)) {
-          fs.unlinkSync(flacPath);
-          console.log(`一時FLACファイルを削除しました: ${flacPath}`);
-        }
-      } catch (cleanupError) {
-        console.error('一時FLACファイルの削除に失敗しました:', cleanupError);
-      }
+      // 一時音声ファイルを削除
+      this.cleanupTempFiles([wavPath, flacPath]);
       
       return transcription;
-    } catch (error) {
+    } catch (error: unknown) {
       console.error('Cloud Speech-to-Textでの文字起こし中にエラーが発生しました:', error);
-      throw error;
+      
+      // エラーメッセージをより詳細に
+      const errorMessage = error instanceof Error 
+        ? `Cloud Speech-to-Textでの文字起こしに失敗しました: ${error.message}`
+        : 'Cloud Speech-to-Textでの文字起こしに失敗しました';
+      
+      throw new Error(errorMessage);
     }
   }
 
@@ -376,14 +466,6 @@ export class TranscriptionService {
   private async mergeTranscripts(geminiTranscript: string, speechToTextTranscript: string): Promise<string> {
     try {
       console.log('両方の文字起こし結果をマージします');
-      
-      // どちらかの結果が空の場合は、もう一方を返す
-      if (!geminiTranscript || geminiTranscript.trim() === '') {
-        return speechToTextTranscript;
-      }
-      if (!speechToTextTranscript || speechToTextTranscript.trim() === '') {
-        return geminiTranscript;
-      }
       
       // Geminiモデルの取得
       const model = this.genAI.getGenerativeModel({ model: this.geminiModel });
@@ -423,7 +505,7 @@ export class TranscriptionService {
       
       console.log('文字起こし結果のマージが完了しました');
       return mergedTranscript;
-    } catch (error) {
+    } catch (error: unknown) {
       console.error('文字起こし結果のマージ中にエラーが発生しました:', error);
       // マージに失敗した場合は特定のエラーを投げる
       throw new Error('MERGE_FAILED');
