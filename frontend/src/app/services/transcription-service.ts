@@ -18,7 +18,7 @@ export class TranscriptionService {
   private speechClient: SpeechClient;
   private geminiModel: string;
   private geminiMergeModel: string;
-  private s3Client: S3Client;
+  private s3Client: any;
 
   constructor() {
     // APIキーの取得
