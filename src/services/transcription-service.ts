@@ -234,6 +234,34 @@ export class TranscriptionService {
     });
   }
 
+  // 音声ファイルをCloud Speech-to-Text用にFLACに変換
+  private async convertAudioToFlac(inputPath: string, outputPath: string): Promise<void> {
+    return new Promise((resolve, reject) => {
+      console.log(`音声ファイルをFLACに変換: ${inputPath} -> ${outputPath}`);
+      
+      const ffmpeg = require('fluent-ffmpeg');
+      const ffmpegPath = require('ffmpeg-static');
+      ffmpeg.setFfmpegPath(ffmpegPath);
+      
+      ffmpeg(inputPath)
+        .outputOptions([
+          '-vn',                // 映像を除去（既に音声ファイルの場合も安全）
+          '-acodec flac',       // FLACエンコーダを使用
+          '-ar 16000',          // サンプルレート16kHz（Speech-to-Textの推奨値）
+          '-ac 1'               // モノラルチャンネル
+        ])
+        .save(outputPath)
+        .on('end', () => {
+          console.log('FLACへの変換が完了しました');
+          resolve();
+        })
+        .on('error', (err: Error) => {
+          console.error('FLACへの変換中にエラーが発生しました:', err);
+          reject(err);
+        });
+    });
+  }
+
   // Gemini APIを使用した文字起こし
   private async transcribeWithGemini(audioPath: string): Promise<string> {
     try {
@@ -292,8 +320,13 @@ export class TranscriptionService {
     try {
       console.log(`Cloud Speech-to-Textを使用して文字起こしを開始: ${audioPath}`);
       
-      // 音声ファイルを読み込み
-      const audioBytes = fs.readFileSync(audioPath).toString('base64');
+      // 音声ファイルをFLAC形式に変換
+      const flacPath = audioPath.replace(/\.[^/.]+$/, '') + '.flac';
+      await this.convertAudioToFlac(audioPath, flacPath);
+      console.log(`FLACに変換完了: ${flacPath}`);
+      
+      // FLAC音声ファイルを読み込み
+      const audioBytes = fs.readFileSync(flacPath).toString('base64');
       
       // Speech-to-Text APIへのリクエスト設定
       const request = {
@@ -301,8 +334,8 @@ export class TranscriptionService {
           content: audioBytes,
         },
         config: {
-          encoding: 'MP3' as const,
-          sampleRateHertz: 44100,
+          encoding: 'FLAC' as const,
+          sampleRateHertz: 16000,
           languageCode: 'ja-JP', // 日本語を優先
           alternativeLanguageCodes: ['en-US'], // 英語もサポート
           enableAutomaticPunctuation: true,
@@ -321,6 +354,17 @@ export class TranscriptionService {
         .join('\n') || '';
       
       console.log('Cloud Speech-to-Textでの文字起こしが完了しました');
+      
+      // 一時FLAC音声ファイルを削除
+      try {
+        if (fs.existsSync(flacPath)) {
+          fs.unlinkSync(flacPath);
+          console.log(`一時FLACファイルを削除しました: ${flacPath}`);
+        }
+      } catch (cleanupError) {
+        console.error('一時FLACファイルの削除に失敗しました:', cleanupError);
+      }
+      
       return transcription;
     } catch (error) {
       console.error('Cloud Speech-to-Textでの文字起こし中にエラーが発生しました:', error);
