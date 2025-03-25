@@ -48,3 +48,7 @@ yarn-error.log*
 
 # デバッグ
 .debug
+
+# Google Cloud認証情報
+google-credentials.json
+google-credentials
