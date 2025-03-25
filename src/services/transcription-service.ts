@@ -67,11 +67,66 @@ export class TranscriptionService {
           
           // 3. 最後にCloud Speech-to-Textのみを試みる
           try {
-            const transcription = await this.transcribeWithSpeechToText(audioPath);
-            if (transcription && transcription.trim().length > 0) {
-              return transcription;
+            // 動画ファイルの場合は音声を抽出する必要がある
+            const fileExt = path.extname(audioPath).toLowerCase();
+            const tempDir = path.join(os.tmpdir(), 'transcription-' + crypto.randomBytes(6).toString('hex'));
+            fs.mkdirSync(tempDir, { recursive: true });
+            
+            let localFilePath = '';
+            let audioFilePath = '';
+            const tempFiles: string[] = [];
+            
+            try {
+              // ファイルのダウンロード
+              localFilePath = await this.downloadFile(audioPath, tempDir);
+              tempFiles.push(localFilePath);
+              console.log(`フォールバック: ファイルのダウンロード完了: ${localFilePath}`);
+              
+              audioFilePath = localFilePath;
+              
+              // 動画ファイルの場合は音声を抽出
+              if (['.mp4', '.mov', '.avi', '.mkv', '.webm'].includes(fileExt)) {
+                console.log('フォールバック: 動画ファイルから音声を抽出します');
+                audioFilePath = path.join(tempDir, `audio-${crypto.randomBytes(4).toString('hex')}.mp3`);
+                tempFiles.push(audioFilePath);
+                await this.extractAudioFromVideo(localFilePath, audioFilePath);
+                console.log(`フォールバック: 音声抽出完了: ${audioFilePath}`);
+              }
+              
+              // Speech-to-Textで文字起こし
+              const transcription = await this.transcribeWithSpeechToText(audioFilePath);
+              
+              // 一時ファイルの削除
+              this.cleanupTempFiles(tempFiles);
+              
+              // 一時ディレクトリの削除
+              try {
+                if (tempDir && fs.existsSync(tempDir)) {
+                  fs.rmdirSync(tempDir, { recursive: true });
+                }
+              } catch (cleanupError) {
+                console.error('フォールバック: 一時ディレクトリの削除に失敗しました:', cleanupError);
+              }
+              
+              if (transcription && transcription.trim().length > 0) {
+                return transcription;
+              }
+              throw new Error('Speech-to-Text文字起こし結果が空でした');
+            } catch (processingError) {
+              // 一時ファイルの削除
+              this.cleanupTempFiles(tempFiles);
+              
+              // 一時ディレクトリの削除
+              try {
+                if (tempDir && fs.existsSync(tempDir)) {
+                  fs.rmdirSync(tempDir, { recursive: true });
+                }
+              } catch (cleanupError) {
+                console.error('フォールバック: 一時ディレクトリの削除に失敗しました:', cleanupError);
+              }
+              
+              throw processingError;
             }
-            throw new Error('Speech-to-Text文字起こし結果が空でした');
           } catch (speechError) {
             console.error('すべての文字起こし方法が失敗しました', speechError);
             throw new Error(`すべての文字起こし方法が失敗しました: ${speechError instanceof Error ? speechError.message : String(speechError)}`);
