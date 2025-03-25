@@ -266,11 +266,9 @@ export class TranscriptionService {
       ffmpeg(inputPath)
         .outputOptions([
           '-vn',                // 映像を除去
-          '-acodec pcm_s16le',  // PCM 16bit LEエンコード（WAV標準）
+          '-acodec pcm_s16le',  // PCM 16bit LEエンコード（LINEAR16形式）
           '-ar 16000',          // サンプルレート16kHz
           '-ac 1',              // モノラルチャンネル
-          '-sample_fmt s16',    // 16ビット形式を明示的に指定
-          '-strict experimental', // より厳格なフォーマット準拠
           '-f wav'              // WAV形式を明示的に指定
         ])
         .output(outputPath)
@@ -410,20 +408,20 @@ export class TranscriptionService {
     try {
       console.log(`Cloud Speech-to-Textを使用して文字起こしを開始: ${audioPath}`);
       
-      // 音声ファイルをFLAC形式に変換
-      const flacPath = audioPath.replace(/\.[^/.]+$/, '') + '.flac';
+      // 音声ファイルをWAV形式に変換
+      const wavPath = audioPath.replace(/\.[^/.]+$/, '') + '.wav';
       
       try {
-        // 元の音声ファイルから直接FLACに変換
-        await this.convertAudioToFlac(audioPath, flacPath);
-        console.log(`FLACに変換完了: ${flacPath}`);
+        // 元の音声ファイルから直接WAVに変換
+        await this.convertAudioToWav(audioPath, wavPath);
+        console.log(`WAVに変換完了: ${wavPath}`);
       } catch (convErr: unknown) {
         console.error('音声フォーマット変換エラー:', convErr);
         throw new Error(`音声ファイルの変換に失敗しました: ${convErr instanceof Error ? convErr.message : String(convErr)}`);
       }
       
-      // FLACファイルの内容を読み込み
-      const audioBytes = fs.readFileSync(flacPath).toString('base64');
+      // WAVファイルの内容を読み込み
+      const audioBytes = fs.readFileSync(wavPath).toString('base64');
       
       // Speech-to-Text APIリクエストの設定
       const request = {
@@ -431,7 +429,7 @@ export class TranscriptionService {
           content: audioBytes,
         },
         config: {
-          encoding: 'FLAC' as const, // 型を明示的に指定
+          encoding: 'LINEAR16' as const, // WAVファイルのエンコーディング
           sampleRateHertz: 16000,
           languageCode: 'ja-JP',
           model: 'default',
@@ -458,7 +456,7 @@ export class TranscriptionService {
       console.log('Cloud Speech-to-Textでの文字起こしが完了しました');
       
       // 一時音声ファイルを削除
-      this.cleanupTempFiles([flacPath]);
+      this.cleanupTempFiles([wavPath]);
       
       return transcription;
     } catch (error: unknown) {
