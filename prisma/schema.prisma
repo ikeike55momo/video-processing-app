@@ -18,18 +18,22 @@ datasource db {
 }
 
 model Record {
-  id             String    @id @default(uuid())
-  file_key       String    // R2のオブジェクトキー
-  r2_bucket      String?   // バケット名（複数バケットを使用する場合のため）
-  transcript_text String?   @db.Text
-  summary_text   String?   @db.Text
-  article_text   String?   @db.Text
-  error          String?   @db.Text
-  status         Status    @default(UPLOADED)
-  processing_step ProcessingStep? // 現在の処理ステップを追跡
-  created_at     DateTime  @default(now())
-  updated_at     DateTime  @updatedAt
-  deleted_at     DateTime?
+  id                 String          @id @default(uuid())
+  fileUrl            String          // ファイルのURL（R2の署名付きURLまたは公開URL）
+  file_key           String          // R2のオブジェクトキー
+  r2_bucket          String?         // バケット名（複数バケットを使用する場合のため）
+  transcription      String?         @db.Text
+  transcriptionStatus ProcessStatus  @default(PENDING)
+  summary            String?         @db.Text
+  summaryStatus      ProcessStatus   @default(PENDING)
+  article            String?         @db.Text
+  articleStatus      ProcessStatus   @default(PENDING)
+  errorMessage       String?         @db.Text
+  status             Status          @default(UPLOADED)
+  processing_step    ProcessingStep? // 現在の処理ステップを追跡
+  created_at         DateTime        @default(now())
+  updated_at         DateTime        @updatedAt
+  deleted_at         DateTime?
 
   @@index([status])
   @@map("records")
@@ -38,9 +42,14 @@ model Record {
 enum Status {
   UPLOADED    // アップロード済み、まだ処理開始していない
   PROCESSING  // 処理中
-  TRANSCRIBED // 文字起こし完了
-  SUMMARIZED  // 要約完了
-  DONE        // すべての処理完了
+  COMPLETED   // すべての処理完了
+  ERROR       // エラー発生
+}
+
+enum ProcessStatus {
+  PENDING     // 処理待ち
+  PROCESSING  // 処理中
+  COMPLETED   // 処理完了
   ERROR       // エラー発生
 }
 
