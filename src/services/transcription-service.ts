@@ -292,7 +292,7 @@ export class TranscriptionService {
     });
   }
 
-  // 音声ファイルをCloud Speech-to-Text用にFLACに変換
+  // 音声ファイルをFLACに変換する関数
   private async convertAudioToFlac(inputPath: string, outputPath: string): Promise<void> {
     return new Promise((resolve, reject) => {
       console.log(`音声ファイルをFLACに変換: ${inputPath} -> ${outputPath}`);
@@ -303,14 +303,13 @@ export class TranscriptionService {
       
       ffmpeg(inputPath)
         .outputOptions([
-          '-vn',                // 映像を除去（既に音声ファイルの場合も安全）
-          '-acodec flac',       // FLACエンコーダを使用
+          '-vn',                // 映像を除去
+          '-acodec flac',       // FLACエンコーダーを使用
           '-ar 16000',          // サンプルレート16kHz（Speech-to-Textの推奨値）
           '-ac 1',              // モノラルチャンネル
-          '-sample_fmt s16',    // 16ビット形式を明示的に指定
-          '-compression_level 8', // 高品質なFLAC圧縮
-          '-strict experimental', // より厳格なフォーマット準拠
-          '-f flac'             // 明示的にFLAC形式を指定
+          '-bits_per_raw_sample 16', // 16ビット深度
+          '-compression_level 8',    // 高圧縮率（0-12、8は標準的な値）
+          '-f flac'             // FLAC形式を明示的に指定
         ])
         .output(outputPath)
         .on('start', (commandLine: string) => {
@@ -320,13 +319,6 @@ export class TranscriptionService {
           // ファイルの存在と最小サイズを確認
           if (fs.existsSync(outputPath) && fs.statSync(outputPath).size > 100) {
             console.log('FLACへの変換が完了しました');
-            // FLACファイルの詳細情報を出力
-            try {
-              const stats = fs.statSync(outputPath);
-              console.log(`FLAC変換結果: サイズ=${stats.size}バイト`);
-            } catch (statErr) {
-              console.error('FLACファイル情報取得エラー:', statErr);
-            }
             resolve();
           } else {
             const error = new Error('変換されたFLACファイルが無効です');
@@ -334,8 +326,8 @@ export class TranscriptionService {
             reject(error);
           }
         })
-        .on('error', (err: unknown) => {
-          console.error('FLACへの変換中にエラーが発生しました:', err);
+        .on('error', (err: Error) => {
+          console.error('FLAC変換エラー:', err);
           reject(err);
         })
         .run();
@@ -414,79 +406,60 @@ export class TranscriptionService {
     try {
       console.log(`Cloud Speech-to-Textを使用して文字起こしを開始: ${audioPath}`);
       
-      // 音声ファイルを直接WAV形式に変換
-      const wavPath = audioPath.replace(/\.[^/.]+$/, '') + '.wav';
+      // 音声ファイルをFLAC形式に変換
       const flacPath = audioPath.replace(/\.[^/.]+$/, '') + '.flac';
       
       try {
-        // まずWAVに変換（安定性のため中間フォーマットとして使用）
-        await this.convertAudioToWav(audioPath, wavPath);
-        console.log(`WAVに変換完了: ${wavPath}`);
-        
-        // WAVからFLACに変換
-        await this.convertAudioToFlac(wavPath, flacPath);
+        // 元の音声ファイルから直接FLACに変換
+        await this.convertAudioToFlac(audioPath, flacPath);
         console.log(`FLACに変換完了: ${flacPath}`);
       } catch (convErr: unknown) {
         console.error('音声フォーマット変換エラー:', convErr);
-        throw new Error(`音声フォーマット変換に失敗しました: ${convErr instanceof Error ? convErr.message : String(convErr)}`);
+        throw new Error(`音声ファイルの変換に失敗しました: ${convErr instanceof Error ? convErr.message : String(convErr)}`);
       }
       
-      // ファイル存在確認
-      if (!fs.existsSync(flacPath) || fs.statSync(flacPath).size < 100) {
-        throw new Error('変換されたFLACファイルが見つからないか無効です');
-      }
-      
-      // FLAC音声ファイルを読み込み
+      // FLACファイルの内容を読み込み
       const audioBytes = fs.readFileSync(flacPath).toString('base64');
       
-      // Speech-to-Text APIへのリクエスト設定
+      // Speech-to-Text APIリクエストの設定
       const request = {
         audio: {
           content: audioBytes,
         },
         config: {
-          encoding: 'FLAC' as const,
+          encoding: 'FLAC' as const, // 型を明示的に指定
           sampleRateHertz: 16000,
-          languageCode: 'ja-JP', // 日本語を優先
-          alternativeLanguageCodes: ['en-US'], // 英語もサポート
+          languageCode: 'ja-JP',
+          model: 'default',
           enableAutomaticPunctuation: true,
-          enableWordTimeOffsets: false,
-          model: 'default', // 'default', 'phone_call', 'video', 'latest_short'など
-          useEnhanced: true, // 拡張モデルを使用
-          audioChannelCount: 1, // モノラルを明示的に指定
+          useEnhanced: true,
+          audioChannelCount: 1,
         },
       };
       
-      console.log('Speech-to-Text APIリクエスト設定:', JSON.stringify({
-        encoding: request.config.encoding,
-        sampleRateHertz: request.config.sampleRateHertz,
-        languageCode: request.config.languageCode,
-        audioChannelCount: request.config.audioChannelCount
-      }));
-      
-      // Speech-to-Text APIへのリクエスト
+      // Speech-to-Text APIを呼び出し
       const [response] = await this.speechClient.recognize(request);
       
-      // 結果の処理
+      if (!response || !response.results || response.results.length === 0) {
+        console.warn('Speech-to-Text: 文字起こし結果が空です');
+        return '';
+      }
+      
+      // 結果を結合
       const transcription = response.results
-        ?.map(result => result.alternatives?.[0]?.transcript || '')
-        .join('\n') || '';
+        .map((result: any) => result.alternatives && result.alternatives[0] ? result.alternatives[0].transcript : '')
+        .join('\n')
+        .trim();
       
       console.log('Cloud Speech-to-Textでの文字起こしが完了しました');
       
       // 一時音声ファイルを削除
-      this.cleanupTempFiles([wavPath, flacPath]);
+      this.cleanupTempFiles([flacPath]);
       
       return transcription;
     } catch (error: unknown) {
-      console.error('Cloud Speech-to-Textでの文字起こし中にエラーが発生しました:', error);
-      
-      // エラーメッセージをより詳細に
-      const errorMessage = error instanceof Error 
-        ? `Cloud Speech-to-Textでの文字起こしに失敗しました: ${error.message}`
-        : 'Cloud Speech-to-Textでの文字起こしに失敗しました';
-      
-      throw new Error(errorMessage);
+      console.error('Speech-to-Text文字起こしエラー:', error);
+      throw new Error(`Speech-to-Text文字起こしエラー: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 

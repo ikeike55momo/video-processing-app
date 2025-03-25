@@ -102,7 +102,6 @@ async function processJob() {
       where: { id: job.recordId },
       data: { 
         status: 'PROCESSING',
-        processing_step: 'TRANSCRIPTION'
       }
     });
 
@@ -120,14 +119,21 @@ async function processJob() {
     
     // 結果をデータベースに保存
     const fullTranscript = transcriptParts.join('\n\n');
-    await prisma.record.update({
-      where: { id: job.recordId },
-      data: { 
-        transcription: fullTranscript,
-        status: 'COMPLETED',
-        processing_step: null
-      }
-    });
+    
+    try {
+      await prisma.record.update({
+        where: { id: job.recordId },
+        data: { 
+          transcript_text: fullTranscript,
+          status: 'DONE' as any,
+        } as any
+      });
+      
+      console.log(`[${job.recordId}] 文字起こし結果をデータベースに保存しました`);
+    } catch (dbError: any) {
+      console.error(`[${job.recordId}] データベース更新エラー:`, dbError);
+      throw new Error(`データベース更新に失敗しました: ${dbError.message}`);
+    }
     
     // 要約キューにジョブを追加
     await addJob(SUMMARY_QUEUE, {
@@ -157,10 +163,9 @@ async function processJob() {
           data: { 
             status: 'ERROR',
             errorMessage: error instanceof Error ? error.message : String(error),
-            processing_step: null
-          }
+          } as any
         });
-      } catch (dbError) {
+      } catch (dbError: any) {
         console.error('Failed to update record status:', dbError);
       }
     }
