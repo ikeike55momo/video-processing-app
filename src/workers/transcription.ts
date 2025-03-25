@@ -123,8 +123,8 @@ async function processJob() {
     await prisma.record.update({
       where: { id: job.recordId },
       data: { 
-        transcript_text: fullTranscript,
-        status: 'TRANSCRIBED',
+        transcription: fullTranscript,
+        status: 'COMPLETED',
         processing_step: null
       }
     });
@@ -156,7 +156,7 @@ async function processJob() {
           where: { id: job.recordId },
           data: { 
             status: 'ERROR',
-            error: error instanceof Error ? error.message : String(error),
+            errorMessage: error instanceof Error ? error.message : String(error),
             processing_step: null
           }
         });
