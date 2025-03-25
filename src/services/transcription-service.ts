@@ -44,94 +44,43 @@ export class TranscriptionService {
     console.log('TranscriptionServiceを初期化しました');
   }
 
-  // 音声ファイルの文字起こし処理
-  async transcribeAudio(fileUrl: string): Promise<string> {
-    let localFilePath = '';
-    let tempDir = '';
-    let tempFiles: string[] = [];
+  // 音声ファイルを文字起こし（フォールバックメカニズム付き）
+  public async transcribeAudio(audioPath: string): Promise<string> {
+    console.log(`ファイルURLから文字起こしを開始: ${audioPath}`);
     
     try {
-      console.log(`文字起こし処理を開始: ${fileUrl}`);
-      
-      // 一時ディレクトリの作成
-      tempDir = path.join(os.tmpdir(), 'transcription-' + crypto.randomBytes(6).toString('hex'));
-      fs.mkdirSync(tempDir, { recursive: true });
-      
-      // ファイルのダウンロード
-      localFilePath = await this.downloadFile(fileUrl, tempDir);
-      tempFiles.push(localFilePath);
-      console.log(`ファイルのダウンロード完了: ${localFilePath}`);
-      
-      // ファイル形式を確認
-      const fileExt = path.extname(localFilePath).toLowerCase();
-      let audioFilePath = localFilePath;
-      
-      // 動画ファイルの場合は音声を抽出
-      if (['.mp4', '.mov', '.avi', '.mkv', '.webm'].includes(fileExt)) {
-        console.log('動画ファイルから音声を抽出します');
-        audioFilePath = path.join(tempDir, `audio-${crypto.randomBytes(4).toString('hex')}.mp3`);
-        tempFiles.push(audioFilePath);
-        await this.extractAudioFromVideo(localFilePath, audioFilePath);
-        console.log(`音声抽出完了: ${audioFilePath}`);
-      }
-      
-      // 両方の文字起こしを並列で実行
-      console.log('Gemini FlashとCloud Speech-to-Textでの文字起こしを並列で開始');
-      const [geminiPromise, speechToTextPromise] = await Promise.allSettled([
-        this.transcribeWithGemini(audioFilePath),
-        this.transcribeWithSpeechToText(audioFilePath)
-      ]);
-      
-      // 結果の取得
-      const geminiTranscript = geminiPromise.status === 'fulfilled' ? geminiPromise.value : '';
-      const speechToTextTranscript = speechToTextPromise.status === 'fulfilled' ? speechToTextPromise.value : '';
-      
-      // 結果のログ出力
-      console.log(`Gemini Flash結果: ${geminiPromise.status === 'fulfilled' ? '成功' : '失敗'}`);
-      console.log(`Cloud Speech-to-Text結果: ${speechToTextPromise.status === 'fulfilled' ? '成功' : '失敗'}`);
-      
-      // エラーログ
-      if (geminiPromise.status === 'rejected') {
-        console.error('Gemini Flashでの文字起こしに失敗:', geminiPromise.reason);
-      }
-      if (speechToTextPromise.status === 'rejected') {
-        console.error('Cloud Speech-to-Textでの文字起こしに失敗:', speechToTextPromise.reason);
-      }
-      
-      // どちらか一方でも成功していれば処理を続行
-      if (geminiTranscript || speechToTextTranscript) {
-        // 両方成功した場合はマージ
-        if (geminiTranscript && speechToTextTranscript) {
+      // 1. まず高精度な二重文字起こしを試みる
+      try {
+        return await this.processLocalFile(audioPath);
+      } catch (error) {
+        console.log('高精度文字起こしに失敗、フォールバック処理を開始します:', error);
+        
+        // 2. 次にGemini Flashのみを試みる
+        try {
+          const transcription = await this.transcribeWithGemini(audioPath);
+          if (transcription && transcription.trim().length > 0) {
+            return transcription;
+          }
+          throw new Error('Gemini文字起こし結果が空でした');
+        } catch (geminiError) {
+          console.log('Gemini文字起こしに失敗、Speech-to-Textにフォールバックします:', geminiError);
+          
+          // 3. 最後にCloud Speech-to-Textのみを試みる
           try {
-            console.log('両方の文字起こし結果をマージします');
-            return await this.mergeTranscripts(geminiTranscript, speechToTextTranscript);
-          } catch (mergeError: unknown) {
-            console.error('マージ処理中にエラーが発生しました:', mergeError);
-            // マージに失敗した場合はGemini結果を優先
-            return geminiTranscript || speechToTextTranscript;
+            const transcription = await this.transcribeWithSpeechToText(audioPath);
+            if (transcription && transcription.trim().length > 0) {
+              return transcription;
+            }
+            throw new Error('Speech-to-Text文字起こし結果が空でした');
+          } catch (speechError) {
+            console.error('すべての文字起こし方法が失敗しました', speechError);
+            throw new Error(`すべての文字起こし方法が失敗しました: ${speechError instanceof Error ? speechError.message : String(speechError)}`);
           }
         }
-        // どちらか一方のみ成功した場合はその結果を返す
-        return geminiTranscript || speechToTextTranscript;
       }
-      
-      // 両方失敗した場合はエラー
-      throw new Error('すべての文字起こし方法が失敗しました');
-    } catch (error: unknown) {
-      console.error('文字起こし処理中にエラーが発生しました:', error);
-      throw error instanceof Error ? error : new Error(String(error));
-    } finally {
-      // 一時ファイルの削除
-      this.cleanupTempFiles(tempFiles);
-      
-      // 一時ディレクトリの削除
-      try {
-        if (tempDir && fs.existsSync(tempDir)) {
-          fs.rmdirSync(tempDir, { recursive: true });
-        }
-      } catch (cleanupError: unknown) {
-        console.error('一時ディレクトリの削除に失敗しました:', cleanupError);
-      }
+    } catch (error) {
+      console.error('文字起こしエラー:', error);
+      throw new Error(`文字起こし処理に失敗しました: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 
@@ -510,6 +459,97 @@ export class TranscriptionService {
       console.error('文字起こし結果のマージ中にエラーが発生しました:', error);
       // マージに失敗した場合は特定のエラーを投げる
       throw new Error('MERGE_FAILED');
+    }
+  }
+
+  // ローカルファイルを処理する関数
+  private async processLocalFile(audioPath: string): Promise<string> {
+    let localFilePath = '';
+    let tempDir = '';
+    let tempFiles: string[] = [];
+    
+    try {
+      console.log(`文字起こし処理を開始: ${audioPath}`);
+      
+      // 一時ディレクトリの作成
+      tempDir = path.join(os.tmpdir(), 'transcription-' + crypto.randomBytes(6).toString('hex'));
+      fs.mkdirSync(tempDir, { recursive: true });
+      
+      // ファイルのダウンロード
+      localFilePath = await this.downloadFile(audioPath, tempDir);
+      tempFiles.push(localFilePath);
+      console.log(`ファイルのダウンロード完了: ${localFilePath}`);
+      
+      // ファイル形式を確認
+      const fileExt = path.extname(localFilePath).toLowerCase();
+      let audioFilePath = localFilePath;
+      
+      // 動画ファイルの場合は音声を抽出
+      if (['.mp4', '.mov', '.avi', '.mkv', '.webm'].includes(fileExt)) {
+        console.log('動画ファイルから音声を抽出します');
+        audioFilePath = path.join(tempDir, `audio-${crypto.randomBytes(4).toString('hex')}.mp3`);
+        tempFiles.push(audioFilePath);
+        await this.extractAudioFromVideo(localFilePath, audioFilePath);
+        console.log(`音声抽出完了: ${audioFilePath}`);
+      }
+      
+      // 両方の文字起こしを並列で実行
+      console.log('Gemini FlashとCloud Speech-to-Textでの文字起こしを並列で開始');
+      const [geminiPromise, speechToTextPromise] = await Promise.allSettled([
+        this.transcribeWithGemini(audioFilePath),
+        this.transcribeWithSpeechToText(audioFilePath)
+      ]);
+      
+      // 結果の取得
+      const geminiTranscript = geminiPromise.status === 'fulfilled' ? geminiPromise.value : '';
+      const speechToTextTranscript = speechToTextPromise.status === 'fulfilled' ? speechToTextPromise.value : '';
+      
+      // 結果のログ出力
+      console.log(`Gemini Flash結果: ${geminiPromise.status === 'fulfilled' ? '成功' : '失敗'}`);
+      console.log(`Cloud Speech-to-Text結果: ${speechToTextPromise.status === 'fulfilled' ? '成功' : '失敗'}`);
+      
+      // エラーログ
+      if (geminiPromise.status === 'rejected') {
+        console.error('Gemini Flashでの文字起こしに失敗:', geminiPromise.reason);
+      }
+      if (speechToTextPromise.status === 'rejected') {
+        console.error('Cloud Speech-to-Textでの文字起こしに失敗:', speechToTextPromise.reason);
+      }
+      
+      // どちらか一方でも成功していれば処理を続行
+      if (geminiTranscript || speechToTextTranscript) {
+        // 両方成功した場合はマージ
+        if (geminiTranscript && speechToTextTranscript) {
+          try {
+            console.log('両方の文字起こし結果をマージします');
+            return await this.mergeTranscripts(geminiTranscript, speechToTextTranscript);
+          } catch (mergeError: unknown) {
+            console.error('マージ処理中にエラーが発生しました:', mergeError);
+            // マージに失敗した場合はGemini結果を優先
+            return geminiTranscript || speechToTextTranscript;
+          }
+        }
+        // どちらか一方のみ成功した場合はその結果を返す
+        return geminiTranscript || speechToTextTranscript;
+      }
+      
+      // 両方失敗した場合はエラー
+      throw new Error('すべての文字起こし方法が失敗しました');
+    } catch (error: unknown) {
+      console.error('文字起こし処理中にエラーが発生しました:', error);
+      throw error instanceof Error ? error : new Error(String(error));
+    } finally {
+      // 一時ファイルの削除
+      this.cleanupTempFiles(tempFiles);
+      
+      // 一時ディレクトリの削除
+      try {
+        if (tempDir && fs.existsSync(tempDir)) {
+          fs.rmdirSync(tempDir, { recursive: true });
+        }
+      } catch (cleanupError: unknown) {
+        console.error('一時ディレクトリの削除に失敗しました:', cleanupError);
+      }
     }
   }
 }
