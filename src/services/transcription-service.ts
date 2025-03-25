@@ -265,12 +265,24 @@ export class TranscriptionService {
           '-acodec pcm_s16le',  // PCM 16bit LEエンコード（WAV標準）
           '-ar 16000',          // サンプルレート16kHz
           '-ac 1',              // モノラルチャンネル
+          '-sample_fmt s16',    // 16ビット形式を明示的に指定
+          '-strict experimental', // より厳格なフォーマット準拠
           '-f wav'              // WAV形式を明示的に指定
         ])
         .output(outputPath)
+        .on('start', (commandLine: string) => {
+          console.log('FFmpeg WAV変換コマンド:', commandLine);
+        })
         .on('end', () => {
-          console.log('WAVへの変換が完了しました');
-          resolve();
+          // ファイルの存在と最小サイズを確認
+          if (fs.existsSync(outputPath) && fs.statSync(outputPath).size > 100) {
+            console.log('WAVへの変換が完了しました');
+            resolve();
+          } else {
+            const error = new Error('変換されたWAVファイルが無効です');
+            console.error(error);
+            reject(error);
+          }
         })
         .on('error', (err: unknown) => {
           console.error('WAVへの変換中にエラーが発生しました:', err);
@@ -296,16 +308,25 @@ export class TranscriptionService {
           '-ar 16000',          // サンプルレート16kHz（Speech-to-Textの推奨値）
           '-ac 1',              // モノラルチャンネル
           '-sample_fmt s16',    // 16ビット形式を明示的に指定
+          '-compression_level 8', // 高品質なFLAC圧縮
+          '-strict experimental', // より厳格なフォーマット準拠
           '-f flac'             // 明示的にFLAC形式を指定
         ])
         .output(outputPath)
         .on('start', (commandLine: string) => {
-          console.log('FFmpeg実行コマンド:', commandLine);
+          console.log('FFmpeg FLAC変換コマンド:', commandLine);
         })
         .on('end', () => {
           // ファイルの存在と最小サイズを確認
           if (fs.existsSync(outputPath) && fs.statSync(outputPath).size > 100) {
             console.log('FLACへの変換が完了しました');
+            // FLACファイルの詳細情報を出力
+            try {
+              const stats = fs.statSync(outputPath);
+              console.log(`FLAC変換結果: サイズ=${stats.size}バイト`);
+            } catch (statErr) {
+              console.error('FLACファイル情報取得エラー:', statErr);
+            }
             resolve();
           } else {
             const error = new Error('変換されたFLACファイルが無効です');
@@ -432,8 +453,16 @@ export class TranscriptionService {
           enableWordTimeOffsets: false,
           model: 'default', // 'default', 'phone_call', 'video', 'latest_short'など
           useEnhanced: true, // 拡張モデルを使用
+          audioChannelCount: 1, // モノラルを明示的に指定
         },
       };
+      
+      console.log('Speech-to-Text APIリクエスト設定:', JSON.stringify({
+        encoding: request.config.encoding,
+        sampleRateHertz: request.config.sampleRateHertz,
+        languageCode: request.config.languageCode,
+        audioChannelCount: request.config.audioChannelCount
+      }));
       
       // Speech-to-Text APIへのリクエスト
       const [response] = await this.speechClient.recognize(request);
