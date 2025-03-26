@@ -1,60 +1,33 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
-
 generator client {
   provider        = "prisma-client-js"
   previewFeatures = ["metrics"]
-  // engineTypeを削除して、デフォルトのbinaryTypeを使用
-  // binaryTargetsを追加して、異なる環境でのサポートを確保
   binaryTargets   = ["native", "rhel-openssl-1.0.x"]
 }
 
 datasource db {
-  provider  = "postgresql"
-  url       = env("DATABASE_URL")
-  directUrl = env("DIRECT_URL")
-  // Renderのホスト環境設定
+  provider     = "postgresql"
+  url          = env("DATABASE_URL")
+  directUrl    = env("DIRECT_URL")
   relationMode = "prisma"
 }
 
 model Record {
-  id                 String          @id @default(uuid())
-  fileUrl            String          // ファイルのURL（R2の署名付きURLまたは公開URL）
-  file_key           String          // R2のオブジェクトキー
-  r2_bucket          String?         // バケット名（複数バケットを使用する場合のため）
-  transcription      String?         @db.Text
-  transcriptionStatus ProcessStatus  @default(PENDING)
-  summary            String?         @db.Text
-  summaryStatus      ProcessStatus   @default(PENDING)
-  article            String?         @db.Text
-  articleStatus      ProcessStatus   @default(PENDING)
-  errorMessage       String?         @db.Text
-  status             Status          @default(UPLOADED)
-  processing_step    ProcessingStep? // 現在の処理ステップを追跡
-  created_at         DateTime        @default(now())
-  updated_at         DateTime        @updatedAt
-  deleted_at         DateTime?
+  id              String    @id @default(uuid())
+  file_url        String
+  transcript_text String?
+  summary_text    String?
+  article_text    String?
+  error           String?
+  status          Status    @default(UPLOADED)
+  created_at      DateTime  @default(now())
+  deleted_at      DateTime?
 
-  @@index([status])
   @@map("records")
 }
 
 enum Status {
-  UPLOADED    // アップロード済み、まだ処理開始していない
-  PROCESSING  // 処理中
-  COMPLETED   // すべての処理完了
-  ERROR       // エラー発生
-}
-
-enum ProcessStatus {
-  PENDING     // 処理待ち
-  PROCESSING  // 処理中
-  COMPLETED   // 処理完了
-  ERROR       // エラー発生
-}
-
-enum ProcessingStep {
-  TRANSCRIPTION  // 文字起こし処理中
-  SUMMARY        // 要約処理中
-  ARTICLE        // 記事生成処理中
+  UPLOADED
+  PROCESSING
+  DONE
+  ERROR
 }
