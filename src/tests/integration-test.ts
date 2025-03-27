@@ -1,4 +1,4 @@
-import { PrismaClient, Status, ProcessingStep } from '@prisma/client';
+import { PrismaClient, Status } from '@prisma/client';
 import { ProcessingPipeline } from '../services/processing-pipeline';
 import { testConfig } from './test-config';
 import { setupTestDatabase } from './setup-test-db';
