@@ -394,6 +394,49 @@ export class GeminiService {
   }
 
   /**
+   * 文字起こし結果の整形・改善処理
+   * @param text 文字起こし結果のテキスト
+   * @returns 整形・改善されたテキスト
+   */
+  async enhanceTranscript(text: string): Promise<string> {
+    try {
+      const model = this.genAI.getGenerativeModel({ model: this.model });
+      
+      const prompt = `あなたは文字起こしデータの整形と改善を行う専門家です。以下の文字起こしテキストを整形・改善してください。
+
+## 整形・改善の指示
+1. 話者の区別を明確にし、一貫性のある形式で表示してください（例：「話者A：」「話者B：」など）
+2. 専門用語や固有名詞のスペルや表記を統一し、正確にしてください
+3. 文脈から明らかな言い間違いや言い淀みは適切に修正してください
+4. 不完全な文や中断された文は可能な限り完成させてください
+5. [不明]とマークされた部分は、文脈から推測できる場合は適切な内容で補完してください
+6. 重複した内容や冗長な表現を整理してください
+7. 段落分けを適切に行い、読みやすさを向上させてください
+
+## 最重要指示
+- 元の文字起こしの内容や意味を変えないでください
+- 架空のセミナー内容を生成しないでください
+- 「AIスクールセミナー」などの架空の設定を追加しないでください
+- 実際の音声内容のみを整形してください
+- 話者の発言内容を忠実に保ちながら、読みやすさと正確さを向上させることが目的です
+
+${text}
+
+元の文字起こしの内容や意味を変えないように注意してください。整形・改善された文字起こしを出力してください。`;
+      
+      const result = await model.generateContent(prompt);
+      const response = await result.response;
+      const enhancedText = response.text();
+      
+      return enhancedText;
+    } catch (error: any) {
+      console.error('文字起こし整形・改善エラー:', error);
+      // エラーが発生した場合は元のテキストをそのまま返す
+      return text;
+    }
+  }
+
+  /**
    * 文字起こし用のプロンプトを作成する
    * @returns プロンプト文字列
    */
@@ -410,53 +453,6 @@ export class GeminiService {
 7. 日本語の場合は、敬語や話し言葉のニュアンスを保持してください`;
     
     return promptText;
-  }
-
-  /**
-   * 文字起こし結果の整形・改善処理
-   * @param text 文字起こし結果のテキスト
-   * @returns 整形・改善されたテキスト
-   */
-  async enhanceTranscript(text: string): Promise<string> {
-    try {
-      const model = this.genAI.getGenerativeModel({ model: this.model });
-      
-      const prompt = `あなたはAI・機械学習分野の専門家で、文字起こしデータの整形と改善を行う専門家です。以下のAIスクールセミナーの文字起こしテキストを整形・改善してください。
-
-## 整形・改善の指示
-1. 話者の区別を明確にし、一貫性のある形式で表示してください（例：「講師：」「参加者A：」など）
-2. 専門用語や固有名詞のスペルや表記を統一し、正確にしてください
-3. 文脈から明らかな言い間違いや言い淀みは適切に修正してください
-4. 不完全な文や中断された文は可能な限り完成させてください
-5. [不明]とマークされた部分は、文脈から推測できる場合は適切な内容で補完してください
-6. 重複した内容や冗長な表現を整理してください
-7. 段落分けを適切に行い、読みやすさを向上させてください
-
-## 専門用語・固有名詞リスト
-以下のAI・機械学習用語や固有名詞の表記を統一してください:
-- LLM / 大規模言語モデル / Large Language Model → LLM（大規模言語モデル）
-- ファインチューニング / fine-tuning / 微調整 → ファインチューニング
-- プロンプトエンジニアリング / prompt engineering → プロンプトエンジニアリング
-- トークン / token → トークン
-- Gemini / ジェミナイ → Gemini
-- Claude / クロード → Claude
-- GPT / ジーピーティー → GPT
-- RAG / 検索拡張生成 / Retrieval-Augmented Generation → RAG（検索拡張生成）
-
-${text}
-
-元の文字起こしの内容や意味を変えないように注意してください。話者の発言内容を忠実に保ちながら、読みやすさと正確さを向上させることが目的です。整形・改善された文字起こしを出力してください。`;
-      
-      const result = await model.generateContent(prompt);
-      const response = await result.response;
-      const enhancedText = response.text();
-      
-      return enhancedText;
-    } catch (error: any) {
-      console.error('文字起こし整形・改善エラー:', error);
-      // エラーが発生した場合は元のテキストをそのまま返す
-      return text;
-    }
   }
 
   /**

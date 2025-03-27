@@ -118,8 +118,8 @@ export class TranscriptionService {
         // 音声データをBase64エンコード
         const base64Audio = audioData.toString('base64');
         
-        // MIMEタイプを設定（最適化後はWAV形式）
-        const mimeType = 'audio/wav';
+        // MIMEタイプを設定（最適化後はFLAC形式）
+        const mimeType = 'audio/flac';
         
         console.log(`使用するMIMEタイプ: ${mimeType}`);
         
@@ -407,7 +407,7 @@ export class TranscriptionService {
       console.log(`音声ファイルを最適化します: ${audioPath}`);
       
       // 出力パスを設定
-      const outputPath = `${audioPath}_optimized.wav`;
+      const outputPath = `${audioPath}_optimized.flac`;
       
       // ファイル拡張子を確認
       const fileExt = path.extname(audioPath).toLowerCase();
@@ -415,11 +415,13 @@ export class TranscriptionService {
       // 動画ファイルの場合は音声を抽出
       if (['.mp4', '.mov', '.avi', '.mkv', '.webm'].includes(fileExt)) {
         console.log('動画ファイルから音声を抽出します');
+        
+        // ファイルをダウンロード
         const extractedAudioPath = `${audioPath}_audio.mp3`;
         await this.extractAudioFromVideo(audioPath, extractedAudioPath);
         
-        // 抽出した音声ファイルをWAVに変換
-        await this.convertAudioToWav(extractedAudioPath, outputPath);
+        // 抽出した音声ファイルをFLACに変換
+        await this.convertAudioToFlac(extractedAudioPath, outputPath);
         
         // 一時ファイルを削除
         try {
@@ -429,13 +431,13 @@ export class TranscriptionService {
           console.error(`一時音声ファイルの削除に失敗しました: ${extractedAudioPath}`, err);
         }
       } else if (['.mp3', '.ogg', '.flac'].includes(fileExt)) {
-        // 音声ファイルの場合はWAVに変換
-        console.log('音声ファイルをWAVに変換します');
-        await this.convertAudioToWav(audioPath, outputPath);
+        // 音声ファイルの場合はFLACに変換
+        console.log('音声ファイルをFLACに変換します');
+        await this.convertAudioToFlac(audioPath, outputPath);
       } else if (fileExt === '.wav') {
-        // すでにWAVファイルの場合は最適化のみ
-        console.log('WAVファイルを最適化します');
-        await this.convertAudioToWav(audioPath, outputPath);
+        // すでにWAVファイルの場合はFLACに変換
+        console.log('WAVファイルをFLACに変換します');
+        await this.convertAudioToFlac(audioPath, outputPath);
       } else {
         console.log(`未サポートのファイル形式です: ${fileExt}、そのまま処理します`);
         return audioPath;
@@ -488,13 +490,13 @@ export class TranscriptionService {
   }
 
   /**
-   * 音声ファイルをWAVに変換する関数
+   * 音声ファイルをFLACに変換する関数
    * @param inputPath 入力音声ファイルのパス
-   * @param outputPath 出力WAVファイルのパス
+   * @param outputPath 出力FLACファイルのパス
    */
-  private async convertAudioToWav(inputPath: string, outputPath: string): Promise<void> {
+  private async convertAudioToFlac(inputPath: string, outputPath: string): Promise<void> {
     return new Promise((resolve, reject) => {
-      console.log(`音声ファイルをWAVに変換: ${inputPath} -> ${outputPath}`);
+      console.log(`音声ファイルをFLACに変換: ${inputPath} -> ${outputPath}`);
       
       const ffmpeg = require('fluent-ffmpeg');
       const ffmpegPath = require('ffmpeg-static');
@@ -503,28 +505,30 @@ export class TranscriptionService {
       ffmpeg(inputPath)
         .outputOptions([
           '-vn',                // 映像を除去
-          '-acodec pcm_s16le',  // PCM 16bit LEエンコード（LINEAR16形式）
+          '-acodec flac',       // FLACエンコーダーを使用
           '-ar 16000',          // サンプルレート16kHz
           '-ac 1',              // モノラルチャンネル
-          '-f wav'              // WAV形式を明示的に指定
+          '-bits_per_raw_sample 16', // 16ビット深度
+          '-compression_level 8',    // 高圧縮率（0-12、8は標準的な値）
+          '-f flac'             // FLAC形式を明示的に指定
         ])
         .output(outputPath)
         .on('start', (commandLine: string) => {
-          console.log('FFmpeg WAV変換コマンド:', commandLine);
+          console.log('FFmpeg FLAC変換コマンド:', commandLine);
         })
         .on('end', () => {
           // ファイルの存在と最小サイズを確認
           if (fs.existsSync(outputPath) && fs.statSync(outputPath).size > 100) {
-            console.log('WAVへの変換が完了しました');
+            console.log('FLACへの変換が完了しました');
             resolve();
           } else {
-            const error = new Error('変換されたWAVファイルが無効です');
+            const error = new Error('変換されたFLACファイルが無効です');
             console.error(error);
             reject(error);
           }
         })
         .on('error', (err: unknown) => {
-          console.error('WAVへの変換中にエラーが発生しました:', err);
+          console.error('FLACへの変換中にエラーが発生しました:', err);
           reject(err);
         })
         .run();

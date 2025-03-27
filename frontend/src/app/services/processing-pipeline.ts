@@ -88,30 +88,14 @@ export class ProcessingPipeline {
       }
       console.log(`[${recordId}] 文字起こし処理が完了しました`);
 
-      // 1.5. 文字起こし結果の整形・改善処理
-      console.log(`[${recordId}] 文字起こし結果の整形・改善処理を開始します...`);
-      let enhancedTranscript;
-      try {
-        enhancedTranscript = await this.geminiService.enhanceTranscript(transcript);
-        console.log(`[${recordId}] 文字起こし結果の整形・改善処理が成功しました`);
-        
-        await prisma.record.update({
-          where: { id: recordId },
-          data: { transcript_text: enhancedTranscript },
-        });
-        console.log(`[${recordId}] 整形・改善された文字起こし結果をデータベースに保存しました`);
-      } catch (enhanceError) {
-        console.error(`[${recordId}] 文字起こし結果の整形・改善処理エラー:`, enhanceError);
-        // エラーが発生した場合は元の文字起こし結果を使用
-        enhancedTranscript = transcript;
-      }
-      console.log(`[${recordId}] 文字起こし結果の整形・改善処理が完了しました`);
-
+      // 文字起こし結果をそのまま使用（整形・改善処理を行わない）
+      let originalTranscript = transcript;
+      
       // 2. 要約処理
       console.log(`[${recordId}] 要約処理を開始します...`);
       let summary;
       try {
-        summary = await this.geminiService.summarizeText(enhancedTranscript);
+        summary = await this.geminiService.summarizeText(originalTranscript);
         console.log(`[${recordId}] 要約処理が成功しました`);
         
         await prisma.record.update({
@@ -265,21 +249,8 @@ export class ProcessingPipeline {
             });
             console.log(`[${recordId}] 文字起こし結果をデータベースに保存しました`);
             
-            // 文字起こし結果の整形・改善処理
-            console.log(`[${recordId}] 文字起こし結果の整形・改善処理を開始します...`);
-            try {
-              const enhancedTranscript = await this.geminiService.enhanceTranscript(transcript);
-              console.log(`[${recordId}] 文字起こし結果の整形・改善処理が成功しました`);
-              
-              await prisma.record.update({
-                where: { id: recordId },
-                data: { transcript_text: enhancedTranscript },
-              });
-              console.log(`[${recordId}] 整形・改善された文字起こし結果をデータベースに保存しました`);
-            } catch (enhanceError) {
-              console.error(`[${recordId}] 文字起こし結果の整形・改善処理エラー:`, enhanceError);
-              // エラーが発生しても処理を続行（元の文字起こし結果を使用）
-            }
+            // 文字起こし結果をそのまま使用（整形・改善処理を行わない）
+            let originalTranscript = transcript;
             
             // 要約処理に進む
             await this.retryFromStep(recordId, 3);
@@ -302,25 +273,11 @@ export class ProcessingPipeline {
             throw new Error('文字起こし結果がありません。文字起こしから再試行してください。');
           }
           
-          // 文字起こし結果の整形・改善処理
-          console.log(`[${recordId}] 文字起こし結果の整形・改善処理を開始します...`);
-          let enhancedTranscript = record.transcript_text;
-          try {
-            enhancedTranscript = await this.geminiService.enhanceTranscript(record.transcript_text);
-            console.log(`[${recordId}] 文字起こし結果の整形・改善処理が成功しました`);
-            
-            await prisma.record.update({
-              where: { id: recordId },
-              data: { transcript_text: enhancedTranscript },
-            });
-            console.log(`[${recordId}] 整形・改善された文字起こし結果をデータベースに保存しました`);
-          } catch (enhanceError) {
-            console.error(`[${recordId}] 文字起こし結果の整形・改善処理エラー:`, enhanceError);
-            // エラーが発生した場合は元の文字起こし結果を使用
-          }
+          // 文字起こし結果をそのまま使用（整形・改善処理を行わない）
+          let originalTranscript = record.transcript_text;
           
           try {
-            const summary = await this.geminiService.summarizeText(enhancedTranscript);
+            const summary = await this.geminiService.summarizeText(originalTranscript);
             console.log(`[${recordId}] 要約処理が成功しました`);
             
             await prisma.record.update({
