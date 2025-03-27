@@ -50,7 +50,7 @@ export class ProcessingPipeline {
       let transcript;
       try {
         // 新しいTranscriptionServiceを使用
-        transcript = await this.transcriptionService.transcribeAudio(fileUrl);
+        transcript = await this.transcriptionService.transcribeFile(fileUrl);
         console.log(`[${recordId}] 高精度文字起こし処理が成功しました`);
         
         await prisma.record.update({
@@ -256,7 +256,7 @@ export class ProcessingPipeline {
         case 2: // 文字起こしからやり直し
           console.log(`[${recordId}] 文字起こし処理を開始します...`);
           try {
-            const transcript = await this.transcriptionService.transcribeAudio(fileUrl);
+            const transcript = await this.transcriptionService.transcribeFile(fileUrl);
             console.log(`[${recordId}] 文字起こし処理が成功しました`);
             
             await prisma.record.update({
