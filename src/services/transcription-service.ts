@@ -4,10 +4,6 @@ import * as os from 'os';
 import * as crypto from 'crypto';
 import { execSync } from 'child_process';
 import { GoogleGenerativeAI, Part } from '@google/generative-ai';
-// Speech-to-Text関連のインポートをコメントアウト
-// import { SpeechClient } from '@google-cloud/speech';
-// SpeechClient型を代替定義
-type SpeechClient = any;
 import axios from 'axios';
 import { pipeline } from 'stream/promises';
 import { GetObjectCommand, S3Client } from '@aws-sdk/client-s3';
@@ -17,7 +13,6 @@ import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 // Gemini FlashとCloud Speech-to-Textを組み合わせて高精度な文字起こしを実現
 export class TranscriptionService {
   private genAI: GoogleGenerativeAI;
-  private speechClient: SpeechClient;
   private geminiModel: string;
   private s3Client: S3Client;
 
@@ -31,9 +26,6 @@ export class TranscriptionService {
     
     // 環境変数からモデル名を取得（デフォルトはgemini-2.0-flash）
     this.geminiModel = process.env.GEMINI_MODEL || 'gemini-2.0-flash';
-    
-    // Google Cloud Speech-to-Text APIの初期化
-    // this.speechClient = new SpeechClient();
     
     // S3クライアントの初期化（Cloudflare R2用）
     this.s3Client = new S3Client({
@@ -54,43 +46,128 @@ export class TranscriptionService {
     console.log(`ファイル情報: 存在=${fs.existsSync(audioPath)}, サイズ=${fs.existsSync(audioPath) ? fs.statSync(audioPath).size : 'N/A'} バイト`);
     
     try {
-      // 第1段階: 高精度処理を試行（Gemini + Speech-to-Text）
+      // 音声ファイルを最適化（すべての処理フローで共通）
+      console.log(`音声ファイルの最適化を開始します...`);
+      const optimizedAudioPath = await this.optimizeAudioForGemini(audioPath);
+      console.log(`音声ファイルを最適化しました: ${optimizedAudioPath}`);
+      
+      // 音声ファイルのサイズを確認
+      const stats = fs.statSync(optimizedAudioPath);
+      const fileSizeMB = stats.size / (1024 * 1024);
+      console.log(`最適化された音声ファイルのサイズ: ${fileSizeMB.toFixed(2)} MB`);
+      
+      // Geminiのみで文字起こしを試行
+      console.log(`Geminiのみでの処理を開始: ${optimizedAudioPath}`);
+      
       try {
-        console.log(`[DEBUG] 高精度処理を開始: ${audioPath}`);
-        const transcription = await this.processLocalFile(audioPath);
-        // 成功した場合は一時ファイルをクリーンアップして結果を返す
+        console.log(`[DEBUG] Geminiのみでの処理を開始: ${optimizedAudioPath}`);
+        
+        let transcription = '';
+        
+        // 大きなファイルの場合は分割処理
+        if (fileSizeMB > 4) {
+          console.log(`ファイルサイズが大きいため、分割処理を実行します`);
+          transcription = await this.transcribeWithGeminiChunked(optimizedAudioPath);
+        } else {
+          console.log(`ファイルサイズが小さいため、直接処理します`);
+          // 音声ファイルを読み込み
+          const audioData = fs.readFileSync(optimizedAudioPath);
+          
+          // Geminiモデルの取得
+          const model = this.genAI.getGenerativeModel({ model: this.geminiModel });
+          
+          // プロンプトの作成
+          const prompt = `
+          あなたは高精度文字起こしの専門家です。このファイルは実際にユーザーがアップロードした音声または動画データです。
+
+          ## 文字起こしの指示
+          1. 全ての言葉を省略せず、一語一句正確に文字起こししてください
+          2. 専門用語や固有名詞は特に注意して正確に書き起こしてください
+          3. 話者を識別し、適切にラベル付けしてください（「話者A：」「話者B：」など）
+          4. 聞き取れない部分は[不明]と記録してください
+          5. 音声の特徴（笑い、ため息、強調など）も[笑い]のように記録してください
+          6. 言い間違いや言い直しも忠実に書き起こしてください
+          7. 句読点、改行を適切に入れて読みやすくしてください
+
+          ## 最重要指示
+          - これは実際の文字起こしタスクです。架空の内容を絶対に生成しないでください。
+          - 「AIスクールセミナー」や「LLMを活用した文字起こし」などの架空のセミナー内容を生成してはいけません。
+          - 音声に実際に含まれている内容だけを文字起こししてください。
+          - 音声が聞き取れない場合は「この音声は聞き取れません」と正直に報告してください。
+          - 音声が存在しない場合は「音声データが検出できません」と報告してください。
+          - 音声データが不完全または破損している場合は「音声データが不完全または破損しています」と報告してください。
+          - 架空の内容を生成することは厳禁です。これは実際のユーザーデータの文字起こしです。
+          - 音声が聞き取れない場合は、架空のセミナー内容を生成せず、「音声が聞き取れません」と報告してください。
+
+          ## 音声特性
+          - 複数の話者が存在する可能性があります
+          - 背景音がある場合があります
+          - 音質が変化する場合があります
+
+          全ての言葉を省略せず、一言一句漏らさず文字起こしして下さい。これは非常に重要な情報であり、完全な正確さが求められます。
+          `;
+          
+          // 音声データをBase64エンコード
+          const base64Audio = audioData.toString('base64');
+          
+          // MIMEタイプを設定（最適化後はWAV形式）
+          const mimeType = 'audio/wav';
+          
+          console.log(`使用するMIMEタイプ: ${mimeType}`);
+          
+          // Gemini APIへのリクエスト
+          const result = await model.generateContent([
+            { text: prompt },
+            {
+              inlineData: {
+                mimeType: mimeType,
+                data: base64Audio
+              }
+            }
+          ]);
+          
+          const response = result.response;
+          transcription = response.text();
+        }
+        
+        // 架空のセミナー内容が含まれていないか確認
+        if (transcription.includes('AIスクール') || 
+            transcription.includes('LLMの基礎') || 
+            transcription.includes('セミナー要約') ||
+            transcription.includes('AIを活用して人生を変えた')) {
+          console.warn('警告: 架空のセミナー内容が検出されました。文字起こし結果を破棄します。');
+          throw new Error('Gemini APIが架空の内容を生成しました。実際の音声データを文字起こしできませんでした。');
+        }
+        
+        if (transcription && transcription.trim().length > 0) {
+          console.log(`Geminiのみでの処理が成功しました`);
+          console.log(`[DEBUG] Geminiのみでの処理が成功しました。結果の長さ: ${transcription.length} 文字`);
+          
+          // 一時ファイルを削除
+          try {
+            if (optimizedAudioPath !== audioPath && fs.existsSync(optimizedAudioPath)) {
+              fs.unlinkSync(optimizedAudioPath);
+              console.log(`最適化された一時ファイルを削除しました: ${optimizedAudioPath}`);
+            }
+          } catch (cleanupError) {
+            console.warn('一時ファイルの削除に失敗しました:', cleanupError);
+          }
+          
+          // 成功した場合は一時ファイルをクリーンアップして結果を返す
+          this.cleanupAllTempFiles();
+          return transcription;
+        } else {
+          throw new Error('Geminiのみでの文字起こし結果が空です');
+        }
+      } catch (fallbackError: unknown) {
+        console.error(`Geminiのみでの文字起こしエラー:`, fallbackError);
+        // すべての一時ファイルをクリーンアップ
         this.cleanupAllTempFiles();
-        console.log(`[DEBUG] 高精度処理が成功しました。結果の長さ: ${transcription.length} 文字`);
-        return transcription;
-      } catch (localError: unknown) {
-        console.error('ローカルファイル処理エラー:', localError);
-        throw new Error(`ローカルファイル処理に失敗しました: ${localError instanceof Error ? localError.message : String(localError)}`);
+        throw new Error(`文字起こし処理に失敗しました: ${fallbackError instanceof Error ? fallbackError.message : String(fallbackError)}`);
       }
     } catch (error: unknown) {
       console.error(`文字起こし処理エラー:`, error);
-      
-      // 第2段階: Geminiのみで文字起こしを試行
-      console.log(`フォールバック: 従来のGemini文字起こしを試します...`);
-      
-      try {
-        console.log(`[DEBUG] Geminiのみでの処理を開始: ${audioPath}`);
-        const fallbackTranscription = await this.transcribeWithGemini(audioPath);
-        
-        if (fallbackTranscription && fallbackTranscription.trim().length > 0) {
-          console.log(`フォールバック成功: Geminiでの文字起こしが完了しました`);
-          console.log(`[DEBUG] Geminiのみでの処理が成功しました。結果の長さ: ${fallbackTranscription.length} 文字`);
-          // 成功した場合は一時ファイルをクリーンアップして結果を返す
-          this.cleanupAllTempFiles();
-          return fallbackTranscription;
-        } else {
-          throw new Error('フォールバック文字起こし結果が空です');
-        }
-      } catch (fallbackError: unknown) {
-        console.error(`フォールバック文字起こしエラー:`, fallbackError);
-        // すべての一時ファイルをクリーンアップ
-        this.cleanupAllTempFiles();
-        throw new Error(`文字起こし処理に失敗しました: ${error instanceof Error ? error.message : String(error)}`);
-      }
+      throw new Error(`文字起こし処理に失敗しました: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 
@@ -356,80 +433,28 @@ export class TranscriptionService {
     });
   }
 
-  // Google Cloud Speech-to-Textを使用した文字起こし
-  private async transcribeWithSpeechToText(audioPath: string): Promise<string> {
-    let wavPath = '';
-    try {
-      console.log(`Cloud Speech-to-Textを使用して文字起こしを開始: ${audioPath}`);
-      
-      // 音声ファイルをWAV形式に変換
-      wavPath = audioPath.replace(/\.[^/.]+$/, '') + '.wav';
-      
-      try {
-        // 元の音声ファイルから直接WAVに変換
-        await this.convertAudioToWav(audioPath, wavPath);
-        console.log(`WAVに変換完了: ${wavPath}`);
-      } catch (convErr: unknown) {
-        console.error('音声フォーマット変換エラー:', convErr);
-        throw new Error(`音声ファイルの変換に失敗しました: ${convErr instanceof Error ? convErr.message : String(convErr)}`);
-      }
-      
-      // WAVファイルの内容を読み込み
-      const audioBytes = fs.readFileSync(wavPath).toString('base64');
-      
-      // 処理が終わったらすぐに一時ファイルを削除
-      this.cleanupTempFiles([wavPath]);
-      
-      // Speech-to-Text APIリクエストの設定
-      const request = {
-        audio: {
-          content: audioBytes,
-        },
-        config: {
-          encoding: 'LINEAR16' as const, // WAVファイルのエンコーディング
-          sampleRateHertz: 16000,
-          languageCode: 'ja-JP',
-          model: 'default',
-          enableAutomaticPunctuation: true,
-          useEnhanced: true,
-          audioChannelCount: 1,
-        },
-      };
-      
-      // Speech-to-Text APIを呼び出し
-      const [response] = await this.speechClient.recognize(request);
-      
-      if (!response || !response.results || response.results.length === 0) {
-        console.warn('Speech-to-Text: 文字起こし結果が空です');
-        return '';
-      }
-      
-      // 結果を結合
-      const transcription = response.results
-        .map((result: any) => result.alternatives && result.alternatives[0] ? result.alternatives[0].transcript : '')
-        .join('\n')
-        .trim();
-      
-      console.log('Cloud Speech-to-Textでの文字起こしが完了しました');
-      
-      return transcription;
-    } catch (error: unknown) {
-      console.error('Speech-to-Text文字起こしエラー:', error);
-      // エラーが発生した場合も一時ファイルを削除
-      if (wavPath) {
-        this.cleanupTempFiles([wavPath]);
-      }
-      throw new Error(`Speech-to-Text文字起こしエラー: ${error instanceof Error ? error.message : String(error)}`);
-    }
-  }
-
   // Gemini APIを使用した文字起こし
   private async transcribeWithGemini(audioPath: string): Promise<string> {
     try {
       console.log(`Gemini APIを使用して文字起こしを開始: ${audioPath}`);
       
+      // 音声ファイルを最適化
+      const optimizedAudioPath = await this.optimizeAudioForGemini(audioPath);
+      console.log(`音声ファイルを最適化しました: ${optimizedAudioPath}`);
+      
+      // 音声ファイルのサイズを確認
+      const stats = fs.statSync(optimizedAudioPath);
+      const fileSizeMB = stats.size / (1024 * 1024);
+      console.log(`最適化された音声ファイルのサイズ: ${fileSizeMB.toFixed(2)} MB`);
+      
+      // 大きなファイルの場合は分割処理
+      if (fileSizeMB > 4) {
+        console.log(`ファイルサイズが大きいため、分割処理を実行します`);
+        return this.transcribeWithGeminiChunked(optimizedAudioPath);
+      }
+      
       // 音声ファイルを読み込み
-      const audioData = fs.readFileSync(audioPath);
+      const audioData = fs.readFileSync(optimizedAudioPath);
       
       // Geminiモデルの取得
       const model = this.genAI.getGenerativeModel({ model: this.geminiModel });
@@ -446,15 +471,16 @@ export class TranscriptionService {
       5. 音声の特徴（笑い、ため息、強調など）も[笑い]のように記録してください
       6. 言い間違いや言い直しも忠実に書き起こしてください
       7. 句読点、改行を適切に入れて読みやすくしてください
-      8. AIに関する専門用語が出てきた場合は、特に正確に書き起こしてください
 
       ## 最重要指示
-      - これは実際の文字起こしタスクです。架空の内容を生成してはいけません。
-      - 「AIスクールセミナー」や「LLMを活用した文字起こし」などの架空のセミナー内容を生成しないでください。
+      - これは実際の文字起こしタスクです。架空の内容を絶対に生成しないでください。
+      - 「AIスクールセミナー」や「LLMを活用した文字起こし」などの架空のセミナー内容を生成してはいけません。
       - 音声に実際に含まれている内容だけを文字起こししてください。
       - 音声が聞き取れない場合は「この音声は聞き取れません」と正直に報告してください。
       - 音声が存在しない場合は「音声データが検出できません」と報告してください。
-      - 架空の内容を生成することは厳禁です。
+      - 音声データが不完全または破損している場合は「音声データが不完全または破損しています」と報告してください。
+      - 架空の内容を生成することは厳禁です。これは実際のユーザーデータの文字起こしです。
+      - 音声が聞き取れない場合は、架空のセミナー内容を生成せず、「音声が聞き取れません」と報告してください。
 
       ## 音声特性
       - 複数の話者が存在する可能性があります
@@ -466,7 +492,12 @@ export class TranscriptionService {
       
       // 音声データをBase64エンコード
       const base64Audio = audioData.toString('base64');
-      const mimeType = 'audio/mp3';
+      
+      // ファイル拡張子に基づいてMIMEタイプを決定
+      const fileExt = path.extname(optimizedAudioPath).toLowerCase();
+      let mimeType = 'audio/wav'; // 最適化後はWAV形式
+      
+      console.log(`使用するMIMEタイプ: ${mimeType}`);
       
       // Gemini APIへのリクエスト
       const result = await model.generateContent([
@@ -482,56 +513,266 @@ export class TranscriptionService {
       const response = result.response;
       const transcription = response.text();
       
-      console.log('Gemini APIでの文字起こしが完了しました');
+      // 架空のセミナー内容が含まれていないか確認
+      if (transcription.includes('AIスクール') || 
+          transcription.includes('LLMの基礎') || 
+          transcription.includes('セミナー要約') ||
+          transcription.includes('AIを活用して人生を変えた')) {
+        console.warn('警告: 架空のセミナー内容が検出されました。文字起こし結果を破棄します。');
+        return '警告: Gemini APIが架空の内容を生成しました。実際の音声データを文字起こしできませんでした。音声データが破損しているか、処理できない形式である可能性があります。';
+      }
+      
+      // 一時ファイルを削除
+      try {
+        if (optimizedAudioPath !== audioPath && fs.existsSync(optimizedAudioPath)) {
+          fs.unlinkSync(optimizedAudioPath);
+          console.log(`最適化された一時ファイルを削除しました: ${optimizedAudioPath}`);
+        }
+      } catch (cleanupError) {
+        console.warn('一時ファイルの削除に失敗しました:', cleanupError);
+      }
+      
+      console.log('文字起こしが完了しました');
       return transcription;
-    } catch (error: unknown) {
+    } catch (error) {
       console.error('Gemini APIでの文字起こし中にエラーが発生しました:', error);
-      throw error instanceof Error ? error : new Error(String(error));
+      throw error;
     }
   }
 
-  // 両方の文字起こし結果をマージ
-  private async mergeTranscripts(geminiTranscript: string, speechToTextTranscript: string): Promise<string> {
+  // 音声ファイルをGemini APIに最適な形式に変換
+  private async optimizeAudioForGemini(inputPath: string): Promise<string> {
+    const outputPath = inputPath.replace(/\.[^/.]+$/, '') + '_optimized.wav';
+    
+    return new Promise((resolve, reject) => {
+      console.log(`音声ファイルを最適化: ${inputPath} -> ${outputPath}`);
+      
+      try {
+        const ffmpeg = require('fluent-ffmpeg');
+        const ffmpegPath = require('ffmpeg-static');
+        ffmpeg.setFfmpegPath(ffmpegPath);
+        
+        ffmpeg(inputPath)
+          .outputOptions([
+            '-vn',                // 映像を除去
+            '-acodec pcm_s16le',  // PCM 16bit LEエンコード（LINEAR16形式）
+            '-ar 16000',          // サンプルレート16kHz（Gemini推奨）
+            '-ac 1',              // モノラルチャンネル
+            '-f wav'              // WAV形式を明示的に指定
+          ])
+          .output(outputPath)
+          .on('start', (commandLine: string) => {
+            console.log('FFmpeg最適化コマンド:', commandLine);
+          })
+          .on('end', () => {
+            // ファイルの存在と最小サイズを確認
+            if (fs.existsSync(outputPath) && fs.statSync(outputPath).size > 100) {
+              console.log('音声ファイルの最適化が完了しました');
+              resolve(outputPath);
+            } else {
+              const error = new Error('最適化された音声ファイルが無効です');
+              console.error(error);
+              reject(error);
+            }
+          })
+          .on('error', (err: unknown) => {
+            console.error('音声ファイルの最適化中にエラーが発生しました:', err);
+            reject(err);
+          })
+          .run();
+      } catch (error) {
+        console.error('FFmpegの初期化に失敗しました:', error);
+        // FFmpegが使用できない場合は元のファイルを返す
+        resolve(inputPath);
+      }
+    });
+  }
+
+  // 大きな音声ファイルを分割して処理
+  private async transcribeWithGeminiChunked(audioPath: string): Promise<string> {
     try {
-      console.log('両方の文字起こし結果をマージします');
+      console.log(`音声ファイルを分割して処理します: ${audioPath}`);
+      
+      // 音声ファイルのメタデータを取得
+      const metadata = await this.getAudioMetadata(audioPath);
+      console.log(`音声ファイルのメタデータ:`, metadata);
+      
+      // 音声の長さ（秒）
+      const duration = metadata.format.duration || 0;
+      console.log(`音声の長さ: ${duration}秒`);
+      
+      // 分割数を計算（5分ごとに分割）
+      const chunkDuration = 300; // 5分 = 300秒
+      const chunks = Math.ceil(duration / chunkDuration);
+      console.log(`音声を${chunks}チャンクに分割します`);
+      
+      // 各チャンクを処理
+      const transcriptions = [];
+      
+      for (let i = 0; i < chunks; i++) {
+        const start = i * chunkDuration;
+        const end = Math.min((i + 1) * chunkDuration, duration);
+        console.log(`チャンク${i+1}/${chunks}を処理: ${start}秒 - ${end}秒`);
+        
+        // チャンクを抽出
+        const chunkPath = await this.extractAudioChunk(audioPath, start, end);
+        console.log(`チャンク抽出完了: ${chunkPath}`);
+        
+        try {
+          // チャンクを処理
+          const chunkTranscription = await this.transcribeChunk(chunkPath, i+1, chunks);
+          transcriptions.push(chunkTranscription);
+          
+          // 一時ファイルを削除
+          if (fs.existsSync(chunkPath)) {
+            fs.unlinkSync(chunkPath);
+            console.log(`チャンク一時ファイルを削除しました: ${chunkPath}`);
+          }
+        } catch (chunkError) {
+          console.error(`チャンク${i+1}の処理中にエラーが発生しました:`, chunkError);
+          transcriptions.push(`[チャンク${i+1}の処理中にエラーが発生しました]`);
+        }
+      }
+      
+      // 結果を結合
+      const combinedTranscription = transcriptions.join('\n\n');
+      console.log(`全チャンクの処理が完了しました。結果の長さ: ${combinedTranscription.length}文字`);
+      
+      return combinedTranscription;
+    } catch (error) {
+      console.error('チャンク処理中にエラーが発生しました:', error);
+      throw error;
+    }
+  }
+
+  // 音声ファイルのメタデータを取得
+  private async getAudioMetadata(audioPath: string): Promise<any> {
+    return new Promise((resolve, reject) => {
+      try {
+        const ffmpeg = require('fluent-ffmpeg');
+        ffmpeg.ffprobe(audioPath, (err: Error, metadata: any) => {
+          if (err) {
+            console.error('メタデータ取得エラー:', err);
+            reject(err);
+            return;
+          }
+          resolve(metadata);
+        });
+      } catch (error) {
+        console.error('FFprobeの実行に失敗しました:', error);
+        reject(error);
+      }
+    });
+  }
+
+  // 音声ファイルからチャンクを抽出
+  private async extractAudioChunk(audioPath: string, start: number, end: number): Promise<string> {
+    const chunkPath = audioPath.replace(/\.[^/.]+$/, '') + `_chunk_${start}_${end}.wav`;
+    
+    return new Promise((resolve, reject) => {
+      try {
+        const ffmpeg = require('fluent-ffmpeg');
+        const ffmpegPath = require('ffmpeg-static');
+        ffmpeg.setFfmpegPath(ffmpegPath);
+        
+        ffmpeg(audioPath)
+          .setStartTime(start)
+          .setDuration(end - start)
+          .outputOptions([
+            '-vn',                // 映像を除去
+            '-acodec pcm_s16le',  // PCM 16bit LEエンコード
+            '-ar 16000',          // サンプルレート16kHz
+            '-ac 1',              // モノラルチャンネル
+            '-f wav'              // WAV形式
+          ])
+          .output(chunkPath)
+          .on('end', () => {
+            console.log(`チャンク抽出が完了しました: ${start}秒 - ${end}秒`);
+            resolve(chunkPath);
+          })
+          .on('error', (err: unknown) => {
+            console.error('チャンク抽出中にエラーが発生しました:', err);
+            reject(err);
+          })
+          .run();
+      } catch (error) {
+        console.error('FFmpegの初期化に失敗しました:', error);
+        reject(error);
+      }
+    });
+  }
+
+  // 音声チャンクを処理
+  private async transcribeChunk(chunkPath: string, chunkNumber: number, totalChunks: number): Promise<string> {
+    try {
+      console.log(`チャンク${chunkNumber}/${totalChunks}の文字起こしを開始`);
+      
+      // 音声ファイルを読み込み
+      const audioData = fs.readFileSync(chunkPath);
       
       // Geminiモデルの取得
       const model = this.genAI.getGenerativeModel({ model: this.geminiModel });
       
-      // プロンプトの作成
+      // プロンプトの作成（チャンク情報を含む）
       const prompt = `
-      以下に2つの文字起こし結果があります。これらを比較して、最も正確で読みやすい文字起こしを生成してください。
-      
-      文字起こし1（Gemini Flash）:
-      ${geminiTranscript}
-      
-      文字起こし2（Cloud Speech-to-Text）:
-      ${speechToTextTranscript}
-      
-      以下の点に注意して最終的な文字起こしを生成してください：
-      1. 両方の文字起こしの長所を組み合わせる
-      2. 文脈に合わない単語や表現を修正する
-      3. 話者が複数いる場合は、可能であれば話者を区別する
-      4. 自然な文章になるように調整する
-      5. 音声が不明瞭な部分は[不明瞭]と記載する
-      
-      最終的な文字起こしのみを出力してください。説明や分析は不要です。
+      あなたは高精度文字起こしの専門家です。このファイルは実際にユーザーがアップロードした音声または動画データの一部（チャンク${chunkNumber}/${totalChunks}）です。
+
+      ## 文字起こしの指示
+      1. 全ての言葉を省略せず、一語一句正確に文字起こししてください
+      2. 専門用語や固有名詞は特に注意して正確に書き起こしてください
+      3. 話者を識別し、適切にラベル付けしてください（「話者A：」「話者B：」など）
+      4. 聞き取れない部分は[不明]と記録してください
+      5. 音声の特徴（笑い、ため息、強調など）も[笑い]のように記録してください
+      6. 言い間違いや言い直しも忠実に書き起こしてください
+      7. 句読点、改行を適切に入れて読みやすくしてください
+
+      ## 最重要指示
+      - これは実際の文字起こしタスクです。架空の内容を絶対に生成しないでください。
+      - 「AIスクールセミナー」や「LLMを活用した文字起こし」などの架空のセミナー内容を生成してはいけません。
+      - 音声に実際に含まれている内容だけを文字起こししてください。
+      - 音声が聞き取れない場合は「この部分の音声は聞き取れません」と正直に報告してください。
+      - 音声が存在しない場合は「音声データが検出できません」と報告してください。
+      - 架空の内容を生成することは厳禁です。これは実際のユーザーデータの文字起こしです。
+
+      ## チャンク情報
+      - これは${totalChunks}分割された音声の${chunkNumber}番目のチャンクです
+      - 前後のチャンクとの連続性を意識してください
+      - チャンクの先頭と末尾の文が途中で切れている可能性があります
+
+      全ての言葉を省略せず、一言一句漏らさず文字起こしして下さい。
       `;
+      
+      // 音声データをBase64エンコード
+      const base64Audio = audioData.toString('base64');
       
       // Gemini APIへのリクエスト
       const result = await model.generateContent([
-        { text: prompt }
+        { text: prompt },
+        {
+          inlineData: {
+            mimeType: 'audio/wav',
+            data: base64Audio
+          }
+        }
       ]);
       
       const response = result.response;
-      const mergedTranscript = response.text();
+      const transcription = response.text();
       
-      console.log('文字起こし結果のマージが完了しました');
-      return mergedTranscript;
-    } catch (error: unknown) {
-      console.error('文字起こし結果のマージ中にエラーが発生しました:', error);
-      // マージに失敗した場合は特定のエラーを投げる
-      throw new Error('MERGE_FAILED');
+      // 架空のセミナー内容が含まれていないか確認
+      if (transcription.includes('AIスクール') || 
+          transcription.includes('LLMの基礎') || 
+          transcription.includes('セミナー要約') ||
+          transcription.includes('AIを活用して人生を変えた')) {
+        console.warn(`警告: チャンク${chunkNumber}で架空のセミナー内容が検出されました`);
+        return `[警告: チャンク${chunkNumber}で架空の内容が検出されました。このチャンクの音声は正しく処理できませんでした。]`;
+      }
+      
+      console.log(`チャンク${chunkNumber}の文字起こしが完了しました`);
+      return transcription;
+    } catch (error) {
+      console.error(`チャンク${chunkNumber}の処理中にエラーが発生しました:`, error);
+      throw error;
     }
   }
 
@@ -577,7 +818,7 @@ export class TranscriptionService {
         }
       }
       
-      // Gemini APIのみを呼び出し（Speech-to-Text APIはコメントアウト）
+      // Gemini APIを呼び出し
       console.log(`Gemini APIを呼び出します...`);
       
       // Gemini APIを使用して文字起こし
