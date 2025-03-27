@@ -166,6 +166,15 @@ export class TranscriptionService {
         throw new Error('音声データを正しく処理できませんでした。音声ファイルが破損しているか、処理できない形式である可能性があります。');
       }
       
+      // 架空のセミナー内容が生成されていないか検証
+      if (transcription.includes('AIスクールセミナー') ||
+          transcription.includes('LLMの基礎') ||
+          transcription.includes('セミナー要約') ||
+          transcription.includes('AIを活用して人生を変えた')) {
+        console.error('エラー: 架空のセミナー内容が生成されました:', transcription);
+        throw new Error('文字起こし処理に失敗しました: 架空の内容が生成されました。実際の音声内容のみを文字起こしするように設定を見直してください。');
+      }
+      
       // 一時ファイルを削除
       try {
         this.cleanupAllTempFiles();
@@ -255,6 +264,7 @@ export class TranscriptionService {
           - 音質が変化する場合があります
 
           全ての言葉を省略せず、一言一句漏らさず文字起こしして下さい。これは非常に重要な情報であり、完全な正確さが求められます。
+
           ${contextPrompt}`;
           
           // 音声データを含むリクエストを作成
@@ -280,7 +290,8 @@ export class TranscriptionService {
           // 架空のセミナー内容が含まれていないか確認
           if (text.includes('AIスクール') || 
               text.includes('LLMの基礎') || 
-              text.includes('セミナー要約')) {
+              text.includes('セミナー要約') ||
+              text.includes('AIを活用して人生を変えた')) {
             console.warn(`チャンク ${i+1} に架空のセミナー内容が検出されました。スキップします。`);
             continue;
           }
