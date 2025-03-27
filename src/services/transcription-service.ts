@@ -492,6 +492,7 @@ export class TranscriptionService {
       
       // 音声データをBase64エンコード
       const base64Audio = audioData.toString('base64');
+      console.log(`音声データをBase64エンコードしました (${base64Audio.length} 文字)`);
       
       // ファイル拡張子に基づいてMIMEタイプを決定
       const fileExt = path.extname(optimizedAudioPath).toLowerCase();
@@ -500,6 +501,7 @@ export class TranscriptionService {
       console.log(`使用するMIMEタイプ: ${mimeType}`);
       
       // Gemini APIへのリクエスト
+      console.log(`Gemini API (${this.geminiModel}) にリクエストを送信します...`);
       const result = await model.generateContent([
         { text: prompt },
         {
@@ -513,13 +515,31 @@ export class TranscriptionService {
       const response = result.response;
       const transcription = response.text();
       
+      // 文字起こし結果の検証
+      if (!transcription || transcription.trim() === '') {
+        console.error('エラー: Gemini APIから空の文字起こし結果が返されました');
+        throw new Error('文字起こし結果が空です。音声データが正しく処理されませんでした。');
+      }
+      
+      console.log(`文字起こし結果を受信しました (${transcription.length} 文字)`);
+      console.log(`文字起こし結果の先頭100文字: ${transcription.substring(0, 100)}...`);
+      
       // 架空のセミナー内容が含まれていないか確認
       if (transcription.includes('AIスクール') || 
           transcription.includes('LLMの基礎') || 
           transcription.includes('セミナー要約') ||
           transcription.includes('AIを活用して人生を変えた')) {
         console.warn('警告: 架空のセミナー内容が検出されました。文字起こし結果を破棄します。');
-        return '警告: Gemini APIが架空の内容を生成しました。実際の音声データを文字起こしできませんでした。音声データが破損しているか、処理できない形式である可能性があります。';
+        throw new Error('Gemini APIが架空の内容を生成しました。実際の音声データを文字起こしできませんでした。音声データが破損しているか、処理できない形式である可能性があります。');
+      }
+      
+      // 文字起こし結果が実際の音声データであるかの追加検証
+      if (transcription.includes('元の文字起こしテキストが提供されていない') ||
+          transcription.includes('音声データが検出できません') ||
+          transcription.includes('この音声は聞き取れません') ||
+          transcription.includes('音声データが不完全または破損')) {
+        console.error('エラー: 文字起こし結果が無効です:', transcription);
+        throw new Error('文字起こし処理に失敗しました: ' + transcription);
       }
       
       // 一時ファイルを削除
@@ -744,8 +764,10 @@ export class TranscriptionService {
       
       // 音声データをBase64エンコード
       const base64Audio = audioData.toString('base64');
+      console.log(`チャンク${chunkNumber}の音声データをBase64エンコードしました (${base64Audio.length} 文字)`);
       
       // Gemini APIへのリクエスト
+      console.log(`チャンク${chunkNumber}のGemini APIリクエストを送信します...`);
       const result = await model.generateContent([
         { text: prompt },
         {
@@ -759,13 +781,31 @@ export class TranscriptionService {
       const response = result.response;
       const transcription = response.text();
       
+      // 文字起こし結果の検証
+      if (!transcription || transcription.trim() === '') {
+        console.error(`エラー: チャンク${chunkNumber}で空の文字起こし結果が返されました`);
+        throw new Error(`チャンク${chunkNumber}の文字起こし結果が空です。音声データが正しく処理されませんでした。`);
+      }
+      
+      console.log(`チャンク${chunkNumber}の文字起こし結果を受信しました (${transcription.length} 文字)`);
+      console.log(`チャンク${chunkNumber}の文字起こし結果の先頭100文字: ${transcription.substring(0, 100)}...`);
+      
       // 架空のセミナー内容が含まれていないか確認
       if (transcription.includes('AIスクール') || 
           transcription.includes('LLMの基礎') || 
           transcription.includes('セミナー要約') ||
           transcription.includes('AIを活用して人生を変えた')) {
         console.warn(`警告: チャンク${chunkNumber}で架空のセミナー内容が検出されました`);
-        return `[警告: チャンク${chunkNumber}で架空の内容が検出されました。このチャンクの音声は正しく処理できませんでした。]`;
+        throw new Error(`チャンク${chunkNumber}でGemini APIが架空の内容を生成しました。実際の音声データを文字起こしできませんでした。`);
+      }
+      
+      // 文字起こし結果が実際の音声データであるかの追加検証
+      if (transcription.includes('元の文字起こしテキストが提供されていない') ||
+          transcription.includes('音声データが検出できません') ||
+          transcription.includes('この音声は聞き取れません') ||
+          transcription.includes('音声データが不完全または破損')) {
+        console.error(`エラー: チャンク${chunkNumber}の文字起こし結果が無効です:`, transcription);
+        throw new Error(`チャンク${chunkNumber}の文字起こし処理に失敗しました: ` + transcription);
       }
       
       console.log(`チャンク${chunkNumber}の文字起こしが完了しました`);
