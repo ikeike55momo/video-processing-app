@@ -55,6 +55,9 @@ const fs = __importStar(require("fs"));
 const os = __importStar(require("os"));
 const path = __importStar(require("path"));
 const crypto = __importStar(require("crypto"));
+// TranscriptionServiceを先頭でインポート
+const { TranscriptionService } = require('./services/transcription-service');
+let transcriptionService;
 // 環境変数の読み込み
 dotenv.config();
 // Expressアプリケーションの初期化
@@ -245,8 +248,10 @@ app.post('/api/transcribe', (req, res) => __awaiter(void 0, void 0, void 0, func
         console.log(`ファイルをダウンロードしました: ${filePath}`);
         
         // 文字起こし処理
-        const { TranscriptionService } = require('./services/transcription-service');
-        const transcriptionService = new TranscriptionService();
+        if (!transcriptionService) {
+            console.log('TranscriptionServiceを初期化します');
+            transcriptionService = new TranscriptionService();
+        }
         const transcript = yield transcriptionService.transcribeAudio(filePath);
         
         // 一時ディレクトリを削除
@@ -447,6 +452,12 @@ app.post('/api/records/:id/retry', (req, res) => __awaiter(void 0, void 0, void 
 // サーバーを起動
 app.listen(PORT, () => {
   console.log(`サーバーが起動しました。ポート: ${PORT}`);
+  try {
+    transcriptionService = new TranscriptionService();
+    console.log('TranscriptionService初期化完了');
+  } catch (error) {
+    console.error('TranscriptionServiceの初期化に失敗しました:', error);
+  }
 });
 
 // モジュールとしてもエクスポート（他のファイルからインポートできるように）

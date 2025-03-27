@@ -51,7 +51,7 @@ export class ProcessingPipeline {
       let transcript = '';
       try {
         // バックエンドAPIを使用して文字起こし
-        const apiUrl = `https://video-processing-app.onrender.com/api/transcribe`;
+        const apiUrl = `https://video-processing-api.onrender.com/api/transcribe`;
         console.log(`[${recordId}] バックエンドAPIを使用して文字起こし: ${apiUrl}`);
         
         const response = await fetch(apiUrl, {
@@ -270,7 +270,7 @@ export class ProcessingPipeline {
             let transcript = '';
             try {
               // バックエンドAPIを使用して文字起こし
-              const apiUrl = `https://video-processing-app.onrender.com/api/transcribe`;
+              const apiUrl = `https://video-processing-api.onrender.com/api/transcribe`;
               console.log(`[${recordId}] バックエンドAPIを使用して文字起こし: ${apiUrl}`);
               
               const response = await fetch(apiUrl, {
