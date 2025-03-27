@@ -21,21 +21,25 @@ export const testConfig = {
     {
       id: 'test-short-audio',
       file_key: './test-assets/short-audio.mp3',
+      file_url: 'https://example.com/test-assets/short-audio.mp3',
       status: 'UPLOADED'
     },
     {
       id: 'test-medium-audio',
       file_key: './test-assets/medium-audio.mp3',
+      file_url: 'https://example.com/test-assets/medium-audio.mp3',
       status: 'UPLOADED'
     },
     {
       id: 'test-short-video',
       file_key: './test-assets/short-video.mp4',
+      file_url: 'https://example.com/test-assets/short-video.mp4',
       status: 'UPLOADED'
     },
     {
       id: 'test-medium-video',
       file_key: './test-assets/medium-video.mp4',
+      file_url: 'https://example.com/test-assets/medium-video.mp4',
       status: 'UPLOADED'
     }
   ]
