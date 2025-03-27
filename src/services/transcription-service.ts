@@ -25,8 +25,8 @@ export class TranscriptionService {
     }
     this.genAI = new GoogleGenerativeAI(geminiApiKey);
     
-    // 環境変数からモデル名を取得（デフォルトはgemini-2.5-pro-exp-03-25）
-    this.geminiModel = process.env.GEMINI_MODEL || 'gemini-2.5-pro-exp-03-25';
+    // 環境変数からモデル名を取得（デフォルトはgemini-2.0-flash）
+    this.geminiModel = process.env.GEMINI_MODEL || 'gemini-2.0-flash';
     
     // Google Cloud Speech-to-Text APIの初期化
     this.speechClient = new SpeechClient();

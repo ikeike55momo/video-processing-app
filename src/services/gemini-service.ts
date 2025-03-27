@@ -29,8 +29,8 @@ export class GeminiService {
     // Gemini APIの初期化
     this.genAI = new GoogleGenerativeAI(apiKey);
     
-    // 環境変数からモデル名を取得（デフォルトはgemini-2.5-pro-exp-03-25）
-    const modelName = process.env.GEMINI_MODEL || 'gemini-2.5-pro-exp-03-25';
+    // 環境変数からモデル名を取得（デフォルトはgemini-2.0-flash）
+    const modelName = process.env.GEMINI_MODEL || 'gemini-2.0-flash';
     this.model = modelName;
     
     // Google Cloud Storageの初期化
