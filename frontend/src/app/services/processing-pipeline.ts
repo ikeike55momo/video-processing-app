@@ -44,28 +44,52 @@ export class ProcessingPipeline {
         data: { status: 'PROCESSING' },
       });
 
-      // 1. 高精度文字起こし処理（Gemini FlashとSpeech-to-Textの組み合わせ）
+      // 1. 高精度文字起こし処理
       console.log(`[${recordId}] 高精度文字起こし処理を開始します...`);
       console.log(`[${recordId}] 使用するファイルURL:`, fileUrl);
-      let transcript;
+      
+      let transcript = '';
       try {
-        // 新しいTranscriptionServiceを使用
-        transcript = await this.transcriptionService.transcribeFile(fileUrl);
-        console.log(`[${recordId}] 高精度文字起こし処理が成功しました`);
+        // バックエンドAPIを使用して文字起こし
+        const apiUrl = `${process.env.NEXT_PUBLIC_API_URL || ''}/api/transcribe`;
+        console.log(`[${recordId}] バックエンドAPIを使用して文字起こし: ${apiUrl}`);
         
+        const response = await fetch(apiUrl, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ fileUrl }),
+        });
+        
+        if (!response.ok) {
+          const errorText = await response.text();
+          throw new Error(`バックエンドAPIエラー: ${response.status} ${errorText}`);
+        }
+        
+        const data = await response.json();
+        transcript = data.transcript;
+        
+        if (!transcript || transcript.trim() === '') {
+          throw new Error('文字起こし結果が空です');
+        }
+        
+        // 文字起こし結果をデータベースに保存
         await prisma.record.update({
           where: { id: recordId },
           data: { transcript_text: transcript },
         });
         console.log(`[${recordId}] 文字起こし結果をデータベースに保存しました`);
-      } catch (transcriptError) {
-        console.error(`[${recordId}] 文字起こし処理エラー:`, transcriptError);
+      } catch (transcriptionError) {
+        console.error(`[${recordId}] 文字起こし処理エラー:`, transcriptionError);
         
         // フォールバック: 従来のGemini文字起こしを試行
+        console.log(`[${recordId}] フォールバック: 従来のGemini文字起こしを試行します...`);
+        
         try {
-          console.log(`[${recordId}] フォールバック: 従来のGemini文字起こしを試行します...`);
-          transcript = await this.geminiService.transcribeAudio(fileUrl);
+          transcript = await this.transcriptionService.transcribeFile(fileUrl);
           
+          // 文字起こし結果をデータベースに保存
           await prisma.record.update({
             where: { id: recordId },
             data: { transcript_text: transcript },
@@ -87,7 +111,8 @@ export class ProcessingPipeline {
         }
       }
       console.log(`[${recordId}] 文字起こし処理が完了しました`);
-
+      console.log(`[${recordId}] 文字起こし結果: ${transcript.substring(0, 100)}...`);
+      
       // 文字起こし結果をそのまま使用（整形・改善処理を行わない）
       let originalTranscript = transcript;
       
@@ -242,14 +267,70 @@ export class ProcessingPipeline {
         case 2: // 文字起こしからやり直し
           console.log(`[${recordId}] 文字起こし処理を開始します...`);
           try {
-            const transcript = await this.transcriptionService.transcribeFile(fileUrl);
-            console.log(`[${recordId}] 文字起こし処理が成功しました`);
-            
-            await prisma.record.update({
-              where: { id: recordId },
-              data: { transcript_text: transcript },
-            });
-            console.log(`[${recordId}] 文字起こし結果をデータベースに保存しました`);
+            let transcript = '';
+            try {
+              // バックエンドAPIを使用して文字起こし
+              const apiUrl = `${process.env.NEXT_PUBLIC_API_URL || ''}/api/transcribe`;
+              console.log(`[${recordId}] バックエンドAPIを使用して文字起こし: ${apiUrl}`);
+              
+              const response = await fetch(apiUrl, {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ fileUrl }),
+              });
+              
+              if (!response.ok) {
+                const errorText = await response.text();
+                throw new Error(`バックエンドAPIエラー: ${response.status} ${errorText}`);
+              }
+              
+              const data = await response.json();
+              transcript = data.transcript;
+              
+              if (!transcript || transcript.trim() === '') {
+                throw new Error('文字起こし結果が空です');
+              }
+              
+              // 文字起こし結果をデータベースに保存
+              await prisma.record.update({
+                where: { id: recordId },
+                data: { transcript_text: transcript },
+              });
+              console.log(`[${recordId}] 文字起こし結果をデータベースに保存しました`);
+            } catch (transcriptionError) {
+              console.error(`[${recordId}] 文字起こし処理エラー:`, transcriptionError);
+              
+              // フォールバック: 従来のGemini文字起こしを試行
+              console.log(`[${recordId}] フォールバック: 従来のGemini文字起こしを試行します...`);
+              
+              try {
+                transcript = await this.transcriptionService.transcribeFile(fileUrl);
+                
+                // 文字起こし結果をデータベースに保存
+                await prisma.record.update({
+                  where: { id: recordId },
+                  data: { transcript_text: transcript },
+                });
+                console.log(`[${recordId}] フォールバック文字起こし結果をデータベースに保存しました`);
+              } catch (fallbackError) {
+                console.error(`[${recordId}] フォールバック文字起こし処理エラー:`, fallbackError);
+                
+                // エラー情報をデータベースに保存
+                await prisma.record.update({
+                  where: { id: recordId },
+                  data: { 
+                    error: fallbackError instanceof Error ? fallbackError.message : '文字起こし処理中にエラーが発生しました',
+                    status: 'ERROR'
+                  },
+                });
+                
+                throw fallbackError;
+              }
+            }
+            console.log(`[${recordId}] 文字起こし処理が完了しました`);
+            console.log(`[${recordId}] 文字起こし結果: ${transcript.substring(0, 100)}...`);
             
             // 文字起こし結果をそのまま使用（整形・改善処理を行わない）
             let originalTranscript = transcript;
