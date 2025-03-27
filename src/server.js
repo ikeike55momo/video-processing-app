@@ -56,7 +56,7 @@ const os = __importStar(require("os"));
 const path = __importStar(require("path"));
 const crypto = __importStar(require("crypto"));
 // TranscriptionServiceを先頭でインポート
-const { TranscriptionService } = require('./services/transcription-service');
+// const { TranscriptionService } = require('./services/transcription-service');
 let transcriptionService;
 // 環境変数の読み込み
 dotenv.config();
@@ -250,7 +250,13 @@ app.post('/api/transcribe', (req, res) => __awaiter(void 0, void 0, void 0, func
         // 文字起こし処理
         if (!transcriptionService) {
             console.log('TranscriptionServiceを初期化します');
-            transcriptionService = new TranscriptionService();
+            try {
+                const { TranscriptionService } = require('./services/transcription-service');
+                transcriptionService = new TranscriptionService();
+            } catch (error) {
+                console.error('TranscriptionServiceの初期化に失敗しました:', error);
+                return res.status(500).json({ error: `TranscriptionServiceの初期化に失敗しました: ${error.message}` });
+            }
         }
         const transcript = yield transcriptionService.transcribeAudio(filePath);
         
@@ -453,6 +459,8 @@ app.post('/api/records/:id/retry', (req, res) => __awaiter(void 0, void 0, void 
 app.listen(PORT, () => {
   console.log(`サーバーが起動しました。ポート: ${PORT}`);
   try {
+    // TranscriptionServiceのダイナミックインポート
+    const { TranscriptionService } = require('./services/transcription-service');
     transcriptionService = new TranscriptionService();
     console.log('TranscriptionService初期化完了');
   } catch (error) {
