@@ -50,6 +50,11 @@ const client_1 = require("@prisma/client");
 const dotenv = __importStar(require("dotenv"));
 const queue_1 = require("./lib/queue");
 const storage_1 = require("./lib/storage");
+const axios = __importStar(require("axios"));
+const fs = __importStar(require("fs"));
+const os = __importStar(require("os"));
+const path = __importStar(require("path"));
+const crypto = __importStar(require("crypto"));
 // 環境変数の読み込み
 dotenv.config();
 // Expressアプリケーションの初期化
@@ -220,6 +225,92 @@ app.post('/api/process', (req, res) => __awaiter(void 0, void 0, void 0, functio
         });
     }
 }));
+// 文字起こしAPIエンドポイント
+app.post('/api/transcribe', (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    try {
+        const { fileUrl } = req.body;
+        
+        if (!fileUrl) {
+            return res.status(400).json({ error: 'fileUrlは必須です' });
+        }
+        
+        console.log(`文字起こし処理を開始: ${fileUrl}`);
+        
+        // 一時ディレクトリを作成
+        const tempDir = path.join(os.tmpdir(), 'transcription-' + crypto.randomBytes(6).toString('hex'));
+        fs.mkdirSync(tempDir, { recursive: true });
+        
+        // ファイルをダウンロード
+        const filePath = yield downloadFile(fileUrl, tempDir);
+        console.log(`ファイルをダウンロードしました: ${filePath}`);
+        
+        // 文字起こし処理
+        const { TranscriptionService } = require('./services/transcription-service');
+        const transcriptionService = new TranscriptionService();
+        const transcript = yield transcriptionService.transcribeAudio(filePath);
+        
+        // 一時ディレクトリを削除
+        try {
+            fs.rmSync(tempDir, { recursive: true, force: true });
+            console.log(`一時ディレクトリを削除しました: ${tempDir}`);
+        } catch (err) {
+            console.error(`一時ディレクトリの削除に失敗しました: ${tempDir}`, err);
+        }
+        
+        return res.json({ transcript });
+    } catch (error) {
+        console.error('文字起こし処理エラー:', error);
+        return res.status(500).json({ error: `文字起こし処理に失敗しました: ${error.message}` });
+    }
+}));
+
+/**
+ * ファイルURLからファイルをダウンロード
+ * @param {string} fileUrl ファイルのURL
+ * @param {string} tempDir 一時ディレクトリのパス
+ * @returns {Promise<string>} ダウンロードしたファイルのパス
+ */
+function downloadFile(fileUrl, tempDir) {
+    return __awaiter(this, void 0, void 0, function* () {
+        try {
+            // URLの形式に応じた処理
+            if (fileUrl.startsWith('http://') || fileUrl.startsWith('https://')) {
+                // 公開URLの場合、一時ファイルにダウンロード
+                console.log('公開URLからファイルをダウンロードします');
+                
+                // ファイル名を取得
+                const fileName = path.basename(new URL(fileUrl).pathname);
+                const localFilePath = path.join(tempDir, fileName);
+                
+                console.log(`ファイルをダウンロード中: ${localFilePath}`);
+                
+                // ファイルをダウンロード
+                const response = yield axios({
+                    method: 'get',
+                    url: fileUrl,
+                    responseType: 'stream'
+                });
+                
+                const writer = fs.createWriteStream(localFilePath);
+                response.data.pipe(writer);
+                
+                yield new Promise((resolve, reject) => {
+                    writer.on('finish', resolve);
+                    writer.on('error', reject);
+                });
+                
+                console.log(`ファイルのダウンロード完了: ${localFilePath}`);
+                return localFilePath;
+            } else {
+                throw new Error('サポートされていないURL形式です: ' + fileUrl);
+            }
+        } catch (error) {
+            console.error('ファイルダウンロードエラー:', error);
+            throw new Error(`ファイルのダウンロードに失敗しました: ${error.message}`);
+        }
+    });
+}
+
 // レコード情報取得エンドポイント
 app.get('/api/records/:id', (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
