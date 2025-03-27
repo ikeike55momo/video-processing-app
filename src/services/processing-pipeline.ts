@@ -2,7 +2,7 @@ import { GeminiService } from './gemini-service';
 import { ClaudeService } from './claude-service';
 import { FFmpegService } from './ffmpeg-service';
 import { TranscriptionService } from './transcription-service';
-import { PrismaClient, Status, ProcessingStep } from '@prisma/client';
+import { PrismaClient, Status } from '@prisma/client';
 import * as path from 'path';
 import * as fs from 'fs';
 import * as os from 'os';
@@ -13,6 +13,9 @@ import { GetObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 
 const prisma = new PrismaClient();
+
+// 処理ステップの定義
+type ProcessingStep = 'TRANSCRIPTION' | 'SUMMARY' | 'ARTICLE' | null;
 
 // AI処理パイプラインを管理するクラス
 export class ProcessingPipeline {
@@ -61,17 +64,17 @@ export class ProcessingPipeline {
         where: { id: recordId },
         data: { 
           status: Status.PROCESSING,
-          processing_step: ProcessingStep.TRANSCRIPTION
+          processing_step: 'TRANSCRIPTION' as ProcessingStep
         }
       });
       
       // ファイルURLを取得
       let fileUrl = '';
-      if (record.file_key.startsWith('http://') || record.file_key.startsWith('https://')) {
+      if (record.file_key && (record.file_key.startsWith('http://') || record.file_key.startsWith('https://'))) {
         fileUrl = record.file_key;
       } else {
         const r2BucketName = record.r2_bucket || process.env.R2_BUCKET_NAME || 'video-processing';
-        fileUrl = record.file_key;
+        fileUrl = record.file_key || '';
       }
       
       if (!fileUrl) {
@@ -182,7 +185,7 @@ export class ProcessingPipeline {
       await prisma.record.update({
         where: { id: recordId },
         data: { 
-          processing_step: ProcessingStep.TRANSCRIPTION
+          processing_step: 'TRANSCRIPTION' as ProcessingStep
         }
       });
       
@@ -204,7 +207,7 @@ export class ProcessingPipeline {
       await prisma.record.update({
         where: { id: recordId },
         data: { 
-          processing_step: ProcessingStep.SUMMARY
+          processing_step: 'SUMMARY' as ProcessingStep
         }
       });
       
@@ -225,7 +228,7 @@ export class ProcessingPipeline {
       await prisma.record.update({
         where: { id: recordId },
         data: { 
-          processing_step: ProcessingStep.ARTICLE
+          processing_step: 'ARTICLE' as ProcessingStep
         }
       });
       
