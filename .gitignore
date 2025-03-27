@@ -52,3 +52,7 @@ yarn-error.log*
 # Google Cloud認証情報
 google-credentials.json
 google-credentials
+
+# テスト用ファイル
+test-video.mp4
+transcription-result-*.txt
