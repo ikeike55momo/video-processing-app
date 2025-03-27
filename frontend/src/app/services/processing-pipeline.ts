@@ -91,6 +91,8 @@ export class ProcessingPipeline {
       // 文字起こし結果をそのまま使用（整形・改善処理を行わない）
       let originalTranscript = transcript;
       
+      console.log(`[${recordId}] 文字起こし結果: ${originalTranscript.substring(0, 100)}...`);
+      
       // 2. 要約処理
       console.log(`[${recordId}] 要約処理を開始します...`);
       let summary;
@@ -251,6 +253,8 @@ export class ProcessingPipeline {
             
             // 文字起こし結果をそのまま使用（整形・改善処理を行わない）
             let originalTranscript = transcript;
+            
+            console.log(`[${recordId}] 文字起こし結果: ${originalTranscript.substring(0, 100)}...`);
             
             // 要約処理に進む
             await this.retryFromStep(recordId, 3);
