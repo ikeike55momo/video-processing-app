@@ -14,11 +14,14 @@ datasource db {
 model Record {
   id              String    @id @default(uuid())
   file_url        String
+  file_key        String?
+  r2_bucket       String?
   transcript_text String?
   summary_text    String?
   article_text    String?
   error           String?
   status          Status    @default(UPLOADED)
+  processing_step String?
   created_at      DateTime  @default(now())
   deleted_at      DateTime?
 
@@ -28,6 +31,8 @@ model Record {
 enum Status {
   UPLOADED
   PROCESSING
+  TRANSCRIBED
+  SUMMARIZED
   DONE
   ERROR
 }

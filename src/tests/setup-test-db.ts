@@ -26,13 +26,12 @@ async function setupTestDatabase() {
         await prisma.record.update({
           where: { id: testRecord.id },
           data: {
-            file_key: testRecord.file_key,
+            file_url: testRecord.file_url,
             status: Status.UPLOADED,
             transcript_text: null,
             summary_text: null,
             article_text: null,
-            error: null,
-            processing_step: null
+            error: null
           }
         });
       } else {
@@ -40,7 +39,7 @@ async function setupTestDatabase() {
         await prisma.record.create({
           data: {
             id: testRecord.id,
-            file_key: testRecord.file_key,
+            file_url: testRecord.file_url,
             status: Status.UPLOADED
           }
         });
@@ -61,7 +60,7 @@ async function setupTestDatabase() {
     console.log('テスト用レコード:');
     console.table(records.map(r => ({
       id: r.id,
-      file_key: r.file_key,
+      file_url: r.file_url,
       status: r.status
     })));
     
