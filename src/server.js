@@ -257,11 +257,11 @@ app.post('/api/transcribe', async (req, res) => {
     fs.mkdirSync(tempDir, { recursive: true });
     
     // ファイルをダウンロード
-    const filePath = yield downloadFile(fileUrl, tempDir);
+    const filePath = await downloadFile(fileUrl, tempDir);
     console.log(`ファイルをダウンロードしました: ${filePath}`);
     
     // 文字起こし処理
-    const transcript = yield transcriptionService.transcribeAudio(filePath);
+    const transcript = await transcriptionService.transcribeAudio(filePath);
     
     // 一時ディレクトリを削除
     try {
@@ -284,45 +284,43 @@ app.post('/api/transcribe', async (req, res) => {
  * @param {string} tempDir 一時ディレクトリのパス
  * @returns {Promise<string>} ダウンロードしたファイルのパス
  */
-function downloadFile(fileUrl, tempDir) {
-  return __awaiter(this, void 0, void 0, function* () {
-    try {
-      // URLの形式に応じた処理
-      if (fileUrl.startsWith('http://') || fileUrl.startsWith('https://')) {
-        // 公開URLの場合、一時ファイルにダウンロード
-        console.log('公開URLからファイルをダウンロードします');
-        
-        // ファイル名を取得
-        const fileName = path.basename(new URL(fileUrl).pathname);
-        const localFilePath = path.join(tempDir, fileName);
-        
-        console.log(`ファイルをダウンロード中: ${localFilePath}`);
-        
-        // ファイルをダウンロード
-        const response = yield axios({
-          method: 'get',
-          url: fileUrl,
-          responseType: 'stream'
-        });
-        
-        const writer = fs.createWriteStream(localFilePath);
-        response.data.pipe(writer);
-        
-        yield new Promise((resolve, reject) => {
-          writer.on('finish', resolve);
-          writer.on('error', reject);
-        });
-        
-        console.log(`ファイルのダウンロード完了: ${localFilePath}`);
-        return localFilePath;
-      } else {
-        throw new Error('サポートされていないURL形式です: ' + fileUrl);
-      }
-    } catch (error) {
-      console.error('ファイルダウンロードエラー:', error);
-      throw new Error(`ファイルのダウンロードに失敗しました: ${error.message}`);
+async function downloadFile(fileUrl, tempDir) {
+  try {
+    // URLの形式に応じた処理
+    if (fileUrl.startsWith('http://') || fileUrl.startsWith('https://')) {
+      // 公開URLの場合、一時ファイルにダウンロード
+      console.log('公開URLからファイルをダウンロードします');
+      
+      // ファイル名を取得
+      const fileName = path.basename(new URL(fileUrl).pathname);
+      const localFilePath = path.join(tempDir, fileName);
+      
+      console.log(`ファイルをダウンロード中: ${localFilePath}`);
+      
+      // ファイルをダウンロード
+      const response = await axios({
+        method: 'get',
+        url: fileUrl,
+        responseType: 'stream'
+      });
+      
+      const writer = fs.createWriteStream(localFilePath);
+      response.data.pipe(writer);
+      
+      await new Promise((resolve, reject) => {
+        writer.on('finish', resolve);
+        writer.on('error', reject);
+      });
+      
+      console.log(`ファイルのダウンロード完了: ${localFilePath}`);
+      return localFilePath;
+    } else {
+      throw new Error('サポートされていないURL形式です: ' + fileUrl);
     }
-  });
+  } catch (error) {
+    console.error('ファイルダウンロードエラー:', error);
+    throw new Error(`ファイルのダウンロードに失敗しました: ${error.message}`);
+  }
 }
 
 // レコード情報取得エンドポイント
