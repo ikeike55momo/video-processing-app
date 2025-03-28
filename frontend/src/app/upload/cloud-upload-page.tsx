@@ -69,7 +69,7 @@ export default function CloudUploadPage() {
       setUploadStage("準備中...");
 
       // 署名付きURLの取得（ファイルサイズを含める）
-      const apiUrl = process.env.NEXT_PUBLIC_API_URL || '';
+      const apiUrl = "https://video-processing-app.onrender.com"; 
       const response = await fetch(`${apiUrl}/api/upload-url`, {
         method: "POST",
         headers: {

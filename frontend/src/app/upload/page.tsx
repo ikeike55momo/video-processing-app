@@ -71,7 +71,7 @@ export default function UploadPage() {
       setUploadStage("準備中...");
 
       // 署名付きURLの取得（ファイルサイズを含める）
-      const apiUrl = process.env.NEXT_PUBLIC_API_URL || '';
+      const apiUrl = "https://video-processing-app.onrender.com"; // 直接バックエンドAPIのURLを指定
       const response = await fetch(`${apiUrl}/api/upload-url`, {
         method: "POST",
         headers: {
@@ -115,7 +115,7 @@ export default function UploadPage() {
 
       // 処理開始リクエスト
       setUploadStage("処理を開始中...");
-      const processResponse = await fetch(`${apiUrl}/api/process`, {
+      const processResponse = await fetch(`https://video-processing-app.onrender.com/api/process`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
