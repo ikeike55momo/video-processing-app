@@ -41,18 +41,43 @@ app.use((req: Request, res: Response, next: NextFunction) => {
   const origin = req.headers.origin;
   if (origin && allowedOrigins.includes(origin)) {
     res.header('Access-Control-Allow-Origin', origin);
+    res.header('Access-Control-Allow-Credentials', 'true'); // クレデンシャル付きリクエストを許可
   } else {
     // デフォルトのオリジンを設定
     res.header('Access-Control-Allow-Origin', '*');
+    // クレデンシャルを使用しない場合のみワイルドカードを使用
   }
   
   // 認証ヘッダーを含むすべての必要なヘッダーを許可
   res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
   res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-  res.header('Access-Control-Allow-Credentials', 'true'); // クレデンシャル付きリクエストを許可
+  
+  // プリフライトリクエストの処理を改善
+  if (req.method === 'OPTIONS') {
+    res.status(200).end();
+    return;
+  }
+  next();
+});
+
+// 特定のAPIエンドポイント用のCORS処理を追加
+app.use('/api/upload-url', (req: Request, res: Response, next: NextFunction) => {
+  const origin = req.headers.origin;
+  const allowedOrigins = ['https://vpm.ririaru-stg.cloud', 'https://video-frontend-nextjs-app.onrender.com', 'https://video-processing-frontend.onrender.com'];
+  
+  if (origin && allowedOrigins.includes(origin)) {
+    res.header('Access-Control-Allow-Origin', origin);
+    res.header('Access-Control-Allow-Credentials', 'true');
+  } else {
+    res.header('Access-Control-Allow-Origin', '*');
+  }
+  
+  res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
+  res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
   
   if (req.method === 'OPTIONS') {
-    return res.sendStatus(204);
+    res.status(200).end();
+    return;
   }
   next();
 });
@@ -101,9 +126,9 @@ app.post('/api/upload-url', async (req: Request, res: Response) => {
     const record = await prisma.record.create({
       data: {
         file_key: uploadData.key,
-        r2_bucket: uploadData.bucket,
+        r2_bucket: uploadData.bucket || '',
         status: 'UPLOADED',
-        file_url: uploadData.fileUrl || '' // 空文字列をデフォルト値として設定
+        file_url: uploadData.url
       }
     });
 
@@ -150,7 +175,7 @@ app.post('/api/process', async (req: Request, res: Response) => {
     await addJob('transcription', {
       type: 'transcription',
       recordId: recordId,
-      fileKey: record.file_key
+      fileKey: record.file_key || '' // nullの場合に空文字列を使用
     });
 
     // ステータスを更新
@@ -294,7 +319,7 @@ app.post('/api/records/:id/retry', async (req: Request<{ id: string }>, res: Res
     await addJob(queueName, {
       type: jobType,
       recordId: recordId,
-      fileKey: record.file_key
+      fileKey: record.file_key || '' // nullの場合に空文字列を使用
     });
 
     // ステータスを更新
