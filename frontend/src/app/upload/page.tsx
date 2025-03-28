@@ -77,6 +77,7 @@ export default function UploadPage() {
         headers: {
           "Content-Type": "application/json",
         },
+        credentials: 'include', // 認証情報を含める
         body: JSON.stringify({
           fileName: file.name,
           contentType: file.type,
@@ -119,6 +120,7 @@ export default function UploadPage() {
         headers: {
           "Content-Type": "application/json",
         },
+        credentials: 'include', // 認証情報を含める
         body: JSON.stringify({
           fileKey: result.key,
           fileName: file.name,
