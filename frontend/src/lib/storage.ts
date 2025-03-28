@@ -385,36 +385,81 @@ export async function uploadMultipart(
     const parts: { ETag: string; PartNumber: number }[] = [];
     let uploadedParts = 0;
 
-    // 各パートをアップロード
-    for (let i = 0; i < totalParts; i++) {
-      const { url, partNumber } = partUrls[i];
-      
-      // ファイルの該当部分を切り出し
-      const start = i * partSize;
-      const end = Math.min(start + partSize, file.size);
-      const chunk = file.slice(start, end);
-      
-      // パートをアップロード
-      const etag = await uploadPart(url, chunk);
-      
-      // 結果を保存
-      parts.push({
-        ETag: etag,
-        PartNumber: partNumber
-      });
-      
-      // 進捗を更新
+    // 並列処理の設定
+    const MAX_CONCURRENT_UPLOADS = 5; // 同時アップロード数
+    const MAX_RETRIES = 3; // 最大再試行回数
+    const TIMEOUT_MS = 30000; // タイムアウト時間（ミリ秒）
+
+    // パートを処理するための関数
+    const processPartUpload = async (partInfo: { url: string; partNumber: number }, retryCount = 0) => {
+      try {
+        // ファイルの該当部分を切り出し
+        const start = (partInfo.partNumber - 1) * partSize;
+        const end = Math.min(start + partSize, file.size);
+        const chunk = file.slice(start, end);
+        
+        // パートをアップロードし、タイムアウト処理を追加
+        const etag = await Promise.race([
+          uploadPart(partInfo.url, chunk),
+          new Promise<never>((_, reject) => 
+            setTimeout(() => reject(new Error('アップロードタイムアウト')), TIMEOUT_MS)
+          )
+        ]);
+        
+        // 結果を保存
+        return {
+          ETag: etag,
+          PartNumber: partInfo.partNumber
+        };
+      } catch (error) {
+        // 再試行回数が上限に達していない場合は再試行
+        if (retryCount < MAX_RETRIES) {
+          console.log(`パート ${partInfo.partNumber} のアップロードに失敗しました。再試行 ${retryCount + 1}/${MAX_RETRIES}`);
+          return processPartUpload(partInfo, retryCount + 1);
+        }
+        throw error;
+      }
+    };
+
+    // 進捗更新用の関数
+    const updateProgress = () => {
       uploadedParts++;
       if (progressCallback) {
         progressCallback(Math.round((uploadedParts / totalParts) * 100));
       }
-    }
+    };
+
+    // チャンクを並列処理するための関数
+    const uploadPartsInBatches = async () => {
+      // すべてのパートをキューに入れる
+      const queue = [...partUrls];
+      const results: { ETag: string; PartNumber: number }[] = [];
+      
+      while (queue.length > 0) {
+        // 同時処理数を制限して並列アップロード
+        const batch = queue.splice(0, MAX_CONCURRENT_UPLOADS);
+        const batchPromises = batch.map(async (partInfo) => {
+          const result = await processPartUpload(partInfo);
+          updateProgress();
+          return result;
+        });
+        
+        // バッチ内のすべてのアップロードを待機
+        const batchResults = await Promise.all(batchPromises);
+        results.push(...batchResults);
+      }
+      
+      return results;
+    };
+
+    // 並列処理でパートをアップロード
+    const uploadedResults = await uploadPartsInBatches();
     
     // パートをETagの順にソート
-    parts.sort((a, b) => a.PartNumber - b.PartNumber);
+    const sortedParts = uploadedResults.sort((a, b) => a.PartNumber - b.PartNumber);
     
     // マルチパートアップロードを完了
-    await completeMultipartUpload(completeUrl, parts);
+    await completeMultipartUpload(completeUrl, sortedParts);
     
     return {
       success: true,
