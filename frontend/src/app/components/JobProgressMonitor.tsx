@@ -24,8 +24,8 @@ interface JobProgressMonitorProps {
 }
 
 // API URLの設定
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:10000';
-const SOCKET_URL = API_URL.replace(/^https?:\/\//, '');
+const API_URL = process.env.NEXT_PUBLIC_API_URL || '';
+const SOCKET_URL = API_URL ? API_URL.replace(/^https?:\/\//, '') : 'vpm.ririaru-stg.cloud';
 
 const JobProgressMonitor: React.FC<JobProgressMonitorProps> = ({
   jobId,
