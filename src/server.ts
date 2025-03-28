@@ -42,11 +42,15 @@ app.use((req: Request, res: Response, next: NextFunction) => {
   if (origin && (allowedOrigins.includes('*') || allowedOrigins.includes(origin))) {
     res.header('Access-Control-Allow-Origin', origin);
   } else {
+    // デフォルトのオリジンを設定
     res.header('Access-Control-Allow-Origin', '*');
   }
   
+  // 認証ヘッダーを含むすべての必要なヘッダーを許可
   res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
   res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+  res.header('Access-Control-Allow-Credentials', 'true'); // クレデンシャル付きリクエストを許可
+  
   if (req.method === 'OPTIONS') {
     return res.sendStatus(204);
   }
