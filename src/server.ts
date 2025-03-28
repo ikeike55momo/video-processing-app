@@ -5,6 +5,9 @@ import * as dotenv from 'dotenv';
 import { addJob } from './lib/queue';
 import { generateUploadUrl, getDownloadUrl } from './lib/storage';
 import path from 'path';
+import http from 'http';
+import { queueManager, QUEUE_NAMES } from './lib/bull-queue';
+import { socketManager } from './lib/socket-manager';
 
 // 環境変数の読み込み
 dotenv.config();
@@ -13,6 +16,17 @@ dotenv.config();
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+// HTTPサーバーの作成
+const server = http.createServer(app);
+
+// Socket.IOサーバーの初期化
+socketManager.initialize(server);
+
+// BullMQキューの初期化
+queueManager.initQueue(QUEUE_NAMES.TRANSCRIPTION);
+queueManager.initQueue(QUEUE_NAMES.SUMMARY);
+queueManager.initQueue(QUEUE_NAMES.ARTICLE);
+
 // Prismaクライアントの初期化
 const prisma = new PrismaClient();
 
@@ -20,7 +34,7 @@ const prisma = new PrismaClient();
 app.use(express.json());
 
 // CORSミドルウェア
-app.use((req, res, next) => {
+app.use((req: Request, res: Response, next: NextFunction) => {
   // ALLOWED_ORIGINSが設定されている場合は、そのオリジンからのリクエストのみを許可
   const allowedOrigins = process.env.ALLOWED_ORIGINS ? process.env.ALLOWED_ORIGINS.split(',') : ['*'];
   
@@ -40,7 +54,7 @@ app.use((req, res, next) => {
 });
 
 // ルートエンドポイント - APIの情報を返す
-app.get('/', (req, res) => {
+app.get('/', (req: Request, res: Response) => {
   res.status(200).json({
     message: "Video Processing API",
     version: "1.0.0",
@@ -55,17 +69,17 @@ app.get('/', (req, res) => {
 });
 
 // ヘルスチェックエンドポイント
-app.get('/api/health', (req, res) => {
+app.get('/api/health', (req: Request, res: Response) => {
   res.status(200).json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
 // 追加のヘルスチェックエンドポイント（Render用）
-app.get('/api/healthcheck', (req, res) => {
+app.get('/api/healthcheck', (req: Request, res: Response) => {
   res.status(200).json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
 // アップロード用URLを生成するエンドポイント
-app.post('/api/upload-url', async (req, res) => {
+app.post('/api/upload-url', async (req: Request, res: Response) => {
   try {
     const { fileName, contentType } = req.body;
     
@@ -84,7 +98,8 @@ app.post('/api/upload-url', async (req, res) => {
       data: {
         file_key: uploadData.key,
         r2_bucket: uploadData.bucket,
-        status: 'UPLOADED'
+        status: 'UPLOADED',
+        file_url: uploadData.fileUrl || '' // 空文字列をデフォルト値として設定
       }
     });
 
@@ -103,7 +118,7 @@ app.post('/api/upload-url', async (req, res) => {
 });
 
 // 処理開始エンドポイント
-app.post('/api/process', async (req, res) => {
+app.post('/api/process', async (req: Request, res: Response) => {
   try {
     const { recordId } = req.body;
     
@@ -154,7 +169,7 @@ app.post('/api/process', async (req, res) => {
 });
 
 // レコード情報取得エンドポイント
-app.get('/api/records/:id', async (req, res) => {
+app.get('/api/records/:id', async (req: Request<{ id: string }>, res: Response) => {
   try {
     const recordId = req.params.id;
     
@@ -193,7 +208,7 @@ app.get('/api/records/:id', async (req, res) => {
 });
 
 // すべてのレコード取得エンドポイント
-app.get('/api/records', async (req, res) => {
+app.get('/api/records', async (req: Request, res: Response) => {
   try {
     // クエリパラメータからページネーション情報を取得
     const page = parseInt(req.query.page as string) || 1;
@@ -233,7 +248,7 @@ app.get('/api/records', async (req, res) => {
 });
 
 // 再試行エンドポイント
-app.post('/api/records/:id/retry', async (req, res) => {
+app.post('/api/records/:id/retry', async (req: Request<{ id: string }>, res: Response) => {
   try {
     const recordId = req.params.id;
     
@@ -301,6 +316,129 @@ app.post('/api/records/:id/retry', async (req, res) => {
   }
 });
 
-// indexからインポートされるため、サーバー起動部分は削除
+// WebSocketの進捗状況を取得するエンドポイント
+app.get('/api/job-status/:jobId', async (req: Request<{ jobId: string }>, res: Response) => {
+  try {
+    const { jobId } = req.params;
+    
+    // 各キューからジョブを検索
+    let job = null;
+    for (const queueName of Object.values(QUEUE_NAMES)) {
+      const queue = queueManager.getQueue(queueName);
+      if (queue) {
+        job = await queue.getJob(jobId);
+        if (job) break;
+      }
+    }
+    
+    if (!job) {
+      return res.status(404).json({ error: 'Job not found' });
+    }
+    
+    const state = await job.getState();
+    const progress = job.progress || 0;
+    
+    res.status(200).json({
+      jobId,
+      state,
+      progress,
+      data: job.data,
+      timestamp: Date.now()
+    });
+  } catch (error) {
+    console.error('Error getting job status:', error);
+    res.status(500).json({
+      error: 'Error getting job status',
+      details: error instanceof Error ? error.message : 'Unknown error'
+    });
+  }
+});
+
+// 文字起こし処理を開始するエンドポイント（BullMQバージョン）
+app.post('/api/transcribe', async (req: Request, res: Response) => {
+  try {
+    const { fileKey, recordId } = req.body;
+    
+    if (!fileKey || !recordId) {
+      return res.status(400).json({
+        error: 'Missing required fields',
+        details: 'fileKey and recordId are required'
+      });
+    }
+    
+    // レコードの存在確認
+    const record = await prisma.record.findUnique({
+      where: { id: recordId }
+    });
+    
+    if (!record) {
+      return res.status(404).json({ error: 'Record not found' });
+    }
+    
+    // ステータスを更新
+    await prisma.record.update({
+      where: { id: recordId },
+      data: { status: 'PROCESSING' }
+    });
+    
+    // ファイルサイズを取得（可能であれば）
+    let fileSize: number | null = null;
+    try {
+      // ここでファイルサイズを取得するロジックを実装
+      // 例: R2からファイルのメタデータを取得
+    } catch (error) {
+      console.warn('Failed to get file size:', error);
+    }
+    
+    // ジョブをキューに追加
+    const jobId = await queueManager.addJob(QUEUE_NAMES.TRANSCRIPTION, {
+      type: 'transcription',
+      fileKey,
+      recordId,
+      metadata: { fileSize }
+    });
+    
+    res.status(200).json({
+      message: 'Transcription job queued successfully',
+      jobId,
+      recordId
+    });
+  } catch (error) {
+    console.error('Error starting transcription:', error);
+    res.status(500).json({
+      error: 'Error starting transcription',
+      details: error instanceof Error ? error.message : 'Unknown error'
+    });
+  }
+});
+
+// サーバーの起動
+server.listen(PORT, () => {
+  console.log(`Server is running on port ${PORT}`);
+  console.log('Node.jsバージョン:', process.version);
+  console.log('DATABASE_URL:', process.env.DATABASE_URL ? '設定されています' : '設定されていません');
+  console.log('プロセスの作業ディレクトリ:', process.cwd());
+});
+
+// プロセス終了時の処理
+process.on('SIGTERM', async () => {
+  console.log('SIGTERM received, shutting down gracefully');
+  await queueManager.cleanup();
+  await prisma.$disconnect();
+  server.close(() => {
+    console.log('Server closed');
+    process.exit(0);
+  });
+});
+
+process.on('SIGINT', async () => {
+  console.log('SIGINT received, shutting down gracefully');
+  await queueManager.cleanup();
+  await prisma.$disconnect();
+  server.close(() => {
+    console.log('Server closed');
+    process.exit(0);
+  });
+});
 
 export default app;
