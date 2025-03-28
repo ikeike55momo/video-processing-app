@@ -63,155 +63,147 @@ const TMP_DIR = process.env.TMP_DIR || '/tmp';
  * @param audioPath 音声ファイルパス
  * @returns 文字起こし結果
  */
-function transcribeAudio(audioPath) {
-    return __awaiter(this, void 0, void 0, function* () {
-        // ここではGemini APIを使用する簡易的な実装
-        // 実際の実装では適切なAPIクライアントを使用
-        const apiKey = process.env.GEMINI_API_KEY;
-        if (!apiKey) {
-            throw new Error('GEMINI_API_KEY is missing');
-        }
-        // TODO: 実際のGemini API呼び出し実装
-        // この例では単純なモックを返しています
-        console.log(`[MOCK] Transcribing audio file: ${audioPath}`);
-        // モック応答（実際はAPIを使用）
-        return "これはデモの文字起こし結果です。実際にはGemini APIを使用して音声認識を行います。";
-    });
+async function transcribeAudio(audioPath) {
+    // ここではGemini APIを使用する簡易的な実装
+    // 実際の実装では適切なAPIクライアントを使用
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (!apiKey) {
+        throw new Error('GEMINI_API_KEY is missing');
+    }
+    // TODO: 実際のGemini API呼び出し実装
+    // この例では単純なモックを返しています
+    console.log(`[MOCK] Transcribing audio file: ${audioPath}`);
+    // モック応答（実際はAPIを使用）
+    return "これはデモの文字起こし結果です。実際にはGemini APIを使用して音声認識を行います。";
 }
 /**
  * 大きなファイルを複数の小さなチャンクに分割して処理する
  * @param filePath ファイルパス
  * @returns 処理結果の配列
  */
-function processLargeFile(filePath) {
-    return __awaiter(this, void 0, void 0, function* () {
-        // 一時ディレクトリの作成
-        const workDir = path.join(TMP_DIR, `transcription-${Date.now()}`);
-        fs.mkdirSync(workDir, { recursive: true });
+async function processLargeFile(filePath) {
+    // 一時ディレクトリの作成
+    const workDir = path.join(TMP_DIR, `transcription-${Date.now()}`);
+    fs.mkdirSync(workDir, { recursive: true });
+    try {
+        // 動画ファイルから音声を抽出
+        const audioPath = path.join(workDir, 'audio.mp3');
+        console.log(`Extracting audio from ${filePath} to ${audioPath}`);
+        // FFmpegを使用して音声抽出
+        (0, child_process_1.execSync)(`ffmpeg -i "${filePath}" -q:a 0 -map a "${audioPath}" -y`, { stdio: 'inherit' });
+        // 音声ファイルを分割（実際の実装ではファイルサイズに基づいて分割）
+        // この例では簡易的に全体を処理
+        const transcription = await transcribeAudio(audioPath);
+        // 一時ファイルの削除
+        fs.unlinkSync(audioPath);
+        return [transcription];
+    }
+    catch (error) {
+        console.error('Error processing file:', error);
+        throw error;
+    }
+    finally {
+        // 一時ディレクトリの削除
         try {
-            // 動画ファイルから音声を抽出
-            const audioPath = path.join(workDir, 'audio.mp3');
-            console.log(`Extracting audio from ${filePath} to ${audioPath}`);
-            // FFmpegを使用して音声抽出
-            (0, child_process_1.execSync)(`ffmpeg -i "${filePath}" -q:a 0 -map a "${audioPath}" -y`, { stdio: 'inherit' });
-            // 音声ファイルを分割（実際の実装ではファイルサイズに基づいて分割）
-            // この例では簡易的に全体を処理
-            const transcription = yield transcribeAudio(audioPath);
-            // 一時ファイルの削除
-            fs.unlinkSync(audioPath);
-            return [transcription];
+            fs.rmSync(workDir, { recursive: true, force: true });
         }
-        catch (error) {
-            console.error('Error processing file:', error);
-            throw error;
+        catch (cleanupError) {
+            console.error('Error cleaning up temp directory:', cleanupError);
         }
-        finally {
-            // 一時ディレクトリの削除
-            try {
-                fs.rmSync(workDir, { recursive: true, force: true });
-            }
-            catch (cleanupError) {
-                console.error('Error cleaning up temp directory:', cleanupError);
-            }
-        }
-    });
+    }
 }
 /**
  * ジョブを処理する関数
  */
-function processJob() {
-    return __awaiter(this, void 0, void 0, function* () {
-        let job = null;
-        try {
-            // キューからジョブを取得
-            job = yield (0, queue_1.getJob)(QUEUE_NAME);
-            if (!job) {
-                // ジョブがなければ待機して終了
-                console.log('No jobs in queue. Waiting...');
-                return;
-            }
-            console.log(`Processing transcription job ${job.id} for record ${job.recordId}`);
-            // 処理状態の更新
-            yield prisma.record.update({
-                where: { id: job.recordId },
-                data: {
-                    status: 'PROCESSING',
-                    processing_step: 'TRANSCRIPTION'
-                }
-            });
-            // R2からファイルを取得
-            console.log(`Downloading file with key: ${job.fileKey}`);
-            const fileData = yield (0, storage_1.getFileContents)(job.fileKey);
-            // 一時ファイルに保存
-            const tempFilePath = path.join(TMP_DIR, `${Date.now()}-${job.id}.mp4`);
-            fs.writeFileSync(tempFilePath, fileData);
-            // 大きなファイルの場合は分割処理
-            console.log(`Starting transcription process for file: ${tempFilePath}`);
-            const transcriptParts = yield processLargeFile(tempFilePath);
-            // 結果をデータベースに保存
-            const fullTranscript = transcriptParts.join('\n\n');
-            yield prisma.record.update({
-                where: { id: job.recordId },
-                data: {
-                    transcript_text: fullTranscript,
-                    status: 'TRANSCRIBED',
-                    processing_step: null
-                }
-            });
-            // 要約キューにジョブを追加
-            yield (0, queue_1.addJob)(SUMMARY_QUEUE, {
-                type: 'summary',
-                recordId: job.recordId,
-                fileKey: job.fileKey
-            });
-            // 一時ファイルの削除
-            fs.unlinkSync(tempFilePath);
-            // ジョブを完了としてマーク
-            yield (0, queue_1.completeJob)(QUEUE_NAME, job.id);
-            console.log(`Transcription job ${job.id} completed successfully`);
+async function processJob() {
+    let job = null;
+    try {
+        // キューからジョブを取得
+        job = await (0, queue_1.getJob)(QUEUE_NAME);
+        if (!job) {
+            // ジョブがなければ待機して終了
+            console.log('No jobs in queue. Waiting...');
+            return;
         }
-        catch (error) {
-            console.error('Error processing transcription job:', error);
-            // ジョブIDがある場合のみリトライを実行
-            if (job === null || job === void 0 ? void 0 : job.id) {
-                yield (0, queue_1.failJob)(QUEUE_NAME, job.id);
-                // エラーステータスを記録
-                try {
-                    yield prisma.record.update({
-                        where: { id: job.recordId },
-                        data: {
-                            status: 'ERROR',
-                            error: error instanceof Error ? error.message : String(error),
-                            processing_step: null
-                        }
-                    });
-                }
-                catch (dbError) {
-                    console.error('Failed to update record status:', dbError);
-                }
+        console.log(`Processing transcription job ${job.id} for record ${job.recordId}`);
+        // 処理状態の更新
+        await prisma.record.update({
+            where: { id: job.recordId },
+            data: {
+                status: 'PROCESSING',
+                processing_step: 'TRANSCRIPTION'
+            }
+        });
+        // R2からファイルを取得
+        console.log(`Downloading file with key: ${job.fileKey}`);
+        const fileData = await (0, storage_1.getFileContents)(job.fileKey);
+        // 一時ファイルに保存
+        const tempFilePath = path.join(TMP_DIR, `${Date.now()}-${job.id}.mp4`);
+        fs.writeFileSync(tempFilePath, fileData);
+        // 大きなファイルの場合は分割処理
+        console.log(`Starting transcription process for file: ${tempFilePath}`);
+        const transcriptParts = await processLargeFile(tempFilePath);
+        // 結果をデータベースに保存
+        const fullTranscript = transcriptParts.join('\n\n');
+        await prisma.record.update({
+            where: { id: job.recordId },
+            data: {
+                transcript_text: fullTranscript,
+                status: 'TRANSCRIBED',
+                processing_step: null
+            }
+        });
+        // 要約キューにジョブを追加
+        await (0, queue_1.addJob)(SUMMARY_QUEUE, {
+            type: 'summary',
+            recordId: job.recordId,
+            fileKey: job.fileKey
+        });
+        // 一時ファイルの削除
+        fs.unlinkSync(tempFilePath);
+        // ジョブを完了としてマーク
+        await (0, queue_1.completeJob)(QUEUE_NAME, job.id);
+        console.log(`Transcription job ${job.id} completed successfully`);
+    }
+    catch (error) {
+        console.error('Error processing transcription job:', error);
+        // ジョブIDがある場合のみリトライを実行
+        if (job === null || job === void 0 ? void 0 : job.id) {
+            await (0, queue_1.failJob)(QUEUE_NAME, job.id);
+            // エラーステータスを記録
+            try {
+                await prisma.record.update({
+                    where: { id: job.recordId },
+                    data: {
+                        status: 'ERROR',
+                        error: error instanceof Error ? error.message : String(error),
+                        processing_step: null
+                    }
+                });
+            }
+            catch (dbError) {
+                console.error('Failed to update record status:', dbError);
             }
         }
-    });
+    }
 }
 /**
  * メインワーカー処理
  */
-function startWorker() {
-    return __awaiter(this, void 0, void 0, function* () {
-        console.log('Transcription worker started');
-        try {
-            // 継続的にジョブを処理
-            while (true) {
-                yield processJob();
-                // 少し待機してからポーリング
-                yield new Promise(resolve => setTimeout(resolve, 1000));
-            }
+async function startWorker() {
+    console.log('Transcription worker started');
+    try {
+        // 継続的にジョブを処理
+        while (true) {
+            await processJob();
+            // 少し待機してからポーリング
+            await new Promise(resolve => setTimeout(resolve, 1000));
         }
-        catch (error) {
-            console.error('Fatal error in worker:', error);
-            process.exit(1);
-        }
-    });
+    }
+    catch (error) {
+        console.error('Fatal error in worker:', error);
+        process.exit(1);
+    }
 }
 // ワーカー開始
 startWorker().catch(error => {
