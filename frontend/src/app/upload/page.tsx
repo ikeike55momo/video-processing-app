@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { useSession } from "next-auth/react";
 import { uploadMultipart } from "@/lib/storage";
+import JobProgressMonitor from "../components/JobProgressMonitor";
 
 export default function UploadPage() {
   const { data: session, status } = useSession();
@@ -13,6 +14,7 @@ export default function UploadPage() {
   const [uploadProgress, setUploadProgress] = useState(0);
   const [error, setError] = useState("");
   const [uploadStage, setUploadStage] = useState<string>("");
+  const [jobId, setJobId] = useState<string | null>(null);
 
   // セッションチェック
   if (status === "loading") {
@@ -111,13 +113,14 @@ export default function UploadPage() {
 
       // 処理開始リクエスト
       setUploadStage("処理を開始中...");
-      const processResponse = await fetch("/api/process", {
+      const processResponse = await fetch("/api/transcribe", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          fileUrl,
+          fileKey: result.fileKey,
+          fileName: file.name,
         }),
       });
 
@@ -125,10 +128,14 @@ export default function UploadPage() {
         throw new Error("処理の開始に失敗しました");
       }
 
-      const { recordId } = await processResponse.json();
-
-      // 結果ページへリダイレクト（recordIdを指定）
-      router.push(`/results?recordId=${recordId}`);
+      const { recordId, jobId } = await processResponse.json();
+      
+      // ジョブIDを設定
+      setJobId(jobId);
+      setUploadStage("処理中...");
+      
+      // 結果ページへのリダイレクトは行わず、このページで進捗を表示する
+      // router.push(`/results?recordId=${recordId}`);
     } catch (err) {
       console.error("アップロードエラー:", err);
       setError(
@@ -273,7 +280,7 @@ export default function UploadPage() {
             </div>
           )}
 
-          {uploading && (
+          {uploading && !jobId && (
             <div className="mb-6">
               <h3 className="mb-2 text-md font-medium text-slate-700">
                 {uploadStage} - 進捗: {uploadProgress}%
@@ -283,6 +290,29 @@ export default function UploadPage() {
                   className="h-2 rounded-full bg-blue-600"
                   style={{ width: `${uploadProgress}%` }}
                 ></div>
+              </div>
+            </div>
+          )}
+
+          {jobId && (
+            <div className="mb-6">
+              <JobProgressMonitor 
+                jobId={jobId} 
+                onComplete={(result) => {
+                  // 処理完了時に結果ページへリダイレクト
+                  router.push(`/results?recordId=${result.recordId}`);
+                }}
+                onError={(error) => {
+                  setError(`処理中にエラーが発生しました: ${error}`);
+                  setUploading(false);
+                  setJobId(null);
+                }}
+              />
+              
+              <div className="text-center mt-4">
+                <p className="text-sm text-gray-600">
+                  処理が完了すると自動的に結果ページに移動します
+                </p>
               </div>
             </div>
           )}

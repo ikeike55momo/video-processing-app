@@ -6,6 +6,7 @@ import { useSession } from "next-auth/react";
 import ProgressIndicator from "../components/ProgressIndicator";
 import ContentModal from "../components/ContentModal";
 import TimestampList from "../components/TimestampList";
+import VideoPlayer from "../components/VideoPlayer";
 
 export default function ResultsPage() {
   const { data: session, status } = useSession();
@@ -324,7 +325,8 @@ export default function ResultsPage() {
                       <div className="mt-2 rounded-md bg-slate-50 p-3">
                         {record.timestamps_json ? (
                           <TimestampList 
-                            timestamps={JSON.parse(record.timestamps_json).timestamps || []} 
+                            timestamps={JSON.parse(record.timestamps_json)} 
+                            videoUrl={record.file_url}
                           />
                         ) : (
                           <div className="text-sm text-slate-500 italic">
@@ -370,6 +372,16 @@ export default function ResultsPage() {
                           全文を表示
                         </button>
                       )}
+                    </div>
+
+                    <div className="mt-6">
+                      <h3 className="text-md font-medium text-slate-700 mb-2">
+                        動画プレーヤー
+                      </h3>
+                      <VideoPlayer 
+                        src={record.file_url} 
+                        timestamps={record.timestamps_json ? JSON.parse(record.timestamps_json) : []}
+                      />
                     </div>
 
                     <button
