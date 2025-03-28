@@ -168,7 +168,7 @@ ${originalTranscript}
         let jsonMatch = timestampResponse.match(/```json\s*([\s\S]*?)\s*```/);
         if (!jsonMatch) {
           // JSONブロックがない場合は、テキスト全体をJSONとして解析を試みる
-          jsonMatch = [null, timestampResponse.trim()];
+          jsonMatch = [timestampResponse, timestampResponse.trim()];
         }
         
         try {
@@ -507,7 +507,7 @@ ${originalTranscript}
             let jsonMatch = timestampResponse.match(/```json\s*([\s\S]*?)\s*```/);
             if (!jsonMatch) {
               // JSONブロックがない場合は、テキスト全体をJSONとして解析を試みる
-              jsonMatch = [null, timestampResponse.trim()];
+              jsonMatch = [timestampResponse, timestampResponse.trim()];
             }
             
             try {
