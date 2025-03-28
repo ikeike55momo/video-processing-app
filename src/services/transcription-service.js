@@ -67,6 +67,91 @@ class TranscriptionService {
     }
   }
 
+  // 文字起こしテキストからタイムスタンプを抽出
+  async extractTimestamps(transcription, audioPath) {
+    console.log(`タイムスタンプ抽出処理を開始: テキスト長=${transcription.length}文字`);
+    
+    try {
+      // 音声ファイルをバイナリデータとして読み込み
+      const audioData = fs.readFileSync(audioPath);
+      
+      // Geminiモデルの初期化
+      const model = this.genAI.getGenerativeModel({ model: this.geminiModel });
+      
+      // プロンプトの設定
+      const prompt = `
+以下は音声の文字起こしテキストです。この音声データを分析し、主要なポイントごとにタイムスタンプを抽出してください。
+
+## 指示
+1. 音声の内容を分析し、重要なトピックの変わり目や主要なポイントを特定してください
+2. 各ポイントの開始時間（秒単位）とその内容の要約を抽出してください
+3. 結果は以下のJSON形式で返してください:
+
+\`\`\`json
+{
+  "timestamps": [
+    {
+      "time": 0,
+      "text": "導入部分の内容"
+    },
+    {
+      "time": 120,
+      "text": "次のトピックの内容"
+    },
+    ...
+  ]
+}
+\`\`\`
+
+## 重要な注意点
+- 時間は秒単位の数値で指定してください（例: 65.5）
+- 各ポイントの要約は簡潔に、30文字程度にしてください
+- 重要なポイントを10〜15個程度抽出してください
+- JSONのみを返してください。説明文は不要です
+
+## 文字起こしテキスト:
+${transcription}
+`;
+      
+      // 音声データをPart形式で準備
+      const audioPart = {
+        inlineData: {
+          data: Buffer.from(audioData).toString('base64'),
+          mimeType: 'audio/wav',
+        },
+      };
+      
+      // Gemini APIを呼び出し
+      console.log('Gemini APIにタイムスタンプ抽出リクエストを送信します...');
+      const result = await model.generateContent([prompt, audioPart]);
+      const response = await result.response;
+      const text = response.text();
+      
+      console.log('タイムスタンプ抽出完了');
+      
+      // JSONを抽出
+      let jsonMatch = text.match(/```json\s*([\s\S]*?)\s*```/);
+      if (!jsonMatch) {
+        // JSONブロックがない場合は、テキスト全体をJSONとして解析を試みる
+        jsonMatch = [null, text.trim()];
+      }
+      
+      try {
+        const timestampsData = JSON.parse(jsonMatch[1]);
+        console.log(`抽出されたタイムスタンプ: ${timestampsData.timestamps.length}個`);
+        return timestampsData;
+      } catch (parseError) {
+        console.error('タイムスタンプJSONの解析に失敗しました:', parseError);
+        console.log('生のレスポンス:', text);
+        throw new Error('タイムスタンプの解析に失敗しました');
+      }
+    } catch (error) {
+      console.error('タイムスタンプ抽出中にエラーが発生しました:', error);
+      // エラー時は空のタイムスタンプ配列を返す
+      return { timestamps: [] };
+    }
+  }
+
   // 音声ファイルをGemini APIに最適な形式に変換
   async optimizeAudioForGemini(audioPath) {
     const tempDir = path.join(os.tmpdir(), 'gemini-audio-' + crypto.randomBytes(4).toString('hex'));

@@ -4,6 +4,8 @@ import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useSession } from "next-auth/react";
 import ProgressIndicator from "../components/ProgressIndicator";
+import ContentModal from "../components/ContentModal";
+import TimestampList from "../components/TimestampList";
 
 export default function ResultsPage() {
   const { data: session, status } = useSession();
@@ -11,6 +13,10 @@ export default function ResultsPage() {
   const [records, setRecords] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  // モーダル表示用の状態
+  const [modalOpen, setModalOpen] = useState(false);
+  const [modalTitle, setModalTitle] = useState("");
+  const [modalContent, setModalContent] = useState<string | null>(null);
 
   // セッションチェック
   if (status === "loading") {
@@ -163,14 +169,20 @@ export default function ResultsPage() {
     }
     
     try {
+      setLoading(true); // 削除処理中はローディング表示
+      
       const response = await fetch(`/api/records/${recordId}`, {
         method: "DELETE",
       });
 
       if (!response.ok) {
-        throw new Error("レコードの削除に失敗しました");
+        const errorData = await response.json();
+        throw new Error(errorData.error || "レコードの削除に失敗しました");
       }
 
+      // 削除成功メッセージ
+      alert("レコードを削除しました");
+      
       // 再取得して表示を更新
       const updatedResponse = await fetch("/api/records");
       const data = await updatedResponse.json();
@@ -182,17 +194,32 @@ export default function ResultsPage() {
           ? err.message
           : "レコードの削除中にエラーが発生しました"
       );
+    } finally {
+      setLoading(false); // 処理完了後にローディング表示を解除
     }
   };
 
   // 処理ステップの計算
   const calculateStep = (record: any) => {
     if (record.status === "ERROR") return record.lastCompletedStep || 1;
-    if (record.status === "DONE") return 4;
-    if (record.article_text) return 3;
-    if (record.summary_text) return 2;
+    if (record.status === "DONE") return 5;
+    if (record.article_text) return 4;
+    if (record.summary_text) return 3;
+    if (record.timestamps_json) return 2;
     if (record.transcript_text) return 1;
     return 1;
+  };
+
+  // モーダルを開く関数
+  const openModal = (title: string, content: string | null) => {
+    setModalTitle(title);
+    setModalContent(content);
+    setModalOpen(true);
+  };
+
+  // モーダルを閉じる関数
+  const closeModal = () => {
+    setModalOpen(false);
   };
 
   return (
@@ -253,7 +280,7 @@ export default function ResultsPage() {
                   <div className="flex-1">
                     <ProgressIndicator
                       currentStep={calculateStep(record)}
-                      totalSteps={4}
+                      totalSteps={5}
                       status={record.status}
                       error={record.error}
                       onRetry={() => handleRetry(record.id)}
@@ -280,6 +307,31 @@ export default function ResultsPage() {
                           ? record.transcript_text.substring(0, 300) + "..."
                           : "文字起こしはありません"}
                       </div>
+                      {record.transcript_text && (
+                        <button
+                          onClick={() => openModal("文字起こし 全文", record.transcript_text)}
+                          className="mt-2 text-sm text-blue-600 hover:text-blue-800"
+                        >
+                          全文を表示
+                        </button>
+                      )}
+                    </div>
+
+                    <div>
+                      <h3 className="text-md font-medium text-slate-700">
+                        タイムスタンプ
+                      </h3>
+                      <div className="mt-2 rounded-md bg-slate-50 p-3">
+                        {record.timestamps_json ? (
+                          <TimestampList 
+                            timestamps={JSON.parse(record.timestamps_json).timestamps || []} 
+                          />
+                        ) : (
+                          <div className="text-sm text-slate-500 italic">
+                            タイムスタンプはありません
+                          </div>
+                        )}
+                      </div>
                     </div>
 
                     <div>
@@ -291,6 +343,14 @@ export default function ResultsPage() {
                           ? record.summary_text.substring(0, 300) + "..."
                           : "要約はありません"}
                       </div>
+                      {record.summary_text && (
+                        <button
+                          onClick={() => openModal("要約 全文", record.summary_text)}
+                          className="mt-2 text-sm text-blue-600 hover:text-blue-800"
+                        >
+                          全文を表示
+                        </button>
+                      )}
                     </div>
 
                     <div>
@@ -302,6 +362,14 @@ export default function ResultsPage() {
                           ? record.article_text.substring(0, 300) + "..."
                           : "記事はありません"}
                       </div>
+                      {record.article_text && (
+                        <button
+                          onClick={() => openModal("記事 全文", record.article_text)}
+                          className="mt-2 text-sm text-blue-600 hover:text-blue-800"
+                        >
+                          全文を表示
+                        </button>
+                      )}
                     </div>
 
                     <button
@@ -317,6 +385,13 @@ export default function ResultsPage() {
           </div>
         )}
       </div>
+      {/* モーダルコンポーネント */}
+      <ContentModal
+        isOpen={modalOpen}
+        onClose={closeModal}
+        title={modalTitle}
+        content={modalContent}
+      />
     </div>
   );
 }

@@ -214,12 +214,6 @@ export default function UploadPage() {
           </div>
           <div className="flex space-x-4">
             <button
-              onClick={() => router.push("/upload/cloud-upload")}
-              className="rounded-md bg-green-600 px-4 py-2 text-white hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2"
-            >
-              Cloud Run処理を使用
-            </button>
-            <button
               onClick={() => router.push("/results")}
               className="rounded-md bg-blue-600 px-4 py-2 text-white hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
             >

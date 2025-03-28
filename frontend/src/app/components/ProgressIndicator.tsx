@@ -22,8 +22,9 @@ export default function ProgressIndicatorComponent({
   const steps = [
     { id: 1, name: "アップロード" },
     { id: 2, name: "文字起こし" },
-    { id: 3, name: "要約" },
-    { id: 4, name: "記事生成" },
+    { id: 3, name: "タイムスタンプ" },
+    { id: 4, name: "要約" },
+    { id: 5, name: "記事生成" },
   ];
 
   const getStepStatus = (stepId: number) => {
