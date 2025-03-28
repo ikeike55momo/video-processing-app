@@ -36,6 +36,23 @@ export default function DashboardPage() {
         </header>
 
         <div className="grid gap-6 md:grid-cols-2">
+          {/* 管理者ページへのリンク（管理者のみ表示） */}
+          {session?.user && 'role' in session.user && session.user.role === "ADMIN" && (
+            <div className="rounded-lg bg-white p-6 shadow-md border-l-4 border-purple-500">
+              <h2 className="mb-4 text-xl font-semibold text-slate-800">
+                管理者機能
+              </h2>
+              <p className="mb-4 text-slate-600">
+                データベース管理や設定変更など、管理者向けの機能にアクセスします。
+              </p>
+              <button
+                className="rounded-md bg-purple-600 px-4 py-2 text-white hover:bg-purple-700 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:ring-offset-2"
+                onClick={() => router.push("/admin/db")}
+              >
+                データベース管理
+              </button>
+            </div>
+          )}
           <div className="rounded-lg bg-white p-6 shadow-md">
             <h2 className="mb-4 text-xl font-semibold text-slate-800">
               動画アップロード

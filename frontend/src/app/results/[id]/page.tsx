@@ -102,6 +102,8 @@ export default function RecordDetailPage() {
       return data.timestamps || [];
     } catch (error) {
       console.error("タイムスタンプの解析エラー:", error);
+      // エラー時は文字列をそのまま表示して確認
+      console.log("解析に失敗したデータ:", timestampsJson);
       return [];
     }
   };
@@ -171,6 +173,7 @@ export default function RecordDetailPage() {
               <div className="mb-2 text-xs text-slate-500">
                 <p>timestamps_json: {record.timestamps_json ? "あり" : "なし"}</p>
                 <p>summary_text: {record.summary_text ? (record.summary_text.includes('"timestamps"') ? "タイムスタンプあり" : "タイムスタンプなし") : "なし"}</p>
+                <p>データ内容: {record.summary_text ? record.summary_text.substring(0, 100) + "..." : "なし"}</p>
               </div>
               {record.timestamps_json ? (
                 <VideoWithTimestamps
@@ -183,8 +186,49 @@ export default function RecordDetailPage() {
                   timestamps={parseTimestamps(record.summary_text)}
                 />
               ) : (
-                <div className="text-sm text-slate-500 italic">
-                  タイムスタンプはありません
+                <div>
+                  <div className="text-sm text-slate-500 italic mb-4">
+                    タイムスタンプはありません
+                  </div>
+                  {/* 強制的にタイムスタンプを表示するためのフォールバック */}
+                  {record.summary_text && (
+                    <div className="mt-4">
+                      <h4 className="text-md font-medium text-slate-700 mb-2">タイムスタンプ生成を試みる</h4>
+                      <button
+                        onClick={() => {
+                          try {
+                            // サンプルタイムスタンプを生成
+                            const sampleData = {
+                              timestamps: [
+                                { time: 0, text: "動画開始" },
+                                { time: 30, text: "主要ポイント1" },
+                                { time: 60, text: "主要ポイント2" }
+                              ]
+                            };
+                            console.log("サンプルタイムスタンプ:", sampleData);
+                            
+                            // 実際のデータがあれば解析を試みる
+                            if (record.summary_text) {
+                              try {
+                                const parsed = JSON.parse(record.summary_text);
+                                console.log("summary_textから解析:", parsed);
+                                if (parsed.timestamps) {
+                                  console.log("タイムスタンプ発見:", parsed.timestamps);
+                                }
+                              } catch (e) {
+                                console.error("summary_textの解析エラー:", e);
+                              }
+                            }
+                          } catch (error) {
+                            console.error("タイムスタンプ生成エラー:", error);
+                          }
+                        }}
+                        className="px-3 py-1 bg-blue-500 text-white rounded hover:bg-blue-600"
+                      >
+                        タイムスタンプ解析を試みる
+                      </button>
+                    </div>
+                  )}
                 </div>
               )}
             </div>
