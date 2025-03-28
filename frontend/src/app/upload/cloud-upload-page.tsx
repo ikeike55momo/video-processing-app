@@ -69,7 +69,8 @@ export default function CloudUploadPage() {
       setUploadStage("準備中...");
 
       // 署名付きURLの取得（ファイルサイズを含める）
-      const response = await fetch("/api/upload-url", {
+      const apiUrl = process.env.NEXT_PUBLIC_API_URL || '';
+      const response = await fetch(`${apiUrl}/api/upload-url`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -111,7 +112,7 @@ export default function CloudUploadPage() {
 
       // 処理開始リクエスト
       setUploadStage("処理を開始中...");
-      const processResponse = await fetch("/api/process-cloud", {
+      const processResponse = await fetch(`${apiUrl}/api/process-cloud`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
