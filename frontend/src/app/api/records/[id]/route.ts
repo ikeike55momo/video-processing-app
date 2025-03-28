@@ -26,6 +26,7 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
     const record = await prisma.record.findUnique({
       where: {
         id: recordId,
+        deleted_at: null,
       },
     });
 
@@ -116,6 +117,15 @@ export async function DELETE(req: NextRequest, { params }: { params: { id: strin
         { error: '指定されたレコードが見つかりません' },
         { status: 404 }
       );
+    }
+
+    // すでに削除済みの場合は成功として返す
+    if (record.deleted_at) {
+      return NextResponse.json({ 
+        success: true, 
+        message: 'レコードはすでに削除されています', 
+        recordId: record.id 
+      });
     }
 
     // 論理削除（deleted_atを設定）
