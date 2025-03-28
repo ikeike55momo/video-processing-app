@@ -49,6 +49,7 @@ const client_1 = require("@prisma/client");
 const queue_1 = require("../lib/queue");
 const storage_1 = require("../lib/storage");
 const child_process_1 = require("child_process");
+const transcription_service_1 = require("../services/transcription-service");
 // 環境変数の読み込み
 dotenv.config();
 // Prismaクライアントの初期化
@@ -64,17 +65,16 @@ const TMP_DIR = process.env.TMP_DIR || '/tmp';
  * @returns 文字起こし結果
  */
 async function transcribeAudio(audioPath) {
-    // ここではGemini APIを使用する簡易的な実装
-    // 実際の実装では適切なAPIクライアントを使用
-    const apiKey = process.env.GEMINI_API_KEY;
-    if (!apiKey) {
-        throw new Error('GEMINI_API_KEY is missing');
+    try {
+        // TranscriptionServiceのインスタンスを作成
+        const transcriptionService = new transcription_service_1.TranscriptionService();
+        // 文字起こし実行
+        const transcription = await transcriptionService.transcribeAudio(audioPath);
+        return transcription;
+    } catch (error) {
+        console.error('文字起こし処理中にエラーが発生しました:', error);
+        throw error;
     }
-    // TODO: 実際のGemini API呼び出し実装
-    // この例では単純なモックを返しています
-    console.log(`[MOCK] Transcribing audio file: ${audioPath}`);
-    // モック応答（実際はAPIを使用）
-    return "これはデモの文字起こし結果です。実際にはGemini APIを使用して音声認識を行います。";
 }
 /**
  * 大きなファイルを複数の小さなチャンクに分割して処理する
@@ -113,6 +113,24 @@ async function processLargeFile(filePath) {
     }
 }
 /**
+ * 文字起こしテキストからタイムスタンプを抽出する
+ * @param transcription 文字起こしテキスト
+ * @param audioPath 音声ファイルパス
+ * @returns タイムスタンプデータ
+ */
+async function extractTimestamps(transcription, audioPath) {
+    try {
+        // TranscriptionServiceのインスタンスを作成
+        const transcriptionService = new transcription_service_1.TranscriptionService();
+        // タイムスタンプ抽出実行
+        const timestampsData = await transcriptionService.extractTimestamps(transcription, audioPath);
+        return timestampsData;
+    } catch (error) {
+        console.error('タイムスタンプ抽出中にエラーが発生しました:', error);
+        return { timestamps: [] }; // エラー時は空のタイムスタンプ配列を返す
+    }
+}
+/**
  * ジョブを処理する関数
  */
 async function processJob() {
@@ -145,14 +163,31 @@ async function processJob() {
         const transcriptParts = await processLargeFile(tempFilePath);
         // 結果をデータベースに保存
         const fullTranscript = transcriptParts.join('\n\n');
+        
+        // 文字起こし完了を記録
         await prisma.record.update({
             where: { id: job.recordId },
             data: {
                 transcript_text: fullTranscript,
+                status: 'PROCESSING',
+                processing_step: 'TIMESTAMPS'
+            }
+        });
+        
+        // タイムスタンプ抽出処理
+        console.log(`Extracting timestamps for record ${job.recordId}`);
+        const timestampsData = await extractTimestamps(fullTranscript, tempFilePath);
+        
+        // タイムスタンプをJSONとして保存
+        await prisma.record.update({
+            where: { id: job.recordId },
+            data: {
+                timestamps_json: JSON.stringify(timestampsData),
                 status: 'TRANSCRIBED',
                 processing_step: null
             }
         });
+        
         // 要約キューにジョブを追加
         await (0, queue_1.addJob)(SUMMARY_QUEUE, {
             type: 'summary',
