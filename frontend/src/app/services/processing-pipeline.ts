@@ -176,13 +176,36 @@ ${originalTranscript}
           console.log(`[${recordId}] 抽出されたタイムスタンプ: ${timestampsData.timestamps.length}個`);
           
           // タイムスタンプをデータベースに保存
+          console.log(`[${recordId}] タイムスタンプ保存前のデータ:`, JSON.stringify(timestampsData).substring(0, 100) + '...');
+          
+          // 保存前のレコード状態を確認
+          const recordBefore = await prisma.record.findUnique({
+            where: { id: recordId },
+          });
+          console.log(`[${recordId}] 保存前のレコード状態:`, {
+            id: recordBefore?.id,
+            summary_text: recordBefore?.summary_text ? recordBefore.summary_text.substring(0, 50) + '...' : null,
+            status: recordBefore?.status
+          });
+          
           await prisma.record.update({
             where: { id: recordId },
             data: { 
               summary_text: JSON.stringify(timestampsData) 
             },
           });
-          console.log(`[${recordId}] タイムスタンプをデータベースに保存しました`);
+          
+          // 保存後のレコード状態を確認
+          const recordAfter = await prisma.record.findUnique({
+            where: { id: recordId },
+          });
+          console.log(`[${recordId}] 保存後のレコード状態:`, {
+            id: recordAfter?.id,
+            summary_text: recordAfter?.summary_text ? recordAfter.summary_text.substring(0, 50) + '...' : null,
+            status: recordAfter?.status
+          });
+          
+          console.log(`[${recordId}] タイムスタンプをデータベースに保存しました（データ:`, JSON.stringify(timestampsData).substring(0, 100) + '...');
         } catch (parseError) {
           console.error(`[${recordId}] タイムスタンプJSONの解析に失敗しました:`, parseError);
           console.log(`[${recordId}] 生のレスポンス:`, timestampResponse);
@@ -191,13 +214,36 @@ ${originalTranscript}
           timestampsData = { timestamps: [] };
           
           // 空のタイムスタンプをデータベースに保存
+          console.log(`[${recordId}] タイムスタンプ保存前のデータ:`, JSON.stringify(timestampsData).substring(0, 100) + '...');
+          
+          // 保存前のレコード状態を確認
+          const recordBefore = await prisma.record.findUnique({
+            where: { id: recordId },
+          });
+          console.log(`[${recordId}] 保存前のレコード状態:`, {
+            id: recordBefore?.id,
+            summary_text: recordBefore?.summary_text ? recordBefore.summary_text.substring(0, 50) + '...' : null,
+            status: recordBefore?.status
+          });
+          
           await prisma.record.update({
             where: { id: recordId },
             data: { 
               summary_text: JSON.stringify(timestampsData) 
             },
           });
-          console.log(`[${recordId}] 空のタイムスタンプをデータベースに保存しました`);
+          
+          // 保存後のレコード状態を確認
+          const recordAfter = await prisma.record.findUnique({
+            where: { id: recordId },
+          });
+          console.log(`[${recordId}] 保存後のレコード状態:`, {
+            id: recordAfter?.id,
+            summary_text: recordAfter?.summary_text ? recordAfter.summary_text.substring(0, 50) + '...' : null,
+            status: recordAfter?.status
+          });
+          
+          console.log(`[${recordId}] 空のタイムスタンプをデータベースに保存しました（データ:`, JSON.stringify(timestampsData));
         }
       } catch (timestampError) {
         console.error(`[${recordId}] タイムスタンプ抽出処理エラー:`, timestampError);
@@ -206,13 +252,36 @@ ${originalTranscript}
         timestampsData = { timestamps: [] };
         
         // 空のタイムスタンプをデータベースに保存
+        console.log(`[${recordId}] タイムスタンプ保存前のデータ:`, JSON.stringify(timestampsData).substring(0, 100) + '...');
+        
+        // 保存前のレコード状態を確認
+        const recordBefore = await prisma.record.findUnique({
+          where: { id: recordId },
+        });
+        console.log(`[${recordId}] 保存前のレコード状態:`, {
+          id: recordBefore?.id,
+          summary_text: recordBefore?.summary_text ? recordBefore.summary_text.substring(0, 50) + '...' : null,
+          status: recordBefore?.status
+        });
+        
         await prisma.record.update({
           where: { id: recordId },
           data: { 
             summary_text: JSON.stringify(timestampsData) 
           },
         });
-        console.log(`[${recordId}] エラー発生のため空のタイムスタンプをデータベースに保存しました`);
+        
+        // 保存後のレコード状態を確認
+        const recordAfter = await prisma.record.findUnique({
+          where: { id: recordId },
+        });
+        console.log(`[${recordId}] 保存後のレコード状態:`, {
+          id: recordAfter?.id,
+          summary_text: recordAfter?.summary_text ? recordAfter.summary_text.substring(0, 50) + '...' : null,
+          status: recordAfter?.status
+        });
+        
+        console.log(`[${recordId}] エラー発生のため空のタイムスタンプをデータベースに保存しました（データ:`, JSON.stringify(timestampsData));
         
         // タイムスタンプ抽出エラーは致命的ではないため、処理を続行
         console.log(`[${recordId}] タイムスタンプ抽出エラーが発生しましたが、処理を続行します`);
@@ -521,13 +590,36 @@ ${originalTranscript}
               console.log(`[${recordId}] 抽出されたタイムスタンプ: ${timestampsData.timestamps.length}個`);
               
               // タイムスタンプをデータベースに保存
+              console.log(`[${recordId}] タイムスタンプ保存前のデータ:`, JSON.stringify(timestampsData).substring(0, 100) + '...');
+              
+              // 保存前のレコード状態を確認
+              const recordBefore = await prisma.record.findUnique({
+                where: { id: recordId },
+              });
+              console.log(`[${recordId}] 保存前のレコード状態:`, {
+                id: recordBefore?.id,
+                summary_text: recordBefore?.summary_text ? recordBefore.summary_text.substring(0, 50) + '...' : null,
+                status: recordBefore?.status
+              });
+              
               await prisma.record.update({
                 where: { id: recordId },
                 data: { 
                   summary_text: JSON.stringify(timestampsData) 
                 },
               });
-              console.log(`[${recordId}] タイムスタンプをデータベースに保存しました`);
+              
+              // 保存後のレコード状態を確認
+              const recordAfter = await prisma.record.findUnique({
+                where: { id: recordId },
+              });
+              console.log(`[${recordId}] 保存後のレコード状態:`, {
+                id: recordAfter?.id,
+                summary_text: recordAfter?.summary_text ? recordAfter.summary_text.substring(0, 50) + '...' : null,
+                status: recordAfter?.status
+              });
+              
+              console.log(`[${recordId}] タイムスタンプをデータベースに保存しました（データ:`, JSON.stringify(timestampsData).substring(0, 100) + '...');
             } catch (parseError) {
               console.error(`[${recordId}] タイムスタンプJSONの解析に失敗しました:`, parseError);
               console.log(`[${recordId}] 生のレスポンス:`, timestampResponse);
@@ -536,13 +628,36 @@ ${originalTranscript}
               const timestampsData = { timestamps: [] };
               
               // 空のタイムスタンプをデータベースに保存
+              console.log(`[${recordId}] タイムスタンプ保存前のデータ:`, JSON.stringify(timestampsData).substring(0, 100) + '...');
+              
+              // 保存前のレコード状態を確認
+              const recordBefore = await prisma.record.findUnique({
+                where: { id: recordId },
+              });
+              console.log(`[${recordId}] 保存前のレコード状態:`, {
+                id: recordBefore?.id,
+                summary_text: recordBefore?.summary_text ? recordBefore.summary_text.substring(0, 50) + '...' : null,
+                status: recordBefore?.status
+              });
+              
               await prisma.record.update({
                 where: { id: recordId },
                 data: { 
                   summary_text: JSON.stringify(timestampsData) 
                 },
               });
-              console.log(`[${recordId}] 空のタイムスタンプをデータベースに保存しました`);
+              
+              // 保存後のレコード状態を確認
+              const recordAfter = await prisma.record.findUnique({
+                where: { id: recordId },
+              });
+              console.log(`[${recordId}] 保存後のレコード状態:`, {
+                id: recordAfter?.id,
+                summary_text: recordAfter?.summary_text ? recordAfter.summary_text.substring(0, 50) + '...' : null,
+                status: recordAfter?.status
+              });
+              
+              console.log(`[${recordId}] 空のタイムスタンプをデータベースに保存しました（データ:`, JSON.stringify(timestampsData));
             }
           } catch (timestampError) {
             console.error(`[${recordId}] タイムスタンプ抽出処理エラー:`, timestampError);
@@ -551,13 +666,36 @@ ${originalTranscript}
             const timestampsData = { timestamps: [] };
             
             // 空のタイムスタンプをデータベースに保存
+            console.log(`[${recordId}] タイムスタンプ保存前のデータ:`, JSON.stringify(timestampsData).substring(0, 100) + '...');
+            
+            // 保存前のレコード状態を確認
+            const recordBefore = await prisma.record.findUnique({
+              where: { id: recordId },
+            });
+            console.log(`[${recordId}] 保存前のレコード状態:`, {
+              id: recordBefore?.id,
+              summary_text: recordBefore?.summary_text ? recordBefore.summary_text.substring(0, 50) + '...' : null,
+              status: recordBefore?.status
+            });
+            
             await prisma.record.update({
               where: { id: recordId },
               data: { 
                 summary_text: JSON.stringify(timestampsData) 
               },
             });
-            console.log(`[${recordId}] エラー発生のため空のタイムスタンプをデータベースに保存しました`);
+            
+            // 保存後のレコード状態を確認
+            const recordAfter = await prisma.record.findUnique({
+              where: { id: recordId },
+            });
+            console.log(`[${recordId}] 保存後のレコード状態:`, {
+              id: recordAfter?.id,
+              summary_text: recordAfter?.summary_text ? recordAfter.summary_text.substring(0, 50) + '...' : null,
+              status: recordAfter?.status
+            });
+            
+            console.log(`[${recordId}] エラー発生のため空のタイムスタンプをデータベースに保存しました（データ:`, JSON.stringify(timestampsData));
             
             // タイムスタンプ抽出エラーは致命的ではないため、処理を続行
             console.log(`[${recordId}] タイムスタンプ抽出エラーが発生しましたが、処理を続行します`);
