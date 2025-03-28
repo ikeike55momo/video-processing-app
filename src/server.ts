@@ -8,6 +8,7 @@ import path from 'path';
 import http from 'http';
 import { queueManager, QUEUE_NAMES } from './lib/bull-queue';
 import { socketManager } from './lib/socket-manager';
+import cors from 'cors';
 
 // 環境変数の読み込み
 dotenv.config();
@@ -33,54 +34,25 @@ const prisma = new PrismaClient();
 // JSON形式のリクエストボディを解析
 app.use(express.json());
 
-// CORSミドルウェア
-app.use((req: Request, res: Response, next: NextFunction) => {
-  // カスタムドメインを明示的に許可
-  const allowedOrigins = ['https://vpm.ririaru-stg.cloud', 'https://video-frontend-nextjs-app.onrender.com', 'https://video-processing-frontend.onrender.com'];
-  
-  const origin = req.headers.origin;
-  if (origin && allowedOrigins.includes(origin)) {
-    res.header('Access-Control-Allow-Origin', origin);
-    res.header('Access-Control-Allow-Credentials', 'true'); // クレデンシャル付きリクエストを許可
-  } else {
-    // デフォルトのオリジンを設定
-    res.header('Access-Control-Allow-Origin', '*');
-    // クレデンシャルを使用しない場合のみワイルドカードを使用
-  }
-  
-  // 認証ヘッダーを含むすべての必要なヘッダーを許可
-  res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
-  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-  
-  // プリフライトリクエストの処理を改善
-  if (req.method === 'OPTIONS') {
-    res.status(200).end();
-    return;
-  }
-  next();
-});
+// CORSミドルウェアの設定
+const corsOptions = {
+  origin: function(origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) {
+    const allowedOrigins = ['https://vpm.ririaru-stg.cloud', 'https://video-frontend-nextjs-app.onrender.com', 'https://video-processing-frontend.onrender.com'];
+    // undefinedの場合はサーバー間リクエスト（Postmanなど）
+    if (!origin || allowedOrigins.includes(origin)) {
+      callback(null, true);
+    } else {
+      callback(null, false);
+    }
+  },
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Origin', 'X-Requested-With', 'Content-Type', 'Accept', 'Authorization'],
+  credentials: true,
+  optionsSuccessStatus: 200
+};
 
-// 特定のAPIエンドポイント用のCORS処理を追加
-app.use('/api/upload-url', (req: Request, res: Response, next: NextFunction) => {
-  const origin = req.headers.origin;
-  const allowedOrigins = ['https://vpm.ririaru-stg.cloud', 'https://video-frontend-nextjs-app.onrender.com', 'https://video-processing-frontend.onrender.com'];
-  
-  if (origin && allowedOrigins.includes(origin)) {
-    res.header('Access-Control-Allow-Origin', origin);
-    res.header('Access-Control-Allow-Credentials', 'true');
-  } else {
-    res.header('Access-Control-Allow-Origin', '*');
-  }
-  
-  res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
-  res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-  
-  if (req.method === 'OPTIONS') {
-    res.status(200).end();
-    return;
-  }
-  next();
-});
+// グローバルCORS設定
+app.use(cors(corsOptions));
 
 // ルートエンドポイント - APIの情報を返す
 app.get('/', (req: Request, res: Response) => {
