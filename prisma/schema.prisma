@@ -17,6 +17,7 @@ model Record {
   file_key        String?
   r2_bucket       String?
   transcript_text String?
+  timestamps_json String?   @db.Text
   summary_text    String?
   article_text    String?
   error           String?
