@@ -191,7 +191,7 @@ ${originalTranscript}
           await prisma.record.update({
             where: { id: recordId },
             data: { 
-              summary_text: JSON.stringify(timestampsData) 
+              timestamps_json: JSON.stringify(timestampsData) 
             },
           });
           
@@ -229,7 +229,7 @@ ${originalTranscript}
           await prisma.record.update({
             where: { id: recordId },
             data: { 
-              summary_text: JSON.stringify(timestampsData) 
+              timestamps_json: JSON.stringify(timestampsData) 
             },
           });
           
@@ -267,7 +267,7 @@ ${originalTranscript}
         await prisma.record.update({
           where: { id: recordId },
           data: { 
-            summary_text: JSON.stringify(timestampsData) 
+            timestamps_json: JSON.stringify(timestampsData) 
           },
         });
         
@@ -605,7 +605,7 @@ ${originalTranscript}
               await prisma.record.update({
                 where: { id: recordId },
                 data: { 
-                  summary_text: JSON.stringify(timestampsData) 
+                  timestamps_json: JSON.stringify(timestampsData) 
                 },
               });
               
@@ -643,7 +643,7 @@ ${originalTranscript}
               await prisma.record.update({
                 where: { id: recordId },
                 data: { 
-                  summary_text: JSON.stringify(timestampsData) 
+                  timestamps_json: JSON.stringify(timestampsData) 
                 },
               });
               
@@ -681,7 +681,7 @@ ${originalTranscript}
             await prisma.record.update({
               where: { id: recordId },
               data: { 
-                summary_text: JSON.stringify(timestampsData) 
+                timestamps_json: JSON.stringify(timestampsData) 
               },
             });
             
