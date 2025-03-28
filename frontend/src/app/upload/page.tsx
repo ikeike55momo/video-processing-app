@@ -113,14 +113,16 @@ export default function UploadPage() {
 
       // 処理開始リクエスト
       setUploadStage("処理を開始中...");
-      const processResponse = await fetch("/api/transcribe", {
+      const apiUrl = process.env.NEXT_PUBLIC_API_URL || '';
+      const processResponse = await fetch(`${apiUrl}/api/process`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          fileKey: result.fileKey,
+          fileKey: result.key,
           fileName: file.name,
+          fileUrl: fileUrl
         }),
       });
 
@@ -238,13 +240,13 @@ export default function UploadPage() {
 
           <div className="mb-6">
             <div className="flex justify-between items-center mb-4">
-              <h2 className="text-xl font-semibold text-slate-800">Vercel処理</h2>
+              <h2 className="text-xl font-semibold text-slate-800">動画処理</h2>
               <div className="bg-yellow-100 text-yellow-800 text-xs font-medium px-2.5 py-0.5 rounded">
                 タイムアウト: 4時間
               </div>
             </div>
             <p className="text-slate-600 mb-4">
-              Vercelのサーバーレス関数を使用して処理を行います。処理時間が4時間を超えるとタイムアウトします。
+              アップロードした動画の文字起こし、要約、記事生成を行います。処理時間が4時間を超えるとタイムアウトします。
             </p>
           </div>
 

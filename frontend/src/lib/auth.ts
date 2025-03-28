@@ -43,6 +43,9 @@ type CustomJWT = JWT & {
   role?: string;
 };
 
+// 環境変数からサイトURLを取得
+const SITE_URL = process.env.NEXTAUTH_URL || 'https://vpm.ririaru-stg.cloud';
+
 export const authOptions: NextAuthOptions = {
   providers: [
     CredentialsProvider({
@@ -107,5 +110,17 @@ export const authOptions: NextAuthOptions = {
   pages: {
     signIn: "/login",
   },
-  secret: process.env.NEXTAUTH_SECRET,
+  secret: process.env.NEXTAUTH_SECRET || "your-secret-key-change-in-production",
+  cookies: {
+    sessionToken: {
+      name: `next-auth.session-token`,
+      options: {
+        httpOnly: true,
+        sameSite: 'lax',
+        path: '/',
+        secure: true
+      }
+    }
+  },
+  debug: process.env.NODE_ENV === 'development',
 };
