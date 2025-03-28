@@ -99,7 +99,7 @@ export default function RecordDetailPage() {
       const data = JSON.parse(timestampsJson);
       return data.timestamps || [];
     } catch (error) {
-      console.error("タイムスタンプの解析に失敗しました:", error);
+      console.error("タイムスタンプの解析エラー:", error);
       return [];
     }
   };
@@ -164,17 +164,24 @@ export default function RecordDetailPage() {
             </div>
 
             {/* 動画プレーヤーとタイムスタンプ */}
-            {record.status !== "ERROR" && (
-              <div className="rounded-lg bg-white p-6 shadow-md">
-                <h2 className="mb-4 text-xl font-semibold text-slate-800">
-                  動画とタイムスタンプ
-                </h2>
+            <div className="mb-8">
+              <h3 className="text-lg font-medium text-slate-800 mb-2">タイムスタンプ</h3>
+              {record.timestamps_json ? (
                 <VideoWithTimestamps
                   videoSrc={record.file_url}
                   timestamps={parseTimestamps(record.timestamps_json)}
                 />
-              </div>
-            )}
+              ) : record.summary_text && record.summary_text.includes('"timestamps"') ? (
+                <VideoWithTimestamps
+                  videoSrc={record.file_url}
+                  timestamps={parseTimestamps(record.summary_text)}
+                />
+              ) : (
+                <div className="text-sm text-slate-500 italic">
+                  タイムスタンプはありません
+                </div>
+              )}
+            </div>
 
             {/* 文字起こし */}
             {record.transcript_text && (
