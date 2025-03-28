@@ -12,9 +12,9 @@ async function isAdmin() {
     return false;
   }
   
-  // 本番環境では適切な管理者チェックを実装
-  // 例: 特定のメールドメインを持つユーザーのみ管理者とする
-  return session.user.email.endsWith('@yourdomain.com');
+  // 特定のメールアドレスを管理者として認識
+  const adminEmails = ['ikeike55momo@gmail.com'];
+  return adminEmails.includes(session.user.email);
 }
 
 // データベーススキーマ情報を取得するAPI
