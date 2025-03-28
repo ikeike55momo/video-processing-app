@@ -118,7 +118,102 @@ export class ProcessingPipeline {
       
       console.log(`[${recordId}] 文字起こし結果: ${originalTranscript.substring(0, 100)}...`);
       
-      // 2. 要約処理
+      // 2. タイムスタンプ抽出処理
+      console.log(`[${recordId}] タイムスタンプ抽出処理を開始します...`);
+      let timestampsData;
+      try {
+        // タイムスタンプ抽出用のプロンプトを作成
+        const timestampPrompt = `
+あなたはプロのタイムスタンプ作成者です。以下の文字起こしテキストを分析し、YouTubeのようなタイムスタンプを作成してください。
+
+## 指示
+1. 文字起こしテキストを分析し、重要なトピックの変わり目、主要なポイント、話題の転換点を特定してください
+2. 各ポイントの開始時間（秒単位）とその内容の要約を抽出してください
+3. 最初のタイムスタンプは必ず0秒から始めてください
+4. 結果は以下のJSON形式で返してください:
+
+\`\`\`json
+{
+  "timestamps": [
+    {
+      "time": 0,
+      "text": "導入部分の内容"
+    },
+    {
+      "time": 120,
+      "text": "次のトピックの内容"
+    },
+    ...
+  ]
+}
+\`\`\`
+
+## 重要な注意点
+- 時間は秒単位の数値で指定してください（例: 65.5）
+- 各ポイントの要約は簡潔に、30文字程度にしてください
+- 重要なポイントを10〜15個程度抽出してください
+- タイムスタンプは均等に分布させてください（例: 2分程度の動画なら15〜30秒ごと）
+- 文字起こしの内容に基づいて、実際の動画内容を反映したタイムスタンプを作成してください
+- JSONのみを返してください。説明文は不要です
+
+## 文字起こしテキスト:
+${originalTranscript}
+`;
+
+        // Gemini APIを使用してタイムスタンプを抽出
+        const timestampResponse = await this.geminiService.extractTimestamps(timestampPrompt);
+        console.log(`[${recordId}] タイムスタンプ抽出が成功しました`);
+        
+        // JSONを抽出
+        let jsonMatch = timestampResponse.match(/```json\s*([\s\S]*?)\s*```/);
+        if (!jsonMatch) {
+          // JSONブロックがない場合は、テキスト全体をJSONとして解析を試みる
+          jsonMatch = [null, timestampResponse.trim()];
+        }
+        
+        try {
+          timestampsData = JSON.parse(jsonMatch && jsonMatch[1] ? jsonMatch[1] : '{"timestamps":[]}');
+          console.log(`[${recordId}] 抽出されたタイムスタンプ: ${timestampsData.timestamps.length}個`);
+          
+          // タイムスタンプをデータベースに保存
+          await prisma.record.update({
+            where: { id: recordId },
+            data: { timestamps_json: JSON.stringify(timestampsData) },
+          });
+          console.log(`[${recordId}] タイムスタンプをデータベースに保存しました`);
+        } catch (parseError) {
+          console.error(`[${recordId}] タイムスタンプJSONの解析に失敗しました:`, parseError);
+          console.log(`[${recordId}] 生のレスポンス:`, timestampResponse);
+          
+          // 空のタイムスタンプ配列を作成
+          timestampsData = { timestamps: [] };
+          
+          // 空のタイムスタンプをデータベースに保存
+          await prisma.record.update({
+            where: { id: recordId },
+            data: { timestamps_json: JSON.stringify(timestampsData) },
+          });
+          console.log(`[${recordId}] 空のタイムスタンプをデータベースに保存しました`);
+        }
+      } catch (timestampError) {
+        console.error(`[${recordId}] タイムスタンプ抽出処理エラー:`, timestampError);
+        
+        // エラー時は空のタイムスタンプ配列を作成
+        timestampsData = { timestamps: [] };
+        
+        // 空のタイムスタンプをデータベースに保存
+        await prisma.record.update({
+          where: { id: recordId },
+          data: { timestamps_json: JSON.stringify(timestampsData) },
+        });
+        console.log(`[${recordId}] エラー発生のため空のタイムスタンプをデータベースに保存しました`);
+        
+        // タイムスタンプ抽出エラーは致命的ではないため、処理を続行
+        console.log(`[${recordId}] タイムスタンプ抽出エラーが発生しましたが、処理を続行します`);
+      }
+      console.log(`[${recordId}] タイムスタンプ抽出処理が完了しました`);
+      
+      // 3. 要約処理
       console.log(`[${recordId}] 要約処理を開始します...`);
       let summary;
       try {
@@ -146,7 +241,7 @@ export class ProcessingPipeline {
       }
       console.log(`[${recordId}] 要約処理が完了しました`);
 
-      // 3. 記事生成処理
+      // 4. 記事生成処理
       console.log(`[${recordId}] 記事生成処理を開始します...`);
       console.log(`[${recordId}] 要約テキスト:`, summary.substring(0, 100) + '...');
       let article;
@@ -337,7 +432,7 @@ export class ProcessingPipeline {
             
             console.log(`[${recordId}] 文字起こし結果: ${originalTranscript.substring(0, 100)}...`);
             
-            // 要約処理に進む
+            // タイムスタンプ抽出処理に進む
             await this.retryFromStep(recordId, 3);
             return;
           } catch (transcriptError) {
@@ -352,7 +447,116 @@ export class ProcessingPipeline {
             throw transcriptError;
           }
           
-        case 3: // 要約からやり直し
+        case 3: // タイムスタンプ抽出からやり直し
+          console.log(`[${recordId}] タイムスタンプ抽出処理を開始します...`);
+          try {
+            // 文字起こし結果を取得
+            const record = await prisma.record.findUnique({
+              where: { id: recordId },
+            });
+            
+            if (!record || !record.transcript_text) {
+              throw new Error('文字起こし結果がありません。文字起こしから再試行してください。');
+            }
+            
+            const originalTranscript = record.transcript_text;
+            
+            // タイムスタンプ抽出用のプロンプトを作成
+            const timestampPrompt = `
+あなたはプロのタイムスタンプ作成者です。以下の文字起こしテキストを分析し、YouTubeのようなタイムスタンプを作成してください。
+
+## 指示
+1. 文字起こしテキストを分析し、重要なトピックの変わり目、主要なポイント、話題の転換点を特定してください
+2. 各ポイントの開始時間（秒単位）とその内容の要約を抽出してください
+3. 最初のタイムスタンプは必ず0秒から始めてください
+4. 結果は以下のJSON形式で返してください:
+
+\`\`\`json
+{
+  "timestamps": [
+    {
+      "time": 0,
+      "text": "導入部分の内容"
+    },
+    {
+      "time": 120,
+      "text": "次のトピックの内容"
+    },
+    ...
+  ]
+}
+\`\`\`
+
+## 重要な注意点
+- 時間は秒単位の数値で指定してください（例: 65.5）
+- 各ポイントの要約は簡潔に、30文字程度にしてください
+- 重要なポイントを10〜15個程度抽出してください
+- タイムスタンプは均等に分布させてください（例: 2分程度の動画なら15〜30秒ごと）
+- 文字起こしの内容に基づいて、実際の動画内容を反映したタイムスタンプを作成してください
+- JSONのみを返してください。説明文は不要です
+
+## 文字起こしテキスト:
+${originalTranscript}
+`;
+
+            // Gemini APIを使用してタイムスタンプを抽出
+            const timestampResponse = await this.geminiService.extractTimestamps(timestampPrompt);
+            console.log(`[${recordId}] タイムスタンプ抽出が成功しました`);
+            
+            // JSONを抽出
+            let jsonMatch = timestampResponse.match(/```json\s*([\s\S]*?)\s*```/);
+            if (!jsonMatch) {
+              // JSONブロックがない場合は、テキスト全体をJSONとして解析を試みる
+              jsonMatch = [null, timestampResponse.trim()];
+            }
+            
+            try {
+              const timestampsData = JSON.parse(jsonMatch && jsonMatch[1] ? jsonMatch[1] : '{"timestamps":[]}');
+              console.log(`[${recordId}] 抽出されたタイムスタンプ: ${timestampsData.timestamps.length}個`);
+              
+              // タイムスタンプをデータベースに保存
+              await prisma.record.update({
+                where: { id: recordId },
+                data: { timestamps_json: JSON.stringify(timestampsData) },
+              });
+              console.log(`[${recordId}] タイムスタンプをデータベースに保存しました`);
+            } catch (parseError) {
+              console.error(`[${recordId}] タイムスタンプJSONの解析に失敗しました:`, parseError);
+              console.log(`[${recordId}] 生のレスポンス:`, timestampResponse);
+              
+              // 空のタイムスタンプ配列を作成
+              const timestampsData = { timestamps: [] };
+              
+              // 空のタイムスタンプをデータベースに保存
+              await prisma.record.update({
+                where: { id: recordId },
+                data: { timestamps_json: JSON.stringify(timestampsData) },
+              });
+              console.log(`[${recordId}] 空のタイムスタンプをデータベースに保存しました`);
+            }
+          } catch (timestampError) {
+            console.error(`[${recordId}] タイムスタンプ抽出処理エラー:`, timestampError);
+            
+            // エラー時は空のタイムスタンプ配列を作成
+            const timestampsData = { timestamps: [] };
+            
+            // 空のタイムスタンプをデータベースに保存
+            await prisma.record.update({
+              where: { id: recordId },
+              data: { timestamps_json: JSON.stringify(timestampsData) },
+            });
+            console.log(`[${recordId}] エラー発生のため空のタイムスタンプをデータベースに保存しました`);
+            
+            // タイムスタンプ抽出エラーは致命的ではないため、処理を続行
+            console.log(`[${recordId}] タイムスタンプ抽出エラーが発生しましたが、処理を続行します`);
+          }
+          console.log(`[${recordId}] タイムスタンプ抽出処理が完了しました`);
+          
+          // 要約処理に進む
+          await this.retryFromStep(recordId, 4);
+          return;
+          
+        case 4: // 要約からやり直し
           console.log(`[${recordId}] 要約処理を開始します...`);
           if (!record.transcript_text) {
             throw new Error('文字起こし結果がありません。文字起こしから再試行してください。');
@@ -372,7 +576,7 @@ export class ProcessingPipeline {
             console.log(`[${recordId}] 要約結果をデータベースに保存しました`);
             
             // 記事生成処理に進む
-            await this.retryFromStep(recordId, 4);
+            await this.retryFromStep(recordId, 5);
             return;
           } catch (summaryError) {
             console.error(`[${recordId}] 要約処理エラー:`, summaryError);
@@ -386,7 +590,7 @@ export class ProcessingPipeline {
             throw summaryError;
           }
           
-        case 4: // 記事生成からやり直し
+        case 5: // 記事生成からやり直し
           console.log(`[${recordId}] 記事生成処理を開始します...`);
           if (!record.summary_text) {
             throw new Error('要約結果がありません。要約から再試行してください。');

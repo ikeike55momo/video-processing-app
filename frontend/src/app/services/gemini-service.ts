@@ -438,36 +438,76 @@ ${text}
 
   /**
    * 要約処理
-   * @param text 文字起こし結果のテキスト
-   * @returns 要約されたテキスト
+   * @param text 要約するテキスト
+   * @returns 要約結果
    */
   async summarizeText(text: string): Promise<string> {
     try {
+      console.log('要約処理を開始');
+      
+      // テキストが空の場合はエラー
+      if (!text || text.trim() === '') {
+        throw new Error('要約するテキストが空です');
+      }
+      
+      // モデルの取得
       const model = this.genAI.getGenerativeModel({ model: this.model });
       
-      const prompt = `あなたは高度な要約スキルを持つプロフェッショナルです。以下の文字起こしテキストを要約してください。
+      // プロンプトの作成
+      const prompt = `
+あなたは高度な要約AIです。以下の文字起こしテキストを要約してください。
 
-## 要約の指示
-1. 主要なトピックと重要なポイントを明確に抽出してください
-2. 専門用語や技術的な概念を正確に保持してください
-3. 話者の説明、例示、重要な情報の要点を含めてください
-4. 質疑応答から得られた重要な洞察を含めてください
-5. 論理的な構造を維持し、トピック間の関連性を示してください
-6. 正確さを保ちながら、簡潔で理解しやすい表現を使用してください
-7. 文字起こしの内容を全て含め、情報を省略せずに要約してください
+## 指示
+- 重要なポイントを抽出し、簡潔にまとめてください
+- 元の内容の意味を保持しながら、冗長な部分を削除してください
+- 箇条書きではなく、段落形式で要約してください
+- 要約は元のテキストの約20%の長さにしてください
+- 架空の内容を追加しないでください
 
+## 文字起こしテキスト:
 ${text}
-
-要約は日本語で、元のテキストの重要なポイントを全て含めてください。文字数制限はありません。この要約は一般読者向けに作成され、内容の正確さと教育的価値を重視してください。`;
+`;
       
+      // 要約の生成
       const result = await model.generateContent(prompt);
       const response = await result.response;
       const summary = response.text();
       
+      console.log('要約処理が完了しました');
       return summary;
-    } catch (error: any) {
-      console.error('要約エラー:', error);
-      throw new Error('要約処理に失敗しました');
+    } catch (error) {
+      console.error('要約処理エラー:', error);
+      throw new Error('要約処理中にエラーが発生しました: ' + (error instanceof Error ? error.message : '不明なエラー'));
+    }
+  }
+
+  /**
+   * タイムスタンプ抽出処理
+   * @param prompt タイムスタンプ抽出用のプロンプト
+   * @returns タイムスタンプ抽出結果（JSON文字列）
+   */
+  async extractTimestamps(prompt: string): Promise<string> {
+    try {
+      console.log('タイムスタンプ抽出処理を開始');
+      
+      // プロンプトが空の場合はエラー
+      if (!prompt || prompt.trim() === '') {
+        throw new Error('タイムスタンプ抽出用のプロンプトが空です');
+      }
+      
+      // モデルの取得
+      const model = this.genAI.getGenerativeModel({ model: this.model });
+      
+      // タイムスタンプの抽出
+      const result = await model.generateContent(prompt);
+      const response = await result.response;
+      const timestampsResponse = response.text();
+      
+      console.log('タイムスタンプ抽出処理が完了しました');
+      return timestampsResponse;
+    } catch (error) {
+      console.error('タイムスタンプ抽出処理エラー:', error);
+      throw new Error('タイムスタンプ抽出処理中にエラーが発生しました: ' + (error instanceof Error ? error.message : '不明なエラー'));
     }
   }
 
