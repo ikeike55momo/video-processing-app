@@ -56,7 +56,7 @@ const os = __importStar(require("os"));
 const path = __importStar(require("path"));
 const crypto = __importStar(require("crypto"));
 // TranscriptionServiceを先頭でインポート
-// const { TranscriptionService } = require('./services/transcription-service');
+const path = require('path');
 let transcriptionService;
 // 環境変数の読み込み
 dotenv.config();
@@ -229,51 +229,55 @@ app.post('/api/process', (req, res) => __awaiter(void 0, void 0, void 0, functio
     }
 }));
 // 文字起こしAPIエンドポイント
-app.post('/api/transcribe', (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    try {
-        const { fileUrl } = req.body;
-        
-        if (!fileUrl) {
-            return res.status(400).json({ error: 'fileUrlは必須です' });
-        }
-        
-        console.log(`文字起こし処理を開始: ${fileUrl}`);
-        
-        // 一時ディレクトリを作成
-        const tempDir = path.join(os.tmpdir(), 'transcription-' + crypto.randomBytes(6).toString('hex'));
-        fs.mkdirSync(tempDir, { recursive: true });
-        
-        // ファイルをダウンロード
-        const filePath = yield downloadFile(fileUrl, tempDir);
-        console.log(`ファイルをダウンロードしました: ${filePath}`);
-        
-        // 文字起こし処理
-        if (!transcriptionService) {
-            console.log('TranscriptionServiceを初期化します');
-            try {
-                const { TranscriptionService } = require('./services/transcription-service');
-                transcriptionService = new TranscriptionService();
-            } catch (error) {
-                console.error('TranscriptionServiceの初期化に失敗しました:', error);
-                return res.status(500).json({ error: `TranscriptionServiceの初期化に失敗しました: ${error.message}` });
-            }
-        }
-        const transcript = yield transcriptionService.transcribeAudio(filePath);
-        
-        // 一時ディレクトリを削除
-        try {
-            fs.rmSync(tempDir, { recursive: true, force: true });
-            console.log(`一時ディレクトリを削除しました: ${tempDir}`);
-        } catch (err) {
-            console.error(`一時ディレクトリの削除に失敗しました: ${tempDir}`, err);
-        }
-        
-        return res.json({ transcript });
-    } catch (error) {
-        console.error('文字起こし処理エラー:', error);
-        return res.status(500).json({ error: `文字起こし処理に失敗しました: ${error.message}` });
+app.post('/api/transcribe', async (req, res) => {
+  try {
+    // リクエストボディからファイルURLを取得
+    const { fileUrl } = req.body;
+    
+    if (!fileUrl) {
+      return res.status(400).json({ error: 'ファイルURLが指定されていません' });
     }
-}));
+    
+    console.log(`文字起こしリクエスト受信: ${fileUrl}`);
+    
+    // TranscriptionServiceが初期化されていない場合は初期化
+    if (!transcriptionService) {
+      console.log('TranscriptionServiceを初期化します');
+      try {
+        const transcriptionServicePath = path.join(__dirname, 'services', 'transcription-service.js');
+        console.log(`TranscriptionServiceのパス: ${transcriptionServicePath}`);
+        const { TranscriptionService } = require(transcriptionServicePath);
+        transcriptionService = new TranscriptionService();
+      } catch (error) {
+        console.error('TranscriptionServiceの初期化に失敗しました:', error);
+        return res.status(500).json({ error: `TranscriptionServiceの初期化に失敗しました: ${error.message}` });
+      }
+    }
+    // 一時ディレクトリを作成
+    const tempDir = path.join(os.tmpdir(), 'transcription-' + crypto.randomBytes(6).toString('hex'));
+    fs.mkdirSync(tempDir, { recursive: true });
+    
+    // ファイルをダウンロード
+    const filePath = yield downloadFile(fileUrl, tempDir);
+    console.log(`ファイルをダウンロードしました: ${filePath}`);
+    
+    // 文字起こし処理
+    const transcript = yield transcriptionService.transcribeAudio(filePath);
+    
+    // 一時ディレクトリを削除
+    try {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+      console.log(`一時ディレクトリを削除しました: ${tempDir}`);
+    } catch (err) {
+      console.error(`一時ディレクトリの削除に失敗しました: ${tempDir}`, err);
+    }
+    
+    return res.json({ transcript });
+  } catch (error) {
+    console.error('文字起こし処理エラー:', error);
+    return res.status(500).json({ error: `文字起こし処理に失敗しました: ${error.message}` });
+  }
+});
 
 /**
  * ファイルURLからファイルをダウンロード
@@ -282,44 +286,44 @@ app.post('/api/transcribe', (req, res) => __awaiter(void 0, void 0, void 0, func
  * @returns {Promise<string>} ダウンロードしたファイルのパス
  */
 function downloadFile(fileUrl, tempDir) {
-    return __awaiter(this, void 0, void 0, function* () {
-        try {
-            // URLの形式に応じた処理
-            if (fileUrl.startsWith('http://') || fileUrl.startsWith('https://')) {
-                // 公開URLの場合、一時ファイルにダウンロード
-                console.log('公開URLからファイルをダウンロードします');
-                
-                // ファイル名を取得
-                const fileName = path.basename(new URL(fileUrl).pathname);
-                const localFilePath = path.join(tempDir, fileName);
-                
-                console.log(`ファイルをダウンロード中: ${localFilePath}`);
-                
-                // ファイルをダウンロード
-                const response = yield axios({
-                    method: 'get',
-                    url: fileUrl,
-                    responseType: 'stream'
-                });
-                
-                const writer = fs.createWriteStream(localFilePath);
-                response.data.pipe(writer);
-                
-                yield new Promise((resolve, reject) => {
-                    writer.on('finish', resolve);
-                    writer.on('error', reject);
-                });
-                
-                console.log(`ファイルのダウンロード完了: ${localFilePath}`);
-                return localFilePath;
-            } else {
-                throw new Error('サポートされていないURL形式です: ' + fileUrl);
-            }
-        } catch (error) {
-            console.error('ファイルダウンロードエラー:', error);
-            throw new Error(`ファイルのダウンロードに失敗しました: ${error.message}`);
-        }
-    });
+  return __awaiter(this, void 0, void 0, function* () {
+    try {
+      // URLの形式に応じた処理
+      if (fileUrl.startsWith('http://') || fileUrl.startsWith('https://')) {
+        // 公開URLの場合、一時ファイルにダウンロード
+        console.log('公開URLからファイルをダウンロードします');
+        
+        // ファイル名を取得
+        const fileName = path.basename(new URL(fileUrl).pathname);
+        const localFilePath = path.join(tempDir, fileName);
+        
+        console.log(`ファイルをダウンロード中: ${localFilePath}`);
+        
+        // ファイルをダウンロード
+        const response = yield axios({
+          method: 'get',
+          url: fileUrl,
+          responseType: 'stream'
+        });
+        
+        const writer = fs.createWriteStream(localFilePath);
+        response.data.pipe(writer);
+        
+        yield new Promise((resolve, reject) => {
+          writer.on('finish', resolve);
+          writer.on('error', reject);
+        });
+        
+        console.log(`ファイルのダウンロード完了: ${localFilePath}`);
+        return localFilePath;
+      } else {
+        throw new Error('サポートされていないURL形式です: ' + fileUrl);
+      }
+    } catch (error) {
+      console.error('ファイルダウンロードエラー:', error);
+      throw new Error(`ファイルのダウンロードに失敗しました: ${error.message}`);
+    }
+  });
 }
 
 // レコード情報取得エンドポイント
@@ -456,11 +460,13 @@ app.post('/api/records/:id/retry', (req, res) => __awaiter(void 0, void 0, void 
     }
 }));
 // サーバーを起動
-app.listen(PORT, () => {
+app.listen(PORT, async () => {
   console.log(`サーバーが起動しました。ポート: ${PORT}`);
   try {
     // TranscriptionServiceのダイナミックインポート
-    const { TranscriptionService } = require('./services/transcription-service');
+    const transcriptionServicePath = path.join(__dirname, 'services', 'transcription-service.js');
+    console.log(`TranscriptionServiceのパス: ${transcriptionServicePath}`);
+    const { TranscriptionService } = require(transcriptionServicePath);
     transcriptionService = new TranscriptionService();
     console.log('TranscriptionService初期化完了');
   } catch (error) {
