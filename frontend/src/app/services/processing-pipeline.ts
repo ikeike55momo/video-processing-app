@@ -178,7 +178,9 @@ ${originalTranscript}
           // タイムスタンプをデータベースに保存
           await prisma.record.update({
             where: { id: recordId },
-            data: { timestamps_json: JSON.stringify(timestampsData) },
+            data: { 
+              summary_text: JSON.stringify(timestampsData) 
+            },
           });
           console.log(`[${recordId}] タイムスタンプをデータベースに保存しました`);
         } catch (parseError) {
@@ -191,7 +193,9 @@ ${originalTranscript}
           // 空のタイムスタンプをデータベースに保存
           await prisma.record.update({
             where: { id: recordId },
-            data: { timestamps_json: JSON.stringify(timestampsData) },
+            data: { 
+              summary_text: JSON.stringify(timestampsData) 
+            },
           });
           console.log(`[${recordId}] 空のタイムスタンプをデータベースに保存しました`);
         }
@@ -204,7 +208,9 @@ ${originalTranscript}
         // 空のタイムスタンプをデータベースに保存
         await prisma.record.update({
           where: { id: recordId },
-          data: { timestamps_json: JSON.stringify(timestampsData) },
+          data: { 
+            summary_text: JSON.stringify(timestampsData) 
+          },
         });
         console.log(`[${recordId}] エラー発生のため空のタイムスタンプをデータベースに保存しました`);
         
@@ -517,7 +523,9 @@ ${originalTranscript}
               // タイムスタンプをデータベースに保存
               await prisma.record.update({
                 where: { id: recordId },
-                data: { timestamps_json: JSON.stringify(timestampsData) },
+                data: { 
+                  summary_text: JSON.stringify(timestampsData) 
+                },
               });
               console.log(`[${recordId}] タイムスタンプをデータベースに保存しました`);
             } catch (parseError) {
@@ -530,7 +538,9 @@ ${originalTranscript}
               // 空のタイムスタンプをデータベースに保存
               await prisma.record.update({
                 where: { id: recordId },
-                data: { timestamps_json: JSON.stringify(timestampsData) },
+                data: { 
+                  summary_text: JSON.stringify(timestampsData) 
+                },
               });
               console.log(`[${recordId}] 空のタイムスタンプをデータベースに保存しました`);
             }
@@ -543,7 +553,9 @@ ${originalTranscript}
             // 空のタイムスタンプをデータベースに保存
             await prisma.record.update({
               where: { id: recordId },
-              data: { timestamps_json: JSON.stringify(timestampsData) },
+              data: { 
+                summary_text: JSON.stringify(timestampsData) 
+              },
             });
             console.log(`[${recordId}] エラー発生のため空のタイムスタンプをデータベースに保存しました`);
             
