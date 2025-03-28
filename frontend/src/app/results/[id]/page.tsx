@@ -16,6 +16,8 @@ export default function RecordDetailPage() {
   const [record, setRecord] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [processingStep, setProcessingStep] = useState<number | null>(null);
+  const [processingMessage, setProcessingMessage] = useState<string>("");
   // モーダル表示用の状態
   const [modalOpen, setModalOpen] = useState(false);
   const [modalTitle, setModalTitle] = useState("");
@@ -108,6 +110,55 @@ export default function RecordDetailPage() {
     }
   };
 
+  // 特定のステップから処理を再開する
+  const retryFromStep = async (step: number) => {
+    if (!recordId) return;
+    
+    try {
+      setProcessingStep(step);
+      setProcessingMessage(`ステップ${step}から処理を再開しています...`);
+      
+      // ステップ名を取得
+      const stepNames = ["アップロード", "文字起こし", "タイムスタンプ", "要約", "記事生成"];
+      const stepName = stepNames[step - 1] || `ステップ${step}`;
+      
+      // APIを呼び出して処理を再開
+      const response = await fetch(`/api/records/${recordId}/retry`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ step }),
+      });
+      
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || `${stepName}の再開に失敗しました`);
+      }
+      
+      // 成功したらレコードを再取得
+      const data = await response.json();
+      setRecord(data.record);
+      setProcessingMessage(`${stepName}の再開が完了しました。処理が開始されました。`);
+      
+      // 3秒後にメッセージをクリア
+      setTimeout(() => {
+        setProcessingStep(null);
+        setProcessingMessage("");
+      }, 3000);
+      
+    } catch (err) {
+      console.error("再開処理エラー:", err);
+      setError(
+        err instanceof Error
+          ? err.message
+          : "処理の再開中にエラーが発生しました"
+      );
+      setProcessingStep(null);
+      setProcessingMessage("");
+    }
+  };
+
   return (
     <div className="min-h-screen bg-slate-50 p-8">
       <div className="mx-auto max-w-6xl">
@@ -118,7 +169,13 @@ export default function RecordDetailPage() {
               動画の文字起こし、タイムスタンプ、要約、記事を確認できます
             </p>
           </div>
-          <div>
+          <div className="flex space-x-3">
+            <button
+              onClick={() => router.push("/dashboard")}
+              className="rounded-md bg-gray-600 px-4 py-2 text-white hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-gray-500 focus:ring-offset-2"
+            >
+              ダッシュボードへ
+            </button>
             <button
               onClick={() => router.push("/results")}
               className="rounded-md bg-blue-600 px-4 py-2 text-white hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
@@ -141,15 +198,30 @@ export default function RecordDetailPage() {
         ) : !record ? (
           <div className="rounded-lg bg-white p-8 text-center shadow-md">
             <p className="text-slate-600">レコードが見つかりませんでした</p>
-            <button
-              onClick={() => router.push("/results")}
-              className="mt-4 rounded-md bg-blue-600 px-4 py-2 text-white hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
-            >
-              一覧に戻る
-            </button>
+            <div className="mt-4 flex justify-center space-x-4">
+              <button
+                onClick={() => router.push("/results")}
+                className="rounded-md bg-blue-600 px-4 py-2 text-white hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
+              >
+                一覧に戻る
+              </button>
+              <button
+                onClick={() => router.push("/dashboard")}
+                className="rounded-md bg-gray-600 px-4 py-2 text-white hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-gray-500 focus:ring-offset-2"
+              >
+                ダッシュボードへ
+              </button>
+            </div>
           </div>
         ) : (
           <div className="space-y-8">
+            {/* 処理中メッセージ */}
+            {processingStep !== null && (
+              <div className="rounded-lg bg-blue-50 p-4 text-blue-700 shadow-md">
+                <p>{processingMessage}</p>
+              </div>
+            )}
+            
             {/* 基本情報 */}
             <div className="rounded-lg bg-white p-6 shadow-md">
               <h2 className="mb-2 text-xl font-semibold text-slate-800">
@@ -164,6 +236,7 @@ export default function RecordDetailPage() {
                 totalSteps={5}
                 status={record.status}
                 error={record.error}
+                onRetryStep={retryFromStep}
               />
             </div>
 
