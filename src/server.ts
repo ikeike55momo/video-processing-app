@@ -35,11 +35,11 @@ app.use(express.json());
 
 // CORSミドルウェア
 app.use((req: Request, res: Response, next: NextFunction) => {
-  // ALLOWED_ORIGINSが設定されている場合は、そのオリジンからのリクエストのみを許可
-  const allowedOrigins = process.env.ALLOWED_ORIGINS ? process.env.ALLOWED_ORIGINS.split(',') : ['*'];
+  // カスタムドメインを明示的に許可
+  const allowedOrigins = ['https://vpm.ririaru-stg.cloud', 'https://video-frontend-nextjs-app.onrender.com', 'https://video-processing-frontend.onrender.com'];
   
   const origin = req.headers.origin;
-  if (origin && (allowedOrigins.includes('*') || allowedOrigins.includes(origin))) {
+  if (origin && allowedOrigins.includes(origin)) {
     res.header('Access-Control-Allow-Origin', origin);
   } else {
     // デフォルトのオリジンを設定
