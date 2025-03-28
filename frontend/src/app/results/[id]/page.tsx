@@ -96,7 +96,9 @@ export default function RecordDetailPage() {
     if (!timestampsJson) return [];
     
     try {
+      console.log("タイムスタンプデータ:", timestampsJson);
       const data = JSON.parse(timestampsJson);
+      console.log("解析後のデータ:", data);
       return data.timestamps || [];
     } catch (error) {
       console.error("タイムスタンプの解析エラー:", error);
@@ -166,6 +168,10 @@ export default function RecordDetailPage() {
             {/* 動画プレーヤーとタイムスタンプ */}
             <div className="mb-8">
               <h3 className="text-lg font-medium text-slate-800 mb-2">タイムスタンプ</h3>
+              <div className="mb-2 text-xs text-slate-500">
+                <p>timestamps_json: {record.timestamps_json ? "あり" : "なし"}</p>
+                <p>summary_text: {record.summary_text ? (record.summary_text.includes('"timestamps"') ? "タイムスタンプあり" : "タイムスタンプなし") : "なし"}</p>
+              </div>
               {record.timestamps_json ? (
                 <VideoWithTimestamps
                   videoSrc={record.file_url}
