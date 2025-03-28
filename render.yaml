@@ -36,7 +36,7 @@ services:
       - key: OPENROUTER_API_KEY
         sync: false
       - key: ALLOWED_ORIGINS
-        value: "https://video-processing-frontend.onrender.com"
+        value: "https://video-processing-frontend.onrender.com,https://vpm.ririaru-stg.cloud"
     healthCheckPath: /api/healthcheck
 
   # フロントエンドアプリケーション（完全に新しい名前で作成）
@@ -59,11 +59,11 @@ services:
       - key: DIRECT_URL
         value: "postgresql://wado_wado_user:U5YqVgZ8xL4OaqGGybLqdJOs4ZwSIWqG@dpg-cve55ldrie7s73e158c0-a/wado_wado"
       - key: NEXTAUTH_URL
-        value: "https://video-frontend-nextjs-app.onrender.com"
+        value: "https://vpm.ririaru-stg.cloud"
       - key: NEXTAUTH_SECRET
         sync: false
       - key: NEXT_PUBLIC_API_URL
-        value: "https://video-processing-app.onrender.com"
+        value: "https://vpm.ririaru-stg.cloud"
       - key: R2_ENDPOINT
         sync: false
       - key: R2_ACCESS_KEY_ID
