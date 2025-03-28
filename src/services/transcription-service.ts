@@ -621,8 +621,8 @@ export class TranscriptionService {
       const duration = metadata.format.duration || 0;
       console.log(`音声の長さ: ${duration}秒`);
       
-      // 分割数を計算（5分ごとに分割）
-      const chunkDuration = 300; // 5分 = 300秒
+      // 分割数を計算（3分ごとに分割）
+      const chunkDuration = 180; // 3分 = 180秒
       const chunks = Math.ceil(duration / chunkDuration);
       console.log(`音声を${chunks}チャンクに分割します`);
       
