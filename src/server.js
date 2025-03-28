@@ -56,7 +56,6 @@ const os = __importStar(require("os"));
 const path = __importStar(require("path"));
 const crypto = __importStar(require("crypto"));
 // TranscriptionServiceを先頭でインポート
-const path = require('path');
 let transcriptionService;
 // 環境変数の読み込み
 dotenv.config();
