@@ -16,8 +16,11 @@ export async function POST(req: NextRequest) {
     // リクエストボディの取得
     const body = await req.json();
 
+    console.log("処理リクエスト:", body);
+    console.log("バックエンドAPI URL:", API_URL);
+
     // バックエンドAPIにリクエストを転送
-    const backendResponse = await fetch(`${API_URL}/api/transcribe`, {
+    const backendResponse = await fetch(`${API_URL}/api/process`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -29,20 +32,18 @@ export async function POST(req: NextRequest) {
 
     // バックエンドからのレスポンスを取得
     const data = await backendResponse.json();
+    console.log("バックエンドAPIレスポンス:", data);
 
     // レスポンスコードを保持してクライアントに返す
     if (!backendResponse.ok) {
-      return NextResponse.json(
-        { error: data.error || "バックエンドAPIでエラーが発生しました" },
-        { status: backendResponse.status }
-      );
+      return NextResponse.json(data, { status: backendResponse.status });
     }
 
     return NextResponse.json(data);
-  } catch (error) {
+  } catch (error: any) {
     console.error("処理リクエストエラー:", error);
     return NextResponse.json(
-      { error: "処理リクエストに失敗しました", details: String(error) },
+      { error: `処理リクエスト中にエラーが発生しました: ${error.message}` },
       { status: 500 }
     );
   }

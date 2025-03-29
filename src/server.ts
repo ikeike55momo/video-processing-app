@@ -1,219 +1,188 @@
-import express from 'express';
-import type { Request, Response, NextFunction } from 'express';
-import { PrismaClient } from '@prisma/client';
-import * as dotenv from 'dotenv';
-import { addJob } from './lib/queue';
-import { generateUploadUrl, getDownloadUrl } from './lib/storage';
-import path from 'path';
-import http from 'http';
-import { queueManager, QUEUE_NAMES } from './lib/bull-queue';
+import express, { Request, Response, NextFunction, Application } from 'express';
+import dotenv from 'dotenv';
+import { PrismaClient, Status } from '@prisma/client';
+import { generateUploadUrl } from './lib/storage';
+import { processRecord } from './lib/processor';
+import { getFileSize } from './lib/file-utils';
+import { getTranscriptionStatus } from './lib/transcription';
+import { getJobStatus } from './lib/job-queue';
 import { socketManager } from './lib/socket-manager';
 import cors from 'cors';
+import { errorHandler } from './middleware/error-handler';
 
 // 環境変数の読み込み
 dotenv.config();
 
-// Expressアプリケーションの初期化
-const app = express();
-const PORT = process.env.PORT || 3000;
-
-// HTTPサーバーの作成
-const server = http.createServer(app);
-
-// Socket.IOサーバーの初期化
-socketManager.initialize(server);
-
-// BullMQキューの初期化
-queueManager.initQueue(QUEUE_NAMES.TRANSCRIPTION);
-queueManager.initQueue(QUEUE_NAMES.SUMMARY);
-queueManager.initQueue(QUEUE_NAMES.ARTICLE);
-
 // Prismaクライアントの初期化
 const prisma = new PrismaClient();
 
-// JSON形式のリクエストボディを解析
-app.use(express.json());
+// Expressアプリケーションの作成
+const app: Application = express();
+const PORT = process.env.PORT || 3001;
 
-// CORSミドルウェアの設定
-const corsOptions = {
-  origin: function(origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) {
-    const allowedOrigins = [
-      'https://vpm.ririaru-stg.cloud', 
-      'https://api.ririaru-stg.cloud',
-      'https://video-frontend-nextjs-app.onrender.com', 
-      'https://video-processing-frontend.onrender.com'
-    ];
-    // undefinedの場合はサーバー間リクエスト（Postmanなど）
-    if (!origin || allowedOrigins.includes(origin)) {
+// CORSの設定
+const allowedOrigins = [
+  'http://localhost:3000',
+  'https://ririaru-stg.cloud',
+  'https://api.ririaru-stg.cloud',
+  process.env.FRONTEND_URL,
+].filter(Boolean);
+
+app.use(cors({
+  origin: (origin, callback) => {
+    // originがnullの場合（サーバー間リクエストなど）は許可
+    if (!origin) return callback(null, true);
+    
+    if (allowedOrigins.indexOf(origin) !== -1) {
       callback(null, true);
     } else {
-      callback(null, false);
+      console.warn(`CORS blocked request from origin: ${origin}`);
+      callback(new Error('Not allowed by CORS'));
     }
   },
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Origin', 'X-Requested-With', 'Content-Type', 'Accept', 'Authorization'],
-  credentials: true,
-  optionsSuccessStatus: 200
-};
+  credentials: true
+}));
 
-// グローバルCORS設定
-app.use(cors(corsOptions));
+// JSONボディパーサーの設定
+app.use(express.json({ limit: '50mb' }));
 
-// ルートエンドポイント - APIの情報を返す
-app.get('/', (req: Request, res: Response) => {
-  res.status(200).json({
-    message: "Video Processing API",
-    version: "1.0.0",
-    endpoints: {
-      health: "/api/health",
-      healthcheck: "/api/healthcheck",
-      uploadUrl: "/api/upload-url",
-      process: "/api/process",
-      records: "/api/records/:id"
-    }
-  });
-});
+// URLエンコードされたボディパーサーの設定
+app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
 // ヘルスチェックエンドポイント
-app.get('/api/health', (req: Request, res: Response) => {
+app.get('/health', (req: Request, res: Response) => {
   res.status(200).json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
-// 追加のヘルスチェックエンドポイント（Render用）
-app.get('/api/healthcheck', (req: Request, res: Response) => {
-  res.status(200).json({ status: 'ok', timestamp: new Date().toISOString() });
+// WebSocketサーバーの初期化
+const server = app.listen(PORT, () => {
+  console.log(`Server is running on port ${PORT}`);
 });
+
+// WebSocketマネージャーの設定
+socketManager.init(server);
+
+// APIルート
 
 // アップロード用URLを生成するエンドポイント
 app.post('/api/upload-url', async (req: Request, res: Response) => {
   try {
-    const { fileName, contentType } = req.body;
+    const { fileName, contentType, fileSize } = req.body;
     
     if (!fileName || !contentType) {
-      return res.status(400).json({ 
-        error: 'Missing required fields',
-        details: 'fileName and contentType are required'
-      });
+      return res.status(400).json({ error: 'ファイル名とコンテンツタイプが必要です' });
     }
 
-    // 署名付きURLの生成
+    console.log(`アップロードリクエスト: ${fileName} (${contentType}, ${fileSize || 'サイズ不明'})`);
+    
+    // 署名付きURLを生成
     const uploadData = await generateUploadUrl(fileName, contentType);
     
     // 新しいレコードをデータベースに作成
     const record = await prisma.record.create({
       data: {
+        file_url: uploadData.url,
         file_key: uploadData.key,
         r2_bucket: uploadData.bucket || '',
-        status: 'UPLOADED',
-        file_url: uploadData.url
+        status: Status.UPLOADED
       }
     });
 
     res.status(200).json({
       uploadUrl: uploadData.url,
-      recordId: record.id,
-      fileKey: uploadData.key
+      key: uploadData.key,
+      recordId: record.id
     });
   } catch (error) {
     console.error('Error generating upload URL:', error);
-    res.status(500).json({ 
-      error: 'Error generating upload URL',
-      details: error instanceof Error ? error.message : 'Unknown error'
-    });
+    res.status(500).json({ error: 'Error generating upload URL', details: String(error) });
   }
 });
 
-// 処理開始エンドポイント
+// 処理を開始するエンドポイント
 app.post('/api/process', async (req: Request, res: Response) => {
   try {
     const { recordId } = req.body;
     
     if (!recordId) {
-      return res.status(400).json({ error: 'recordId is required' });
+      return res.status(400).json({ error: 'Record ID is required' });
     }
 
     // レコードの存在確認
-    const record = await prisma.record.findUnique({
-      where: { id: recordId }
-    });
+    const record = await prisma.record.findUnique({ where: { id: recordId } });
 
     if (!record) {
       return res.status(404).json({ error: 'Record not found' });
     }
 
-    if (record.status !== 'UPLOADED') {
-      return res.status(400).json({ 
-        error: 'Record is already being processed or completed',
-        status: record.status
-      });
+    if (record.status === Status.PROCESSING) {
+      return res.status(400).json({ error: 'Record is already being processed' });
     }
 
-    // 文字起こしキューにジョブを追加
-    await addJob('transcription', {
-      type: 'transcription',
-      recordId: recordId,
-      fileKey: record.file_key || '' // nullの場合に空文字列を使用
+    // 処理キューに追加
+    const job = await processRecord({
+      recordId,
+      fileKey: record.file_key,
+      fileUrl: record.file_url,
+      bucket: record.r2_bucket
     });
 
     // ステータスを更新
-    await prisma.record.update({
-      where: { id: recordId },
-      data: { status: 'PROCESSING' }
+    await prisma.record.update({ 
+      where: { id: recordId }, 
+      data: { status: Status.PROCESSING } 
     });
 
     res.status(200).json({ 
       message: 'Processing started',
-      recordId: recordId
+      jobId: job.id
     });
   } catch (error) {
-    console.error('Error starting process:', error);
-    res.status(500).json({ 
-      error: 'Error starting process',
-      details: error instanceof Error ? error.message : 'Unknown error'
-    });
+    console.error('Error starting processing:', error);
+    res.status(500).json({ error: 'Error starting processing', details: String(error) });
   }
 });
 
-// レコード情報取得エンドポイント
-app.get('/api/records/:id', async (req: Request<{ id: string }>, res: Response) => {
+// レコードの詳細を取得するエンドポイント
+app.get('/api/records/:id', async (req: Request, res: Response) => {
   try {
     const recordId = req.params.id;
     
-    const record = await prisma.record.findUnique({
-      where: { id: recordId }
-    });
+    const record = await prisma.record.findUnique({ where: { id: recordId } });
 
     if (!record) {
       return res.status(404).json({ error: 'Record not found' });
     }
 
-    // ファイルダウンロードURLの生成（必要な場合）
-    let fileUrl = null;
-    if (record.file_key) {
-      fileUrl = await getDownloadUrl(record.file_key);
+    // 削除されたレコードは表示しない
+    if (record.deleted_at) {
+      return res.status(404).json({ error: 'Record not found or has been deleted' });
     }
 
-    res.status(200).json({
+    // レスポンスデータの整形
+    const responseData = {
       id: record.id,
+      fileUrl: record.file_url,
+      fileKey: record.file_key,
       status: record.status,
-      processing_step: record.processing_step,
-      transcript_text: record.transcript_text,
-      summary_text: record.summary_text,
-      article_text: record.article_text,
+      createdAt: record.created_at,
+      updatedAt: record.updated_at,
+      transcriptText: record.transcript_text,
+      summaryText: record.summary_text,
+      articleText: record.article_text,
       error: record.error,
-      created_at: record.created_at,
-      file_url: fileUrl
-    });
+      processingStep: record.processing_step,
+      timestampsJson: record.timestamps_json
+    };
+
+    res.status(200).json(responseData);
   } catch (error) {
     console.error('Error retrieving record:', error);
-    res.status(500).json({ 
-      error: 'Error retrieving record',
-      details: error instanceof Error ? error.message : 'Unknown error'
-    });
+    res.status(500).json({ error: 'Error retrieving record', details: String(error) });
   }
 });
 
-// すべてのレコード取得エンドポイント
+// レコード一覧を取得するエンドポイント
 app.get('/api/records', async (req: Request, res: Response) => {
   try {
     // クエリパラメータからページネーション情報を取得
@@ -234,217 +203,137 @@ app.get('/api/records', async (req: Request, res: Response) => {
       take: pageSize,
     });
 
-    // レスポンス
     res.status(200).json({
       records,
       pagination: {
+        total: totalCount,
         page,
         pageSize,
-        totalCount,
         totalPages: Math.ceil(totalCount / pageSize)
       }
     });
   } catch (error) {
-    console.error('Error retrieving records:', error);
-    res.status(500).json({ 
-      error: 'Error retrieving records',
-      details: error instanceof Error ? error.message : 'Unknown error'
-    });
+    console.error('Error fetching records:', error);
+    res.status(500).json({ error: 'Error fetching records', details: String(error) });
   }
 });
 
-// 再試行エンドポイント
-app.post('/api/records/:id/retry', async (req: Request<{ id: string }>, res: Response) => {
+// レコードの処理を再開するエンドポイント
+app.post('/api/records/:id/restart', async (req: Request, res: Response) => {
   try {
     const recordId = req.params.id;
     
-    const record = await prisma.record.findUnique({
-      where: { id: recordId }
-    });
+    const record = await prisma.record.findUnique({ where: { id: recordId } });
 
     if (!record) {
       return res.status(404).json({ error: 'Record not found' });
     }
 
-    if (record.status !== 'ERROR') {
-      return res.status(400).json({ 
-        error: 'Only records with ERROR status can be retried',
-        status: record.status
-      });
+    if (record.status === Status.PROCESSING) {
+      return res.status(400).json({ error: 'Record is already being processed' });
     }
 
-    // 処理ステップに基づいてキューを選択
-    let queueName: string;
-    let jobType: 'transcription' | 'summary' | 'article';
-    
-    switch (record.processing_step) {
-      case 'SUMMARY':
-        queueName = 'summary';
-        jobType = 'summary';
-        break;
-      case 'ARTICLE':
-        queueName = 'article';
-        jobType = 'article';
-        break;
-      default:
-        // デフォルトは文字起こしから開始
-        queueName = 'transcription';
-        jobType = 'transcription';
+    // ファイルキーの存在確認
+    if (!record.file_key) {
+      return res.status(400).json({ error: 'Record has no associated file' });
     }
 
-    // ジョブをキューに追加
-    await addJob(queueName, {
-      type: jobType,
-      recordId: recordId,
-      fileKey: record.file_key || '' // nullの場合に空文字列を使用
+    // 処理キューに追加
+    const job = await processRecord({
+      recordId,
+      fileKey: record.file_key,
+      fileUrl: record.file_url,
+      bucket: record.r2_bucket,
+      // 処理をリセットするためのフラグ
+      reset: true
     });
 
     // ステータスを更新
-    await prisma.record.update({
-      where: { id: recordId },
+    await prisma.record.update({ 
+      where: { id: recordId }, 
       data: { 
-        status: 'PROCESSING',
+        status: Status.PROCESSING,
         error: null
-      }
+      } 
     });
 
     res.status(200).json({ 
       message: 'Processing restarted',
-      recordId: recordId,
-      queue: queueName
+      jobId: job.id
     });
   } catch (error) {
-    console.error('Error retrying process:', error);
-    res.status(500).json({ 
-      error: 'Error retrying process',
-      details: error instanceof Error ? error.message : 'Unknown error'
-    });
+    console.error('Error restarting processing:', error);
+    res.status(500).json({ error: 'Error restarting processing', details: String(error) });
   }
 });
 
-// WebSocketの進捗状況を取得するエンドポイント
-app.get('/api/job-status/:jobId', async (req: Request<{ jobId: string }>, res: Response) => {
+// ジョブのステータスを取得するエンドポイント
+app.get('/api/jobs/:jobId/status', async (req: Request, res: Response) => {
   try {
     const { jobId } = req.params;
     
-    // 各キューからジョブを検索
-    let job = null;
-    for (const queueName of Object.values(QUEUE_NAMES)) {
-      const queue = queueManager.getQueue(queueName);
-      if (queue) {
-        job = await queue.getJob(jobId);
-        if (job) break;
-      }
+    if (!jobId) {
+      return res.status(400).json({ error: 'Job ID is required' });
     }
+
+    const status = await getJobStatus(jobId);
     
-    if (!job) {
+    if (!status) {
       return res.status(404).json({ error: 'Job not found' });
     }
-    
-    const state = await job.getState();
-    const progress = job.progress || 0;
-    
-    res.status(200).json({
-      jobId,
-      state,
-      progress,
-      data: job.data,
-      timestamp: Date.now()
-    });
+
+    res.status(200).json(status);
   } catch (error) {
-    console.error('Error getting job status:', error);
-    res.status(500).json({
-      error: 'Error getting job status',
-      details: error instanceof Error ? error.message : 'Unknown error'
-    });
+    console.error('Error retrieving job status:', error);
+    res.status(500).json({ error: 'Error retrieving job status', details: String(error) });
   }
 });
 
-// 文字起こし処理を開始するエンドポイント（BullMQバージョン）
-app.post('/api/transcribe', async (req: Request, res: Response) => {
+// 文字起こしステータスを取得するエンドポイント
+app.get('/api/transcription/:recordId/status', async (req: Request, res: Response) => {
   try {
-    const { fileKey, recordId } = req.body;
+    const { recordId } = req.params;
     
-    if (!fileKey || !recordId) {
-      return res.status(400).json({
-        error: 'Missing required fields',
-        details: 'fileKey and recordId are required'
-      });
+    if (!recordId) {
+      return res.status(400).json({ error: 'Record ID is required' });
     }
     
     // レコードの存在確認
-    const record = await prisma.record.findUnique({
-      where: { id: recordId }
-    });
+    const record = await prisma.record.findUnique({ where: { id: recordId } });
     
     if (!record) {
       return res.status(404).json({ error: 'Record not found' });
     }
     
     // ステータスを更新
-    await prisma.record.update({
-      where: { id: recordId },
-      data: { status: 'PROCESSING' }
+    await prisma.record.update({ 
+      where: { id: recordId }, 
+      data: { status: Status.PROCESSING } 
     });
     
     // ファイルサイズを取得（可能であれば）
     let fileSize: number | null = null;
-    try {
-      // ここでファイルサイズを取得するロジックを実装
-      // 例: R2からファイルのメタデータを取得
-    } catch (error) {
-      console.warn('Failed to get file size:', error);
+    if (record.file_key) {
+      try {
+        fileSize = await getFileSize(record.file_key, record.r2_bucket);
+      } catch (err) {
+        console.warn(`Could not get file size for ${record.file_key}:`, err);
+      }
     }
     
-    // ジョブをキューに追加
-    const jobId = await queueManager.addJob(QUEUE_NAMES.TRANSCRIPTION, {
-      type: 'transcription',
-      fileKey,
-      recordId,
-      metadata: { fileSize }
-    });
+    // 文字起こしステータスを取得
+    const status = await getTranscriptionStatus(recordId, fileSize);
     
-    res.status(200).json({
-      message: 'Transcription job queued successfully',
-      jobId,
-      recordId
-    });
+    res.status(200).json(status);
   } catch (error) {
-    console.error('Error starting transcription:', error);
-    res.status(500).json({
-      error: 'Error starting transcription',
-      details: error instanceof Error ? error.message : 'Unknown error'
-    });
+    console.error('Error retrieving transcription status:', error);
+    res.status(500).json({ error: 'Error retrieving transcription status', details: String(error) });
   }
 });
 
-// サーバーの起動
-server.listen(PORT, () => {
-  console.log(`Server is running on port ${PORT}`);
-  console.log('Node.jsバージョン:', process.version);
-  console.log('DATABASE_URL:', process.env.DATABASE_URL ? '設定されています' : '設定されていません');
-  console.log('プロセスの作業ディレクトリ:', process.cwd());
+// エラーハンドリングミドルウェア
+app.use((err: any, req: Request, res: Response, next: NextFunction) => {
+  return errorHandler(err, req, res, next);
 });
 
-// プロセス終了時の処理
-process.on('SIGTERM', async () => {
-  console.log('SIGTERM received, shutting down gracefully');
-  await queueManager.cleanup();
-  await prisma.$disconnect();
-  server.close(() => {
-    console.log('Server closed');
-    process.exit(0);
-  });
-});
-
-process.on('SIGINT', async () => {
-  console.log('SIGINT received, shutting down gracefully');
-  await queueManager.cleanup();
-  await prisma.$disconnect();
-  server.close(() => {
-    console.log('Server closed');
-    process.exit(0);
-  });
-});
-
-export default app;
+export default server;

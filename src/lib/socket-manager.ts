@@ -56,6 +56,14 @@ export class SocketManager {
   }
 
   /**
+   * 新しい初期化メソッド（server.tsとの互換性のため）
+   * @param server HTTPサーバー
+   */
+  init(server: HttpServer) {
+    return this.initialize(server);
+  }
+
+  /**
    * ジョブイベントリスナーを設定する
    */
   private setupJobEventListeners() {
@@ -120,6 +128,55 @@ export class SocketManager {
     }
 
     this.io.to(`job-${jobId}`).emit('jobFailed', { jobId, error });
+  }
+
+  /**
+   * 特定のレコードに関連するイベントを発行する
+   * @param recordId レコードID
+   * @param event イベント名
+   * @param data イベントデータ
+   */
+  emitToRecord(recordId: string, event: string, data: any) {
+    if (!this.io) {
+      console.warn('Socket.IO server is not initialized');
+      return;
+    }
+
+    const roomName = `record-${recordId}`;
+    this.io.to(roomName).emit(event, data);
+    console.log(`Emitted ${event} to ${roomName}`, data);
+  }
+
+  /**
+   * 特定のジョブに関連するイベントを発行する
+   * @param jobId ジョブID
+   * @param event イベント名
+   * @param data イベントデータ
+   */
+  emitToJob(jobId: string, event: string, data: any) {
+    if (!this.io) {
+      console.warn('Socket.IO server is not initialized');
+      return;
+    }
+
+    const roomName = `job-${jobId}`;
+    this.io.to(roomName).emit(event, data);
+    console.log(`Emitted ${event} to ${roomName}`, data);
+  }
+
+  /**
+   * 全クライアントにイベントを発行する
+   * @param event イベント名
+   * @param data イベントデータ
+   */
+  emitToAll(event: string, data: any) {
+    if (!this.io) {
+      console.warn('Socket.IO server is not initialized');
+      return;
+    }
+
+    this.io.emit(event, data);
+    console.log(`Emitted ${event} to all clients`, data);
   }
 
   /**
