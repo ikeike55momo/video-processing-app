@@ -106,7 +106,8 @@ app.post('/api/upload-url', async (req: Request, res: Response) => {
     res.status(200).json({
       uploadUrl: uploadData.url,
       key: uploadData.key,
-      recordId: record.id
+      recordId: record.id,
+      fileUrl: fileUrl
     });
   } catch (error) {
     console.error('Error generating upload URL:', error);
