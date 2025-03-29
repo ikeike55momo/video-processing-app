@@ -219,6 +219,7 @@ export default function UploadPage() {
         mode: "cors", // CORSモードを明示的に指定
         credentials: "omit", // 認証情報を含めない
         body: JSON.stringify({
+          recordId: result.recordId, // recordIdパラメータを追加
           fileKey: result.key,
           fileName: file.name,
           fileUrl: fileUrl
@@ -229,7 +230,7 @@ export default function UploadPage() {
         throw new Error("処理の開始に失敗しました");
       }
 
-      const { recordId, jobId } = await processResponse.json();
+      const { jobId } = await processResponse.json();
       
       // ジョブIDを設定
       setJobId(jobId);
