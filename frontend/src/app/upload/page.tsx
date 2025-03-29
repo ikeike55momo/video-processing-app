@@ -218,7 +218,7 @@ export default function UploadPage() {
       // 処理開始リクエストの内容をログ出力
       const processRequestBody = {
         recordId: result.recordId, // recordIdパラメータを追加
-        fileKey: result.key,
+        fileKey: result.fileKey, // result.keyではなくresult.fileKeyを使用
         fileName: file.name,
         fileUrl: fileUrl
       };
