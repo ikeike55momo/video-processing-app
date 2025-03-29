@@ -24,6 +24,7 @@ model Record {
   status          Status    @default(UPLOADED)
   processing_step String?
   created_at      DateTime  @default(now())
+  updated_at      DateTime  @default(now()) @updatedAt
   deleted_at      DateTime?
 
   @@map("records")
