@@ -197,8 +197,15 @@ export default function UploadPage() {
       } else {
         // 通常のアップロード
         setUploadStage("アップロード中...");
+        
+        // URLが存在するか確認
+        if (!result.url) {
+          console.error("アップロードURLが取得できませんでした:", result);
+          throw new Error("アップロードURLが取得できませんでした");
+        }
+        
         await uploadFileWithProgress(file, result.url);
-        fileUrl = result.fileUrl;
+        fileUrl = result.fileUrl || result.url; // fileUrlがない場合はurlを使用
       }
 
       // 処理開始リクエスト
@@ -248,6 +255,13 @@ export default function UploadPage() {
       // タイムアウトを設定（4時間 = 14400000ミリ秒）
       xhr.timeout = 14400000;
 
+      // URLが有効か確認
+      if (!signedUrl) {
+        console.error("署名付きURLが無効です");
+        reject(new Error("署名付きURLが無効です"));
+        return;
+      }
+
       xhr.open("PUT", signedUrl, true);
       
       // Content-Typeヘッダーを設定
@@ -271,34 +285,32 @@ export default function UploadPage() {
           console.log("アップロード成功:", xhr.status);
           resolve();
         } else {
-          console.error("アップロード失敗:", xhr.status, xhr.statusText, xhr.responseText);
+          console.error("アップロード失敗:", xhr.status, xhr.statusText);
           reject(new Error(`アップロード失敗: ${xhr.status} ${xhr.statusText}`));
         }
       };
 
       // エラーハンドラー
-      xhr.onerror = (e) => {
-        console.error("アップロードエラー:", e);
-        console.error("署名付きURL:", signedUrl);
-        console.error("ファイル情報:", { name: file.name, type: file.type, size: file.size });
-        reject(new Error("アップロード中にネットワークエラーが発生しました"));
+      xhr.onerror = () => {
+        console.error("アップロードエラー:", xhr.status);
+        reject(new Error("ネットワークエラーが発生しました"));
       };
 
       // タイムアウトハンドラー
       xhr.ontimeout = () => {
-        console.error("アップロードがタイムアウトしました");
+        console.error("アップロードタイムアウト");
         reject(new Error("アップロードがタイムアウトしました"));
       };
 
-      // アップロード中断ハンドラー
-      xhr.onabort = () => {
-        console.error("アップロードが中断されました");
-        reject(new Error("アップロードが中断されました"));
-      };
-
-      // ファイル送信
-      console.log("アップロード開始:", file.name, file.size, "URL:", signedUrl.substring(0, 100) + "...");
-      xhr.send(file);
+      // アップロード開始
+      try {
+        // URLのログ出力（安全に）
+        console.log("アップロード開始:", file.name, file.size, "URL:", signedUrl ? (signedUrl.substring(0, 100) + "...") : "URL未設定");
+        xhr.send(file);
+      } catch (error) {
+        console.error("アップロード送信エラー:", error);
+        reject(error);
+      }
     });
   };
 
