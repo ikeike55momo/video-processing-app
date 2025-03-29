@@ -90,6 +90,31 @@ app.post('/api/upload-url', async (req: Request, res: Response) => {
     // file_urlには公開URLを使用（存在する場合）またはアップロードURLを使用
     const fileUrl = uploadData.publicUrl || uploadData.url;
     
+    // fileUrlが存在しない場合はフォールバック値を使用
+    if (!fileUrl) {
+      console.error('有効なファイルURLが生成されませんでした。フォールバックURLを使用します。');
+      const fallbackUrl = `https://pub-70c06e6cdf134c4ea4d0adf14d3a6b16.r2.dev/uploads/temp-${Date.now()}-${fileName}`;
+      console.log('フォールバックURL:', fallbackUrl);
+      
+      // 新しいレコードをデータベースに作成（フォールバックURLを使用）
+      const record = await prisma.record.create({
+        data: {
+          file_url: fallbackUrl,
+          file_key: uploadData.key,
+          r2_bucket: uploadData.bucket || '',
+          status: Status.UPLOADED
+        }
+      });
+
+      res.status(200).json({
+        uploadUrl: uploadData.url,
+        key: uploadData.key,
+        recordId: record.id,
+        fileUrl: fallbackUrl
+      });
+      return;
+    }
+    
     console.log(`生成されたURL: ${fileUrl.substring(0, 50)}...`);
     console.log(`ファイルキー: ${uploadData.key}`);
     console.log('uploadData詳細:', {

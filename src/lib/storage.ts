@@ -72,9 +72,13 @@ export async function generateUploadUrl(fileName: string, contentType: string) {
     console.log(`Generated upload URL: ${signedUrl.substring(0, 50)}...`);
     console.log(`File key: ${key}`);
     
+    // 必ず有効なURLを返すようにする
+    // publicUrlがundefinedやnullの場合は、signedUrlをフォールバックとして使用
+    const safePublicUrl = publicUrl || signedUrl;
+    
     return {
       url: signedUrl,
-      publicUrl: publicUrl,
+      publicUrl: safePublicUrl, // 必ず有効な値を返す
       key: key,
       bucket: R2_BUCKET_NAME,
     };
