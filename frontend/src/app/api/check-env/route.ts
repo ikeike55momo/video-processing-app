@@ -1,16 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
 
 // 環境変数チェックエンドポイント
 export async function GET(request: NextRequest) {
   try {
-    // セッションの確認
-    const session = await getServerSession(authOptions);
-    if (!session) {
-      return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
-    }
-
     // R2ストレージの環境変数をチェック
     const r2AccessKeyId = process.env.NEXT_PUBLIC_R2_ACCESS_KEY_ID;
     const r2SecretAccessKey = process.env.R2_SECRET_ACCESS_KEY;
