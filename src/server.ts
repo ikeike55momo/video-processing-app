@@ -69,26 +69,24 @@ app.post('/api/upload-url', async (req: Request, res: Response) => {
   try {
     const { fileName, contentType, fileSize } = req.body;
     
+    console.log(`アップロードURL生成リクエスト: filename=${fileName}, contentType=${contentType}, fileSize=${fileSize}`);
+    
     if (!fileName || !contentType) {
       return res.status(400).json({ error: 'ファイル名とコンテンツタイプが必要です' });
     }
 
     console.log(`アップロードリクエスト: ${fileName} (${contentType}, ${fileSize || 'サイズ不明'})`);
     
+    // ファイル名からファイルキーを生成
+    const fileKey = `uploads/${Date.now()}-${fileName}`;
+    
     // 署名付きURLを生成
-    const uploadData = await generateUploadUrl(fileName, contentType);
+    const uploadData = await generateUploadUrl(fileKey, contentType);
+    console.log("生成されたアップロードデータ:", JSON.stringify(uploadData, null, 2));
     
-    // URLが生成されたことを確認
-    if (!uploadData || !uploadData.url) {
-      console.error('署名付きURLの生成に失敗しました:', uploadData);
-      return res.status(500).json({ 
-        error: '署名付きURLの生成に失敗しました',
-        details: 'R2ストレージの設定を確認してください'
-      });
-    }
-    
-    // file_urlには公開URLを使用（存在する場合）またはアップロードURLを使用
+    // fileUrlがnullまたはundefinedの場合、フォールバックとしてurlを使用
     const fileUrl = uploadData.publicUrl || uploadData.url;
+    console.log(`使用するfileUrl: ${fileUrl}`);
     
     // fileUrlが存在しない場合はフォールバック値を使用
     if (!fileUrl) {
@@ -100,7 +98,7 @@ app.post('/api/upload-url', async (req: Request, res: Response) => {
       const record = await prisma.record.create({
         data: {
           file_url: fallbackUrl,
-          file_key: uploadData.key,
+          file_key: fileKey,
           r2_bucket: uploadData.bucket || '',
           status: Status.UPLOADED
         }
@@ -129,12 +127,13 @@ app.post('/api/upload-url', async (req: Request, res: Response) => {
     const record = await prisma.record.create({
       data: {
         file_url: fileUrl,
-        file_key: uploadData.key,
+        file_key: fileKey,
         r2_bucket: uploadData.bucket || '',
         status: Status.UPLOADED
       }
     });
-
+    console.log(`レコード作成成功: ${record.id}`);
+    
     res.status(200).json({
       uploadUrl: uploadData.url,
       key: uploadData.key,

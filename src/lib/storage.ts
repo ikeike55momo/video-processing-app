@@ -44,6 +44,13 @@ export async function generateUploadUrl(fileName: string, contentType: string) {
       throw new Error('R2 configuration is missing. Cannot generate upload URL.');
     }
 
+    console.log("R2環境変数:", {
+      endpoint: R2_ENDPOINT,
+      region: "auto",
+      publicUrl: R2_PUBLIC_URL,
+      bucketName: R2_BUCKET_NAME,
+    });
+
     console.log(`Generating upload URL for file: ${fileName} (${contentType})`);
     console.log('R2環境変数:', {
       endpoint: R2_ENDPOINT ? R2_ENDPOINT.substring(0, 20) + '...' : 'Not set',
@@ -63,12 +70,17 @@ export async function generateUploadUrl(fileName: string, contentType: string) {
     
     // 1時間有効な署名付きURL
     const signedUrl = await getSignedUrl(s3Client, command, { expiresIn: 3600 });
-    console.log('署名付きURL生成成功:', signedUrl ? signedUrl.substring(0, 30) + '...' : 'null');
+    console.log(`生成された署名付きURL: ${signedUrl.substring(0, 30)}...`);
     
     // 公開URLを生成（R2_PUBLIC_URLが設定されている場合）
-    const publicUrl = R2_PUBLIC_URL ? `${R2_PUBLIC_URL}/${key}` : signedUrl;
-    console.log('公開URL:', publicUrl ? publicUrl.substring(0, 30) + '...' : 'null');
-    
+    let publicUrl = null;
+    if (R2_PUBLIC_URL) {
+      publicUrl = `${R2_PUBLIC_URL}/${key}`;
+      console.log(`構築された公開URL: ${publicUrl.substring(0, 30)}...`);
+    } else {
+      console.log("R2_PUBLIC_URLが設定されていないため、公開URLは生成されません");
+    }
+
     console.log(`Generated upload URL: ${signedUrl.substring(0, 50)}...`);
     console.log(`File key: ${key}`);
     
@@ -76,12 +88,15 @@ export async function generateUploadUrl(fileName: string, contentType: string) {
     // publicUrlがundefinedやnullの場合は、signedUrlをフォールバックとして使用
     const safePublicUrl = publicUrl || signedUrl;
     
-    return {
+    const result = {
       url: signedUrl,
       publicUrl: safePublicUrl, // 必ず有効な値を返す
       key: key,
       bucket: R2_BUCKET_NAME,
     };
+    
+    console.log("generateUploadUrl結果:", JSON.stringify(result, null, 2));
+    return result;
   } catch (error) {
     console.error('Error generating upload URL:', error);
     throw error;
