@@ -119,8 +119,12 @@ export default function UploadPage() {
       setUploadProgress(0);
       setUploadStage("準備中...");
 
-      // 署名付きURLの取得（ファイルサイズを含める）
-      const apiUrl = "https://video-processing-app.onrender.com"; // 直接バックエンドAPIのURLを指定
+      // バックエンドAPIのURLを設定
+      // 環境変数から読み込むか、デフォルト値を使用
+      const apiUrl = process.env.NEXT_PUBLIC_API_URL || 
+                    window.location.origin; // 同一オリジンのAPIを使用（プロキシ経由）
+      
+      console.log("使用するAPIエンドポイント:", apiUrl);
       
       // 最大3回まで再試行
       let response;
@@ -131,13 +135,12 @@ export default function UploadPage() {
         try {
           setUploadStage(`APIに接続中... (試行 ${retryCount + 1}/${maxRetries})`);
           
-          response = await fetch(`${apiUrl}/api/upload-url`, {
+          // 同一オリジンのAPIエンドポイントを使用
+          response = await fetch(`/api/upload-url`, {
             method: "POST",
             headers: {
               "Content-Type": "application/json",
             },
-            mode: "cors", // CORSモードを明示的に指定
-            credentials: "omit", // 認証情報を含めない
             body: JSON.stringify({
               fileName: file.name,
               contentType: file.type,

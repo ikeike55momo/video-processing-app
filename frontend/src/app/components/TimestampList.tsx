@@ -16,8 +16,9 @@ interface TimestampListProps {
 export default function TimestampList({ timestamps, onTimestampClick, videoUrl }: TimestampListProps) {
   const [expanded, setExpanded] = useState(false);
   
-  // タイムスタンプが空の場合
-  if (!timestamps || timestamps.length === 0) {
+  // タイムスタンプが空または配列でない場合
+  if (!timestamps || !Array.isArray(timestamps) || timestamps.length === 0) {
+    console.log('タイムスタンプデータが無効です:', timestamps);
     return (
       <div className="text-sm text-slate-500 italic">
         タイムスタンプはありません
