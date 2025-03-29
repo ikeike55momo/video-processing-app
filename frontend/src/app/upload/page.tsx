@@ -23,15 +23,19 @@ const checkR2Config = async () => {
     }
 
     const config = await response.json();
+    console.log('環境変数チェック（クライアントサイド）:', config);
     
-    // 必要な環境変数が設定されているか確認
+    // APIレスポンスにisConfiguredフラグが含まれている場合はそれを使用
+    if ('isConfigured' in config) {
+      return config;
+    }
+    
+    // そうでない場合は、必要な環境変数が設定されているか確認
     const isConfigured = 
       config.hasAccessKey && 
       config.hasSecretKey && 
       config.hasEndpoint && 
       config.hasBucket;
-    
-    console.log('環境変数チェック:', config);
     
     return { 
       isConfigured, 
