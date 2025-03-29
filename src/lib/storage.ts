@@ -9,9 +9,16 @@ const R2_ENDPOINT = process.env.R2_ENDPOINT;
 const R2_ACCESS_KEY_ID = process.env.R2_ACCESS_KEY_ID;
 const R2_SECRET_ACCESS_KEY = process.env.R2_SECRET_ACCESS_KEY;
 const R2_BUCKET_NAME = process.env.R2_BUCKET_NAME;
+const R2_PUBLIC_URL = process.env.R2_PUBLIC_URL || 'https://pub-70c06e6cdf134c4ea4d0adf14d3a6b16.r2.dev';
 
+// 環境変数のチェックと詳細なログ出力
 if (!R2_ENDPOINT || !R2_ACCESS_KEY_ID || !R2_SECRET_ACCESS_KEY || !R2_BUCKET_NAME) {
   console.error('Missing R2 configuration. Please check your .env file.');
+  console.error(`R2_ENDPOINT: ${R2_ENDPOINT ? 'Set' : 'Not set'}`);
+  console.error(`R2_ACCESS_KEY_ID: ${R2_ACCESS_KEY_ID ? 'Set' : 'Not set'}`);
+  console.error(`R2_SECRET_ACCESS_KEY: ${R2_SECRET_ACCESS_KEY ? 'Set (value hidden)' : 'Not set'}`);
+  console.error(`R2_BUCKET_NAME: ${R2_BUCKET_NAME ? 'Set' : 'Not set'}`);
+  console.error(`R2_PUBLIC_URL: ${R2_PUBLIC_URL ? 'Set' : 'Not set'}`);
 }
 
 // R2はS3互換APIを使用
@@ -31,22 +38,41 @@ const s3Client = new S3Client({
  * @returns 署名付きURLとメタデータ
  */
 export async function generateUploadUrl(fileName: string, contentType: string) {
-  const key = `uploads/${Date.now()}-${fileName}`;
-  
-  const command = new PutObjectCommand({
-    Bucket: R2_BUCKET_NAME,
-    Key: key,
-    ContentType: contentType,
-  });
-  
-  // 1時間有効な署名付きURL
-  const signedUrl = await getSignedUrl(s3Client, command, { expiresIn: 3600 });
-  
-  return {
-    url: signedUrl,
-    key: key,
-    bucket: R2_BUCKET_NAME,
-  };
+  try {
+    // 環境変数が設定されているか確認
+    if (!R2_ENDPOINT || !R2_ACCESS_KEY_ID || !R2_SECRET_ACCESS_KEY || !R2_BUCKET_NAME) {
+      throw new Error('R2 configuration is missing. Cannot generate upload URL.');
+    }
+
+    console.log(`Generating upload URL for file: ${fileName} (${contentType})`);
+    
+    const key = `uploads/${Date.now()}-${fileName}`;
+    
+    const command = new PutObjectCommand({
+      Bucket: R2_BUCKET_NAME,
+      Key: key,
+      ContentType: contentType,
+    });
+    
+    // 1時間有効な署名付きURL
+    const signedUrl = await getSignedUrl(s3Client, command, { expiresIn: 3600 });
+    
+    // 公開URLを生成（R2_PUBLIC_URLが設定されている場合）
+    const publicUrl = R2_PUBLIC_URL ? `${R2_PUBLIC_URL}/${key}` : signedUrl;
+    
+    console.log(`Generated upload URL: ${signedUrl.substring(0, 50)}...`);
+    console.log(`File key: ${key}`);
+    
+    return {
+      url: signedUrl,
+      publicUrl: publicUrl,
+      key: key,
+      bucket: R2_BUCKET_NAME,
+    };
+  } catch (error) {
+    console.error('Error generating upload URL:', error);
+    throw error;
+  }
 }
 
 /**

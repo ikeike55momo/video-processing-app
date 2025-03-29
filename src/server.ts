@@ -78,10 +78,25 @@ app.post('/api/upload-url', async (req: Request, res: Response) => {
     // 署名付きURLを生成
     const uploadData = await generateUploadUrl(fileName, contentType);
     
+    // URLが生成されたことを確認
+    if (!uploadData || !uploadData.url) {
+      console.error('署名付きURLの生成に失敗しました:', uploadData);
+      return res.status(500).json({ 
+        error: '署名付きURLの生成に失敗しました',
+        details: 'R2ストレージの設定を確認してください'
+      });
+    }
+    
+    // file_urlには公開URLを使用（存在する場合）またはアップロードURLを使用
+    const fileUrl = uploadData.publicUrl || uploadData.url;
+    
+    console.log(`生成されたURL: ${fileUrl.substring(0, 50)}...`);
+    console.log(`ファイルキー: ${uploadData.key}`);
+    
     // 新しいレコードをデータベースに作成
     const record = await prisma.record.create({
       data: {
-        file_url: uploadData.url,
+        file_url: fileUrl,
         file_key: uploadData.key,
         r2_bucket: uploadData.bucket || '',
         status: Status.UPLOADED
