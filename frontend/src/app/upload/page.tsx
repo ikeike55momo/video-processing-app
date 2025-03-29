@@ -198,14 +198,15 @@ export default function UploadPage() {
         // 通常のアップロード
         setUploadStage("アップロード中...");
         
-        // URLが存在するか確認
-        if (!result.url) {
+        // URLが存在するか確認（uploadUrlまたはurlを使用）
+        const uploadUrl = result.uploadUrl || result.url;
+        if (!uploadUrl) {
           console.error("アップロードURLが取得できませんでした:", result);
           throw new Error("アップロードURLが取得できませんでした");
         }
         
-        await uploadFileWithProgress(file, result.url);
-        fileUrl = result.fileUrl || result.url; // fileUrlがない場合はurlを使用
+        await uploadFileWithProgress(file, uploadUrl);
+        fileUrl = result.fileUrl || uploadUrl; // fileUrlがない場合はuploadUrlを使用
       }
 
       // 処理開始リクエスト
