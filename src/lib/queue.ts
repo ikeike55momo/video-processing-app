@@ -17,7 +17,7 @@ export interface JobData {
   processingDeadline?: number;
 }
 
-let redisClient: RedisClientType;
+let redisClient: RedisClientType | null;
 
 /**
  * Redisクライアントを初期化する
@@ -26,31 +26,36 @@ export async function initRedisClient() {
   const url = process.env.REDIS_URL;
   
   if (!url) {
-    console.error('Missing REDIS_URL environment variable');
-    throw new Error('Missing REDIS_URL environment variable');
+    console.warn('Redis URL not provided, queue functionality will be limited');
+    return null;
   }
   
-  redisClient = createClient({
-    url: url,
-  });
-  
-  // エラーハンドリング
-  redisClient.on('error', (err) => {
-    console.error('Redis Error:', err);
-  });
-  
-  // 接続
-  await redisClient.connect();
-  console.log('Connected to Redis');
-  
-  return redisClient;
+  try {
+    redisClient = createClient({
+      url: url,
+    });
+    
+    // エラーハンドリング
+    redisClient.on('error', (err) => {
+      console.error('Redis Error:', err);
+    });
+    
+    // 接続
+    await redisClient.connect();
+    console.log('Connected to Redis');
+    
+    return redisClient;
+  } catch (error) {
+    console.warn('Failed to connect to Redis, queue functionality will be limited:', error);
+    return null;
+  }
 }
 
 /**
  * Redisクライアントを取得する
  * 未接続の場合は自動的に接続する
  */
-export async function getRedisClient(): Promise<RedisClientType> {
+export async function getRedisClient(): Promise<RedisClientType | null> {
   if (!redisClient || !redisClient.isOpen) {
     await initRedisClient();
   }
@@ -63,8 +68,13 @@ export async function getRedisClient(): Promise<RedisClientType> {
  * @param data ジョブデータ
  * @returns ジョブID
  */
-export async function addJob(queue: string, data: Omit<JobData, 'id' | 'createdAt' | 'processingDeadline'>): Promise<string> {
+export async function addJob(queue: string, data: Omit<JobData, 'id' | 'createdAt' | 'processingDeadline'>): Promise<string | null> {
   const client = await getRedisClient();
+  
+  if (!client) {
+    console.warn('Redis client not available, cannot add job to queue');
+    return null;
+  }
   
   // ジョブIDを生成
   const jobId = `job-${crypto.randomBytes(8).toString('hex')}`;
@@ -95,6 +105,11 @@ export async function addJob(queue: string, data: Omit<JobData, 'id' | 'createdA
 export async function getJob(queue: string): Promise<JobData | null> {
   const client = await getRedisClient();
   
+  if (!client) {
+    console.warn('Redis client not available, cannot get job from queue');
+    return null;
+  }
+  
   // 処理中キューの名前
   const processingQueue = `${queue}:processing`;
   
@@ -123,6 +138,11 @@ export async function getJob(queue: string): Promise<JobData | null> {
  */
 export async function completeJob(queue: string, jobId: string): Promise<boolean> {
   const client = await getRedisClient();
+  
+  if (!client) {
+    console.warn('Redis client not available, cannot complete job');
+    return false;
+  }
   
   // 処理中キューの名前
   const processingQueue = `${queue}:processing`;
@@ -165,6 +185,11 @@ export async function completeJob(queue: string, jobId: string): Promise<boolean
  */
 export async function failJob(queue: string, jobId: string, maxRetries = 3): Promise<{ retried: boolean, retryCount?: number, failed?: boolean }> {
   const client = await getRedisClient();
+  
+  if (!client) {
+    console.warn('Redis client not available, cannot fail job');
+    return { retried: false, failed: false };
+  }
   
   // 処理中キューの名前
   const processingQueue = `${queue}:processing`;
@@ -224,6 +249,11 @@ export async function failJob(queue: string, jobId: string, maxRetries = 3): Pro
 export async function getQueueStats(queue: string): Promise<{ pending: number, processing: number, failed: number, completed: number }> {
   const client = await getRedisClient();
   
+  if (!client) {
+    console.warn('Redis client not available, cannot get queue stats');
+    return { pending: 0, processing: 0, failed: 0, completed: 0 };
+  }
+  
   const [pending, processing, failed, completed] = await Promise.all([
     client.lLen(queue),
     client.lLen(`${queue}:processing`),
@@ -248,6 +278,12 @@ export async function getQueueStats(queue: string): Promise<{ pending: number, p
  */
 export async function requeueStuckJobs(queue: string, olderThanMs = 5 * 60 * 1000): Promise<number> {
   const client = await getRedisClient();
+  
+  if (!client) {
+    console.warn('Redis client not available, cannot requeue stuck jobs');
+    return 0;
+  }
+  
   const processingQueue = `${queue}:processing`;
   
   // 処理中キューのジョブをすべて取得

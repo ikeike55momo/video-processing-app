@@ -19,10 +19,7 @@ services:
       - key: DIRECT_URL
         value: "postgresql://wado_wado_user:U5YqVgZ8xL4OaqGGybLqdJOs4ZwSIWqG@dpg-cve55ldrie7s73e158c0-a/wado_wado"
       - key: REDIS_URL
-        fromService:
-          type: redis
-          name: video-processing-queue
-          property: connectionString
+        value: "rediss://red-cvfejt7noe9s73bgj2lg:wT2eJVSMILamu48qyO2nunbkfjAo91k0@singapore-keyvalue.render.com:6379"
       - key: R2_ENDPOINT
         sync: false
       - key: R2_ACCESS_KEY_ID
@@ -85,7 +82,7 @@ services:
       - key: OPENROUTER_API_KEY
         sync: false
       - key: REDIS_URL
-        sync: false
+        value: "rediss://red-cvfejt7noe9s73bgj2lg:wT2eJVSMILamu48qyO2nunbkfjAo91k0@singapore-keyvalue.render.com:6379"
 
   # バックグラウンドワーカー（文字起こし処理）
   - type: worker
@@ -105,10 +102,7 @@ services:
       - key: DIRECT_URL
         value: "postgresql://wado_wado_user:U5YqVgZ8xL4OaqGGybLqdJOs4ZwSIWqG@dpg-cve55ldrie7s73e158c0-a/wado_wado"
       - key: REDIS_URL
-        fromService:
-          type: redis
-          name: video-processing-queue
-          property: connectionString
+        value: "rediss://red-cvfejt7noe9s73bgj2lg:wT2eJVSMILamu48qyO2nunbkfjAo91k0@singapore-keyvalue.render.com:6379"
       - key: R2_ENDPOINT
         sync: false
       - key: R2_ACCESS_KEY_ID
@@ -140,10 +134,7 @@ services:
       - key: DIRECT_URL
         value: "postgresql://wado_wado_user:U5YqVgZ8xL4OaqGGybLqdJOs4ZwSIWqG@dpg-cve55ldrie7s73e158c0-a/wado_wado"
       - key: REDIS_URL
-        fromService:
-          type: redis
-          name: video-processing-queue
-          property: connectionString
+        value: "rediss://red-cvfejt7noe9s73bgj2lg:wT2eJVSMILamu48qyO2nunbkfjAo91k0@singapore-keyvalue.render.com:6379"
       - key: GEMINI_API_KEY
         sync: false
       - key: WORKER_TYPE
@@ -167,10 +158,7 @@ services:
       - key: DIRECT_URL
         value: "postgresql://wado_wado_user:U5YqVgZ8xL4OaqGGybLqdJOs4ZwSIWqG@dpg-cve55ldrie7s73e158c0-a/wado_wado"
       - key: REDIS_URL
-        fromService:
-          type: redis
-          name: video-processing-queue
-          property: connectionString
+        value: "rediss://red-cvfejt7noe9s73bgj2lg:wT2eJVSMILamu48qyO2nunbkfjAo91k0@singapore-keyvalue.render.com:6379"
       - key: OPENROUTER_API_KEY
         sync: false
       - key: WORKER_TYPE

@@ -211,6 +211,19 @@ export default function UploadPage() {
 
       // 処理開始リクエスト
       setUploadStage("処理を開始中...");
+      
+      // アップロードURLレスポンスの内容をログ出力
+      console.log("アップロードURL生成レスポンス:", result);
+      
+      // 処理開始リクエストの内容をログ出力
+      const processRequestBody = {
+        recordId: result.recordId, // recordIdパラメータを追加
+        fileKey: result.key,
+        fileName: file.name,
+        fileUrl: fileUrl
+      };
+      console.log("処理開始リクエスト内容:", processRequestBody);
+      
       const processResponse = await fetch(`${apiUrl}/api/process`, {
         method: "POST",
         headers: {
@@ -218,19 +231,21 @@ export default function UploadPage() {
         },
         mode: "cors", // CORSモードを明示的に指定
         credentials: "omit", // 認証情報を含めない
-        body: JSON.stringify({
-          recordId: result.recordId, // recordIdパラメータを追加
-          fileKey: result.key,
-          fileName: file.name,
-          fileUrl: fileUrl
-        }),
+        body: JSON.stringify(processRequestBody),
       });
-
+      
+      // レスポンスの詳細をログ出力
+      console.log("処理開始レスポンスステータス:", processResponse.status);
+      const responseText = await processResponse.text();
+      console.log("処理開始レスポンス内容:", responseText);
+      
       if (!processResponse.ok) {
-        throw new Error("処理の開始に失敗しました");
+        throw new Error(`処理の開始に失敗しました: ${responseText}`);
       }
 
-      const { jobId } = await processResponse.json();
+      // JSONとして再解析
+      const responseData = JSON.parse(responseText);
+      const { jobId } = responseData;
       
       // ジョブIDを設定
       setJobId(jobId);
