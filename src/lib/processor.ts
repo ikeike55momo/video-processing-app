@@ -12,7 +12,7 @@ const prisma = new PrismaClient();
 export async function processRecord(options: {
   recordId: string;
   fileKey?: string | null;
-  fileUrl: string;
+  fileUrl: string | null;
   bucket?: string | null;
   reset?: boolean;
 }) {

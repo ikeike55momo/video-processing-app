@@ -65,7 +65,7 @@ socketManager.init(server);
 // APIルート
 
 // アップロード用URLを生成するエンドポイント
-app.post('/api/upload-url', async (req: Request, res: Response) => {
+app.post('/api/upload-url', async (req: express.Request, res: express.Response) => {
   try {
     const { fileName, contentType, fileSize } = req.body;
     
