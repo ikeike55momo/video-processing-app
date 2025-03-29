@@ -45,6 +45,13 @@ export async function generateUploadUrl(fileName: string, contentType: string) {
     }
 
     console.log(`Generating upload URL for file: ${fileName} (${contentType})`);
+    console.log('R2環境変数:', {
+      endpoint: R2_ENDPOINT ? R2_ENDPOINT.substring(0, 20) + '...' : 'Not set',
+      accessKey: R2_ACCESS_KEY_ID ? R2_ACCESS_KEY_ID.substring(0, 5) + '...' : 'Not set',
+      secretKey: R2_SECRET_ACCESS_KEY ? 'Set (hidden)' : 'Not set',
+      bucket: R2_BUCKET_NAME || 'Not set',
+      publicUrl: R2_PUBLIC_URL || 'Not set'
+    });
     
     const key = `uploads/${Date.now()}-${fileName}`;
     
@@ -56,9 +63,11 @@ export async function generateUploadUrl(fileName: string, contentType: string) {
     
     // 1時間有効な署名付きURL
     const signedUrl = await getSignedUrl(s3Client, command, { expiresIn: 3600 });
+    console.log('署名付きURL生成成功:', signedUrl ? signedUrl.substring(0, 30) + '...' : 'null');
     
     // 公開URLを生成（R2_PUBLIC_URLが設定されている場合）
     const publicUrl = R2_PUBLIC_URL ? `${R2_PUBLIC_URL}/${key}` : signedUrl;
+    console.log('公開URL:', publicUrl ? publicUrl.substring(0, 30) + '...' : 'null');
     
     console.log(`Generated upload URL: ${signedUrl.substring(0, 50)}...`);
     console.log(`File key: ${key}`);

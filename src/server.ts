@@ -92,6 +92,13 @@ app.post('/api/upload-url', async (req: Request, res: Response) => {
     
     console.log(`生成されたURL: ${fileUrl.substring(0, 50)}...`);
     console.log(`ファイルキー: ${uploadData.key}`);
+    console.log('uploadData詳細:', {
+      hasUrl: !!uploadData.url,
+      hasPublicUrl: !!uploadData.publicUrl,
+      fileUrl: fileUrl ? fileUrl.substring(0, 30) + '...' : 'null',
+      key: uploadData.key,
+      bucket: uploadData.bucket
+    });
     
     // 新しいレコードをデータベースに作成
     const record = await prisma.record.create({
