@@ -6,6 +6,43 @@ import { useSession } from "next-auth/react";
 import { uploadMultipart } from "@/lib/storage";
 import JobProgressMonitor from "../components/JobProgressMonitor";
 
+// 環境変数の読み込み確認
+const checkR2Config = async () => {
+  try {
+    // フロントエンドの環境変数をチェック
+    const response = await fetch('/api/check-env', {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+    });
+
+    if (!response.ok) {
+      console.error('環境変数チェックAPIエラー:', response.status);
+      return { isConfigured: false, error: `APIエラー: ${response.status}` };
+    }
+
+    const config = await response.json();
+    
+    // 必要な環境変数が設定されているか確認
+    const isConfigured = 
+      config.hasAccessKey && 
+      config.hasSecretKey && 
+      config.hasEndpoint && 
+      config.hasBucket;
+    
+    console.log('環境変数チェック:', config);
+    
+    return { 
+      isConfigured, 
+      ...config 
+    };
+  } catch (error: any) {
+    console.error('環境変数チェックエラー:', error);
+    return { isConfigured: false, error: error.message };
+  }
+};
+
 export default function UploadPage() {
   const { data: session, status } = useSession();
   const router = useRouter();
@@ -66,27 +103,71 @@ export default function UploadPage() {
     }
 
     try {
+      // 環境変数が読み込まれているか確認
+      const r2Config = await checkR2Config();
+      if (!r2Config.isConfigured) {
+        setError("ストレージ設定が読み込まれていません。しばらく待ってから再試行してください。");
+        console.error("R2設定エラー:", r2Config);
+        return;
+      }
+
       setUploading(true);
       setUploadProgress(0);
       setUploadStage("準備中...");
 
       // 署名付きURLの取得（ファイルサイズを含める）
       const apiUrl = "https://video-processing-app.onrender.com"; // 直接バックエンドAPIのURLを指定
-      const response = await fetch(`${apiUrl}/api/upload-url`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        credentials: 'include', // 認証情報を含める
-        body: JSON.stringify({
-          fileName: file.name,
-          contentType: file.type,
-          fileSize: file.size, // ファイルサイズを送信
-        }),
-      });
+      
+      // 最大3回まで再試行
+      let response;
+      let retryCount = 0;
+      const maxRetries = 3;
+      
+      while (retryCount < maxRetries) {
+        try {
+          setUploadStage(`APIに接続中... (試行 ${retryCount + 1}/${maxRetries})`);
+          
+          response = await fetch(`${apiUrl}/api/upload-url`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            mode: "cors", // CORSモードを明示的に指定
+            credentials: "omit", // 認証情報を含めない
+            body: JSON.stringify({
+              fileName: file.name,
+              contentType: file.type,
+              fileSize: file.size, // ファイルサイズを送信
+            }),
+          });
+          
+          // 成功したらループを抜ける
+          if (response.ok) break;
+          
+          // エラーレスポンスの詳細を取得
+          const errorData = await response.text();
+          console.error(`APIエラー (${response.status}):`, errorData);
+          
+          // 再試行
+          retryCount++;
+          if (retryCount < maxRetries) {
+            setUploadStage(`再接続を試みています... (${retryCount}/${maxRetries})`);
+            await new Promise(resolve => setTimeout(resolve, 2000)); // 2秒待機
+          }
+        } catch (fetchError: unknown) {
+          console.error("フェッチエラー:", fetchError);
+          retryCount++;
+          if (retryCount < maxRetries) {
+            setUploadStage(`再接続を試みています... (${retryCount}/${maxRetries})`);
+            await new Promise(resolve => setTimeout(resolve, 2000)); // 2秒待機
+          } else {
+            throw new Error(`APIへの接続に失敗しました: ${fetchError instanceof Error ? fetchError.message : String(fetchError)}`);
+          }
+        }
+      }
 
-      if (!response.ok) {
-        throw new Error("署名付きURLの取得に失敗しました");
+      if (!response || !response.ok) {
+        throw new Error(`署名付きURLの取得に失敗しました (ステータス: ${response?.status || 'unknown'})`);
       }
 
       const result = await response.json();
@@ -115,12 +196,13 @@ export default function UploadPage() {
 
       // 処理開始リクエスト
       setUploadStage("処理を開始中...");
-      const processResponse = await fetch(`https://video-processing-app.onrender.com/api/process`, {
+      const processResponse = await fetch(`${apiUrl}/api/process`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
-        credentials: 'include', // 認証情報を含める
+        mode: "cors", // CORSモードを明示的に指定
+        credentials: "omit", // 認証情報を含めない
         body: JSON.stringify({
           fileKey: result.key,
           fileName: file.name,
