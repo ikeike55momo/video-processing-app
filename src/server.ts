@@ -147,19 +147,34 @@ app.post('/api/upload-url', async (req: express.Request, res: express.Response) 
 });
 
 // 処理を開始するエンドポイント
-app.post('/api/process', async (req: Request, res: Response) => {
+app.post('/api/process', async (req: express.Request, res: express.Response) => {
   try {
-    const { recordId } = req.body;
+    const { recordId, fileKey, fileUrl } = req.body;
     
-    if (!recordId) {
-      return res.status(400).json({ error: 'Record ID is required' });
+    console.log('処理開始リクエスト:', { recordId, fileKey, fileUrl });
+    
+    // パラメータのバリデーション
+    if (!recordId && !fileKey && !fileUrl) {
+      return res.status(400).json({ error: 'Record ID, File Key, or File URL is required' });
+    }
+
+    // レコードの検索条件を構築
+    const whereCondition: any = {};
+    if (recordId) {
+      whereCondition.id = recordId;
+    } else if (fileKey) {
+      whereCondition.file_key = fileKey;
+    } else if (fileUrl) {
+      whereCondition.file_url = fileUrl;
     }
 
     // レコードの存在確認
-    const record = await prisma.record.findUnique({ where: { id: recordId } });
+    const record = await prisma.record.findFirst({ where: whereCondition });
+    console.log('検索条件:', whereCondition);
+    console.log('検索結果:', record);
 
     if (!record) {
-      return res.status(404).json({ error: 'Record not found' });
+      return res.status(404).json({ error: 'Record not found', searchCriteria: whereCondition });
     }
 
     if (record.status === Status.PROCESSING) {
@@ -168,7 +183,7 @@ app.post('/api/process', async (req: Request, res: Response) => {
 
     // 処理キューに追加
     const job = await processRecord({
-      recordId,
+      recordId: record.id,
       fileKey: record.file_key,
       fileUrl: record.file_url,
       bucket: record.r2_bucket
@@ -176,7 +191,7 @@ app.post('/api/process', async (req: Request, res: Response) => {
 
     // ステータスを更新
     await prisma.record.update({ 
-      where: { id: recordId }, 
+      where: { id: record.id }, 
       data: { status: Status.PROCESSING } 
     });
 
