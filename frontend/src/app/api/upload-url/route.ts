@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 
 // バックエンドAPIのURL
-const API_URL = process.env.NEXT_PUBLIC_API_URL || "https://video-processing-app.onrender.com";
+// 新しいカスタムドメインを使用
+const API_URL = process.env.NEXT_PUBLIC_API_URL || "https://api.ririaru-stg.cloud";
 
 export async function POST(request: NextRequest) {
   try {
@@ -18,6 +19,8 @@ export async function POST(request: NextRequest) {
         "Content-Type": "application/json",
       },
       body: JSON.stringify(body),
+      // タイムアウトを設定
+      signal: AbortSignal.timeout(10000), // 10秒でタイムアウト
     });
 
     // バックエンドからのレスポンスを取得

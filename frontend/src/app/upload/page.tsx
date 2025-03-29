@@ -122,7 +122,7 @@ export default function UploadPage() {
       // バックエンドAPIのURLを設定
       // 環境変数から読み込むか、デフォルト値を使用
       const apiUrl = process.env.NEXT_PUBLIC_API_URL || 
-                    window.location.origin; // 同一オリジンのAPIを使用（プロキシ経由）
+                    "https://api.ririaru-stg.cloud"; // 新しいカスタムドメインを使用
       
       console.log("使用するAPIエンドポイント:", apiUrl);
       
@@ -136,7 +136,7 @@ export default function UploadPage() {
           setUploadStage(`APIに接続中... (試行 ${retryCount + 1}/${maxRetries})`);
           
           // 同一オリジンのAPIエンドポイントを使用
-          response = await fetch(`/api/upload-url`, {
+          response = await fetch(`${apiUrl}/api/upload-url`, {
             method: "POST",
             headers: {
               "Content-Type": "application/json",

@@ -37,7 +37,12 @@ app.use(express.json());
 // CORSミドルウェアの設定
 const corsOptions = {
   origin: function(origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) {
-    const allowedOrigins = ['https://vpm.ririaru-stg.cloud', 'https://video-frontend-nextjs-app.onrender.com', 'https://video-processing-frontend.onrender.com'];
+    const allowedOrigins = [
+      'https://vpm.ririaru-stg.cloud', 
+      'https://api.ririaru-stg.cloud',
+      'https://video-frontend-nextjs-app.onrender.com', 
+      'https://video-processing-frontend.onrender.com'
+    ];
     // undefinedの場合はサーバー間リクエスト（Postmanなど）
     if (!origin || allowedOrigins.includes(origin)) {
       callback(null, true);
