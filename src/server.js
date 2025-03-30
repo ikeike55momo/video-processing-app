@@ -561,6 +561,50 @@ app.post('/api/records/:id/retry', (req, res) => __awaiter(void 0, void 0, void 
         });
     }
 }));
+// クラウドアップロード処理エンドポイント
+app.post('/api/process-cloud', async (req, res) => {
+  try {
+    const { fileUrl } = req.body;
+    
+    if (!fileUrl) {
+      return res.status(400).json({ error: 'ファイルURLが指定されていません' });
+    }
+    
+    console.log(`クラウドアップロード処理リクエスト受信: ${fileUrl}`);
+    
+    // 新しいレコードをデータベースに作成
+    const record = await prisma.record.create({
+      data: {
+        file_url: fileUrl,
+        status: 'UPLOADED'
+      }
+    });
+    
+    // 文字起こしキューにジョブを追加
+    try {
+      await (0, queue_1.addJob)('transcription', {
+        type: 'transcription',
+        recordId: record.id,
+        fileUrl: fileUrl
+      });
+      console.log(`ジョブをキューに追加しました: ${record.id}`);
+    } catch (queueError) {
+      console.error('キューへのジョブ追加に失敗しました:', queueError);
+      // エラーがあってもレスポンスは返す
+    }
+    
+    res.status(200).json({
+      message: 'Processing started',
+      recordId: record.id
+    });
+  } catch (error) {
+    console.error('Error processing cloud upload:', error);
+    res.status(500).json({
+      error: 'Error processing cloud upload',
+      details: error instanceof Error ? error.message : 'Unknown error'
+    });
+  }
+});
 // サーバーを起動
 app.listen(PORT, async () => {
   console.log(`サーバーが起動しました。ポート: ${PORT}`);

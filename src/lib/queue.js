@@ -57,6 +57,7 @@ dotenv.config();
 let redisClient;
 /**
  * Redisクライアントを初期化する
+ * @returns {Promise<RedisClient>} Redisクライアント
  */
 function initRedisClient() {
     return __awaiter(this, void 0, void 0, function* () {
@@ -64,31 +65,36 @@ function initRedisClient() {
             const url = process.env.REDIS_URL;
             if (!url) {
                 console.error('Missing REDIS_URL environment variable');
-                return null; // 環境変数がない場合はnullを返す
+                return null;
             }
-            redisClient = (0, redis_1.createClient)({
+            
+            // URLがredissで始まる場合はSSL接続
+            const isSSL = url.startsWith('rediss://');
+            console.log(`Redis接続を開始します: ${url.replace(/:[^:]*@/, ':***@')}`);
+            console.log(`SSL接続: ${isSSL}`);
+            
+            // SSL接続の場合は証明書検証をスキップするオプションを追加
+            const options = {
                 url: url,
                 socket: {
-                    reconnectStrategy: (retries) => {
-                        // 最大回数の制限なし、常にリトライを続ける
-                        console.warn(`Redis connection retry attempt ${retries}`);
-                        // 指数バックオフ（最大10秒）
-                        return Math.min(retries * 1000, 10000);
-                    }
+                    tls: isSSL,
+                    rejectUnauthorized: false // 自己署名証明書を許可
                 }
-            });
-            // エラーハンドリング
+            };
+            
+            redisClient = (0, redis_1.createClient)(options);
+            
             redisClient.on('error', (err) => {
                 console.error('Redis Error:', err);
-                // エラーログのみ出力し、アプリケーションは継続
             });
-            // 接続
+            
             yield redisClient.connect();
             console.log('Connected to Redis');
             return redisClient;
-        } catch (error) {
+        }
+        catch (error) {
             console.error('Failed to initialize Redis client:', error);
-            return null; // エラーが発生した場合はnullを返す
+            return null;
         }
     });
 }
