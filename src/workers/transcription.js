@@ -159,13 +159,22 @@ async function processJob() {
         }
         console.log(`Processing transcription job ${job.id} for record ${job.recordId}`);
         // 処理状態の更新
-        await prisma.record.update({
+        try {
+          await prisma.record.update({
             where: { id: job.recordId },
             data: {
-                status: 'PROCESSING',
-                processing_step: 'TRANSCRIPTION'
+              status: 'PROCESSING',
+              processing_step: 'TRANSCRIPTION'
             }
-        });
+          });
+        } catch (error) {
+          if (error.code === 'P2025') {
+            console.warn(`Record ${job.recordId} not found in database. Removing job from queue.`);
+            await (0, queue_1.completeJob)(QUEUE_NAME, job.id);
+            return;
+          }
+          throw error;
+        }
         // R2からファイルを取得
         console.log(`Downloading file with key: ${job.fileKey}`);
         const fileData = await (0, storage_1.getFileContents)(job.fileKey);
@@ -180,12 +189,12 @@ async function processJob() {
         
         // 文字起こし完了を記録
         await prisma.record.update({
-            where: { id: job.recordId },
-            data: {
-                transcript_text: fullTranscript,
-                status: 'PROCESSING',
-                processing_step: 'TIMESTAMPS'
-            }
+          where: { id: job.recordId },
+          data: {
+            transcript_text: fullTranscript,
+            status: 'PROCESSING',
+            processing_step: 'TIMESTAMPS'
+          }
         });
         
         // タイムスタンプ抽出処理
@@ -194,19 +203,19 @@ async function processJob() {
         
         // タイムスタンプをJSONとして保存
         await prisma.record.update({
-            where: { id: job.recordId },
-            data: {
-                timestamps_json: JSON.stringify(timestampsData),
-                status: 'TRANSCRIBED',
-                processing_step: null
-            }
+          where: { id: job.recordId },
+          data: {
+            timestamps_json: JSON.stringify(timestampsData),
+            status: 'TRANSCRIBED',
+            processing_step: null
+          }
         });
         
         // 要約キューにジョブを追加
         await (0, queue_1.addJob)(SUMMARY_QUEUE, {
-            type: 'summary',
-            recordId: job.recordId,
-            fileKey: job.fileKey
+          type: 'summary',
+          recordId: job.recordId,
+          fileKey: job.fileKey
         });
         // 一時ファイルの削除
         fs.unlinkSync(tempFilePath);
@@ -222,16 +231,20 @@ async function processJob() {
             // エラーステータスを記録
             try {
                 await prisma.record.update({
-                    where: { id: job.recordId },
-                    data: {
-                        status: 'ERROR',
-                        error: error instanceof Error ? error.message : String(error),
-                        processing_step: null
-                    }
+                  where: { id: job.recordId },
+                  data: {
+                    status: 'ERROR',
+                    error: error instanceof Error ? error.message : String(error),
+                    processing_step: null
+                  }
                 });
             }
             catch (dbError) {
-                console.error('Failed to update record status:', dbError);
+                if (dbError.code === 'P2025') {
+                    console.warn(`Record ${job.recordId} not found in database when updating error status.`);
+                } else {
+                    console.error('Failed to update record status:', dbError);
+                }
             }
         }
     }
