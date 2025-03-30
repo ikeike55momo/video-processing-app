@@ -87,7 +87,8 @@ services:
   - type: worker
     name: transcription-worker
     env: node
-    nodeVersion: 18
+    nodeVersion: 18.20.8
+    runtime: node
     plan: pro
     buildCommand: npm install && npx prisma generate --schema=./prisma/schema.prisma && npx prisma db push --schema=./prisma/schema.prisma --accept-data-loss
     startCommand: npm run start:transcription
@@ -122,7 +123,8 @@ services:
   - type: worker
     name: summary-worker
     env: node
-    nodeVersion: 18
+    nodeVersion: 18.20.8
+    runtime: node
     plan: standard
     buildCommand: npm install && npx prisma generate --schema=./prisma/schema.prisma && npx prisma db push --schema=./prisma/schema.prisma --accept-data-loss
     startCommand: npm run start:summary
@@ -149,7 +151,8 @@ services:
   - type: worker
     name: article-worker
     env: node
-    nodeVersion: 18
+    nodeVersion: 18.20.8
+    runtime: node
     plan: standard
     buildCommand: npm install && npx prisma generate --schema=./prisma/schema.prisma && npx prisma db push --schema=./prisma/schema.prisma --accept-data-loss
     startCommand: npm run start:article
