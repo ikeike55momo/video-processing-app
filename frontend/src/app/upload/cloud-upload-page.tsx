@@ -143,9 +143,16 @@ export default function CloudUploadPage() {
     }
   };
 
-  // 進捗表示付きアップロード（小さなファイル用）
+  // 進捗表示付きアップロード
   const uploadFileWithProgress = (file: File, signedUrl: string) => {
     return new Promise<void>((resolve, reject) => {
+      // signedUrlがundefinedの場合はエラーを返す
+      if (!signedUrl) {
+        console.error("署名付きURLが取得できませんでした");
+        reject(new Error("署名付きURLが取得できませんでした"));
+        return;
+      }
+
       const xhr = new XMLHttpRequest();
 
       // タイムアウトを設定（4時間 = 14400000ミリ秒）
