@@ -60,22 +60,39 @@ let redisClient;
  */
 function initRedisClient() {
     return __awaiter(this, void 0, void 0, function* () {
-        const url = process.env.REDIS_URL;
-        if (!url) {
-            console.error('Missing REDIS_URL environment variable');
-            throw new Error('Missing REDIS_URL environment variable');
+        try {
+            const url = process.env.REDIS_URL;
+            if (!url) {
+                console.error('Missing REDIS_URL environment variable');
+                return null; // エラーをスローする代わりにnullを返す
+            }
+            redisClient = (0, redis_1.createClient)({
+                url: url,
+                socket: {
+                    reconnectStrategy: (retries) => {
+                        // 最大5回まで再接続を試みる
+                        if (retries > 5) {
+                            console.error('Redis connection failed after 5 retries');
+                            return null;
+                        }
+                        // 指数バックオフ（最大10秒）
+                        return Math.min(retries * 1000, 10000);
+                    }
+                }
+            });
+            // エラーハンドリング
+            redisClient.on('error', (err) => {
+                console.error('Redis Error:', err);
+                // エラーログのみ出力し、アプリケーションは継続
+            });
+            // 接続
+            yield redisClient.connect();
+            console.log('Connected to Redis');
+            return redisClient;
+        } catch (error) {
+            console.error('Failed to initialize Redis client:', error);
+            return null; // エラーが発生した場合はnullを返す
         }
-        redisClient = (0, redis_1.createClient)({
-            url: url,
-        });
-        // エラーハンドリング
-        redisClient.on('error', (err) => {
-            console.error('Redis Error:', err);
-        });
-        // 接続
-        yield redisClient.connect();
-        console.log('Connected to Redis');
-        return redisClient;
     });
 }
 /**
@@ -98,16 +115,26 @@ function getRedisClient() {
  */
 function addJob(queue, data) {
     return __awaiter(this, void 0, void 0, function* () {
-        const client = yield getRedisClient();
-        // ジョブIDを生成
-        const jobId = `job-${crypto.randomBytes(8).toString('hex')}`;
-        // 15分後の処理期限を設定
-        const processingDeadline = Date.now() + 15 * 60 * 1000;
-        const jobData = Object.assign(Object.assign({}, data), { id: jobId, createdAt: Date.now(), processingDeadline, retryCount: data.retryCount || 0 });
-        // キューにジョブを追加（左側に追加）
-        yield client.lPush(queue, JSON.stringify(jobData));
-        console.log(`Job added to queue ${queue}:`, jobId);
-        return jobId;
+        try {
+            const client = yield getRedisClient();
+            if (!client) {
+                console.warn(`Redis client unavailable, skipping job addition to queue ${queue}`);
+                // Redisが利用できない場合でもジョブIDを返す
+                return crypto.randomUUID();
+            }
+            // ジョブIDを生成
+            const jobId = `job-${crypto.randomBytes(8).toString('hex')}`;
+            // 15分後の処理期限を設定
+            const processingDeadline = Date.now() + 15 * 60 * 1000;
+            const jobData = Object.assign(Object.assign({}, data), { id: jobId, createdAt: Date.now(), processingDeadline, retryCount: data.retryCount || 0 });
+            // キューにジョブを追加（左側に追加）
+            yield client.lPush(queue, JSON.stringify(jobData));
+            console.log(`Job added to queue ${queue}:`, jobId);
+            return jobId;
+        } catch (error) {
+            console.error('Error adding job to queue:', error);
+            return null;
+        }
     });
 }
 /**
@@ -118,6 +145,10 @@ function addJob(queue, data) {
 function getJob(queue) {
     return __awaiter(this, void 0, void 0, function* () {
         const client = yield getRedisClient();
+        if (!client) {
+            console.warn(`Redis client unavailable, skipping job retrieval from queue ${queue}`);
+            return null;
+        }
         // 処理中キューの名前
         const processingQueue = `${queue}:processing`;
         // キューの右側からジョブを取得し、処理中キューの左側に追加
@@ -145,6 +176,10 @@ function getJob(queue) {
 function completeJob(queue, jobId) {
     return __awaiter(this, void 0, void 0, function* () {
         const client = yield getRedisClient();
+        if (!client) {
+            console.warn(`Redis client unavailable, skipping job completion for queue ${queue}`);
+            return false;
+        }
         // 処理中キューの名前
         const processingQueue = `${queue}:processing`;
         // 処理中キューからジョブを探す
@@ -178,9 +213,13 @@ function completeJob(queue, jobId) {
  * @param maxRetries 最大リトライ回数
  * @returns リトライ状況
  */
-function failJob(queue_1, jobId_1) {
-    return __awaiter(this, arguments, void 0, function* (queue, jobId, maxRetries = 3) {
+function failJob(queue, jobId, maxRetries = 3) {
+    return __awaiter(this, void 0, void 0, function* () {
         const client = yield getRedisClient();
+        if (!client) {
+            console.warn(`Redis client unavailable, skipping job failure handling for queue ${queue}`);
+            return { retried: false, failed: false };
+        }
         // 処理中キューの名前
         const processingQueue = `${queue}:processing`;
         // 処理中キューからジョブを探す
@@ -229,6 +268,15 @@ function failJob(queue_1, jobId_1) {
 function getQueueStats(queue) {
     return __awaiter(this, void 0, void 0, function* () {
         const client = yield getRedisClient();
+        if (!client) {
+            console.warn(`Redis client unavailable, skipping queue stats retrieval for queue ${queue}`);
+            return {
+                pending: 0,
+                processing: 0,
+                failed: 0,
+                completed: 0,
+            };
+        }
         const [pending, processing, failed, completed] = yield Promise.all([
             client.lLen(queue),
             client.lLen(`${queue}:processing`),
@@ -250,9 +298,13 @@ function getQueueStats(queue) {
  * @param olderThanMs 処理デッドラインからの経過時間（ミリ秒）
  * @returns 再キューに入れたジョブ数
  */
-function requeueStuckJobs(queue_1) {
-    return __awaiter(this, arguments, void 0, function* (queue, olderThanMs = 5 * 60 * 1000) {
+function requeueStuckJobs(queue, olderThanMs = 5 * 60 * 1000) {
+    return __awaiter(this, void 0, void 0, function* () {
         const client = yield getRedisClient();
+        if (!client) {
+            console.warn(`Redis client unavailable, skipping stuck job requeueing for queue ${queue}`);
+            return 0;
+        }
         const processingQueue = `${queue}:processing`;
         // 処理中キューのジョブをすべて取得
         const jobs = yield client.lRange(processingQueue, 0, -1);
