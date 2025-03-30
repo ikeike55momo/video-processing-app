@@ -160,6 +160,18 @@ app.post('/api/upload-url', (req, res) => __awaiter(void 0, void 0, void 0, func
         }
         // 署名付きURLの生成
         const uploadData = yield (0, storage_1.generateUploadUrl)(fileName, contentType);
+        
+        // URLが正しく生成されたか確認
+        if (!uploadData || !uploadData.url) {
+            console.error('署名付きURLの生成に失敗しました:', uploadData);
+            return res.status(500).json({
+                error: '署名付きURLの生成に失敗しました'
+            });
+        }
+        
+        // デバッグ情報
+        console.log('生成された署名付きURL:', uploadData.url.substring(0, 100) + '...');
+        
         // 新しいレコードをデータベースに作成
         const record = yield prisma.record.create({
             data: {
