@@ -200,8 +200,8 @@ app.post('/api/process', (req, res) => __awaiter(void 0, void 0, void 0, functio
     try {
         console.log('Process API received request body:', req.body);
         
-        // リクエストボディからrecordIdまたはfileKeyを取得
-        const { recordId, fileKey } = req.body;
+        // リクエストボディからrecordId、fileKey、またはfileUrlを取得
+        const { recordId, fileKey, fileUrl, fileName } = req.body;
         
         // recordIdが存在する場合はそれを使用
         if (recordId) {
@@ -275,10 +275,53 @@ app.post('/api/process', (req, res) => __awaiter(void 0, void 0, void 0, functio
                 recordId: record.id
             });
         }
-        // どちらも存在しない場合はエラー
+        // fileUrlが存在する場合はそれを使用
+        else if (fileUrl) {
+            // fileUrlからfileKeyを抽出
+            // 例: https://...r2.cloudflarestorage.com/uploads/1743352679651-30大プレゼント.mp4?...
+            const urlPath = new URL(fileUrl).pathname; // /uploads/1743352679651-30大プレゼント.mp4
+            const extractedFileKey = urlPath.startsWith('/') ? urlPath.substring(1) : urlPath;
+            
+            console.log('Extracted fileKey from fileUrl:', extractedFileKey);
+            
+            // fileKeyからレコードを検索
+            const record = yield prisma.record.findFirst({
+                where: { file_key: extractedFileKey }
+            });
+            
+            if (!record) {
+                return res.status(404).json({ error: 'Record not found with the extracted fileKey' });
+            }
+            
+            if (record.status !== 'UPLOADED') {
+                return res.status(400).json({
+                    error: 'Record is already being processed or completed',
+                    status: record.status
+                });
+            }
+            
+            // 文字起こしキューにジョブを追加
+            yield (0, queue_1.addJob)('transcription', {
+                type: 'transcription',
+                recordId: record.id,
+                fileKey: record.file_key
+            });
+            
+            // ステータスを更新
+            yield prisma.record.update({
+                where: { id: record.id },
+                data: { status: 'PROCESSING' }
+            });
+            
+            res.status(200).json({
+                message: 'Processing started',
+                recordId: record.id
+            });
+        }
+        // どれも存在しない場合はエラー
         else {
-            console.log('recordId or fileKey is missing in the request body');
-            return res.status(400).json({ error: 'recordId or fileKey is required' });
+            console.log('recordId, fileKey, or fileUrl is missing in the request body');
+            return res.status(400).json({ error: 'recordId, fileKey, or fileUrl is required' });
         }
     }
     catch (error) {
