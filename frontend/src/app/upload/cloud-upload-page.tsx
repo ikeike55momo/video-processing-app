@@ -200,7 +200,7 @@ export default function CloudUploadPage() {
       };
 
       // ファイル送信
-      console.log("アップロード開始:", file.name, file.size, "URL:", signedUrl.substring(0, 100) + "...");
+      console.log("アップロード開始:", file.name, file.size, "URL:", signedUrl ? (signedUrl.substring(0, 100) + "...") : "URL not available");
       xhr.send(file);
     });
   };
