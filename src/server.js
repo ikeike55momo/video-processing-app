@@ -71,18 +71,8 @@ try {
   console.log('DATABASE_URL:', process.env.DATABASE_URL ? '設定されています' : '設定されていません');
   console.log('プロセスの作業ディレクトリ:', process.cwd());
   
-  // Prismaクライアントをインポートする前に、prisma generateを実行
-  const { execSync } = require('child_process');
-  console.log('prisma generateを実行します...');
-  try {
-    execSync('npx prisma generate --schema=./prisma/schema.prisma', { 
-      stdio: 'inherit',
-      env: { ...process.env, NODE_ENV: 'production' }
-    });
-    console.log('prisma generateが正常に完了しました');
-  } catch (genError) {
-    console.error('prisma generateの実行中にエラーが発生しました:', genError);
-  }
+  // Prisma generateの実行をスキップ（Renderでの問題回避のため）
+  console.log('Prismaクライアントを初期化します...');
   
   // スキーマの場所を明示的に指定
   const { PrismaClient } = require('@prisma/client');
