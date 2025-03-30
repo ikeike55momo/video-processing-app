@@ -12,6 +12,15 @@ const nextConfig = {
     // 同時にメモリにキャッシュするページの最大数
     pagesBufferLength: 1,
   },
+  // ビルドキャッシュを完全に無効化
+  experimental: {
+    disableOptimizedLoading: true,
+    optimizeCss: false,
+  },
+  // バージョンを強制的に更新するためのランダム値
+  generateBuildId: () => {
+    return 'build-' + Date.now();
+  },
   async headers() {
     return [
       {

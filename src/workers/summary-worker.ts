@@ -11,6 +11,9 @@ import { GoogleGenerativeAI } from '@google/generative-ai';
 // 環境変数の読み込み
 dotenv.config();
 
+// Redisの接続URL
+const redisUrl = process.env.REDIS_URL;
+
 // Prismaクライアントの初期化
 const prisma = new PrismaClient();
 
@@ -202,14 +205,16 @@ const worker = new Worker(
   QUEUE_NAMES.SUMMARY,
   processSummaryJob,
   {
-    connection: {
+    connection: redisUrl ? {
+      url: redisUrl
+    } : {
       host: process.env.REDIS_HOST || 'localhost',
       port: parseInt(process.env.REDIS_PORT || '6379'),
       password: process.env.REDIS_PASSWORD
     },
-    concurrency: 2, // 同時実行数
+    concurrency: 1, // 同時実行数を制限（リソース消費を抑える）
     limiter: {
-      max: 5, // 最大5ジョブ
+      max: 2, // 最大2ジョブ
       duration: 1000 * 60 // 1分間
     }
   }

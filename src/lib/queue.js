@@ -61,40 +61,75 @@ let redisClient;
  */
 function initRedisClient() {
     return __awaiter(this, void 0, void 0, function* () {
-        try {
-            const url = process.env.REDIS_URL;
-            if (!url) {
-                console.error('Missing REDIS_URL environment variable');
-                return null;
-            }
-            
-            // URLがredissで始まる場合はSSL接続
-            const isSSL = url.startsWith('rediss://');
-            console.log(`Redis接続を開始します: ${url.replace(/:[^:]*@/, ':***@')}`);
-            console.log(`SSL接続: ${isSSL}`);
-            
-            // SSL接続の場合は証明書検証をスキップするオプションを追加
-            const options = {
-                url: url,
-                socket: {
-                    tls: isSSL,
-                    rejectUnauthorized: false // 自己署名証明書を許可
+        let retryCount = 0;
+        const maxRetries = 3;
+        const retryDelay = 2000; // 2秒
+        
+        while (retryCount < maxRetries) {
+            try {
+                const url = process.env.REDIS_URL;
+                if (!url) {
+                    console.error('Missing REDIS_URL environment variable');
+                    return null;
                 }
-            };
-            
-            redisClient = (0, redis_1.createClient)(options);
-            
-            redisClient.on('error', (err) => {
-                console.error('Redis Error:', err);
-            });
-            
-            yield redisClient.connect();
-            console.log('Connected to Redis');
-            return redisClient;
-        }
-        catch (error) {
-            console.error('Failed to initialize Redis client:', error);
-            return null;
+                
+                // URLがredissで始まる場合はSSL接続
+                const isSSL = url.startsWith('rediss://');
+                console.log(`Redis接続を開始します (試行 ${retryCount + 1}/${maxRetries}): ${url.replace(/:[^:]*@/, ':***@')}`);
+                console.log(`SSL接続: ${isSSL}`);
+                console.log(`Node環境: ${process.env.NODE_ENV}`);
+                
+                // SSL接続の場合は証明書検証をスキップするオプションを追加
+                const options = {
+                    url: url,
+                    socket: {
+                        tls: isSSL,
+                        rejectUnauthorized: false // 自己署名証明書を許可
+                    }
+                };
+                
+                console.log('Redisクライアントを作成中...');
+                redisClient = (0, redis_1.createClient)(options);
+                
+                // エラーイベントハンドラを追加
+                redisClient.on('error', (err) => {
+                    console.error('Redisエラー発生:', err);
+                });
+                
+                console.log('Redisに接続中...');
+                yield redisClient.connect();
+                console.log('Redisに正常に接続しました');
+                
+                // 接続テスト
+                try {
+                    const pingResult = yield redisClient.ping();
+                    console.log(`Redis PING結果: ${pingResult}`);
+                } catch (pingError) {
+                    console.error('Redis PING失敗:', pingError);
+                    throw pingError; // 再試行のためにエラーをスロー
+                }
+                
+                return redisClient;
+            } catch (error) {
+                retryCount++;
+                console.error(`Redisクライアント初期化エラー (試行 ${retryCount}/${maxRetries}):`, error);
+                if (error.code) {
+                    console.error(`エラーコード: ${error.code}`);
+                }
+                if (error.message) {
+                    console.error(`エラーメッセージ: ${error.message}`);
+                }
+                
+                // 最大リトライ回数に達した場合
+                if (retryCount >= maxRetries) {
+                    console.error(`Redis接続の最大リトライ回数(${maxRetries})に達しました。`);
+                    throw error;
+                }
+                
+                // リトライ前に待機
+                console.log(`${retryDelay}ミリ秒後に再試行します...`);
+                yield new Promise(resolve => setTimeout(resolve, retryDelay));
+            }
         }
     });
 }
