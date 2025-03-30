@@ -89,7 +89,7 @@ services:
     env: node
     nodeVersion: 18
     plan: pro
-    buildCommand: npm install && npx prisma generate --schema=./prisma/schema.prisma && npx prisma db push --schema=./prisma/schema.prisma --accept-data-loss && npm run build
+    buildCommand: npm install && npx prisma generate --schema=./prisma/schema.prisma && npx prisma db push --schema=./prisma/schema.prisma --accept-data-loss
     startCommand: npm run start:transcription
     rootDir: .
     autoDeploy: true
@@ -124,7 +124,7 @@ services:
     env: node
     nodeVersion: 18
     plan: standard
-    buildCommand: npm install && npx prisma generate --schema=./prisma/schema.prisma && npx prisma db push --schema=./prisma/schema.prisma --accept-data-loss && npm run build
+    buildCommand: npm install && npx prisma generate --schema=./prisma/schema.prisma && npx prisma db push --schema=./prisma/schema.prisma --accept-data-loss
     startCommand: npm run start:summary
     rootDir: .
     autoDeploy: true
@@ -151,7 +151,7 @@ services:
     env: node
     nodeVersion: 18
     plan: standard
-    buildCommand: npm install && npx prisma generate --schema=./prisma/schema.prisma && npx prisma db push --schema=./prisma/schema.prisma --accept-data-loss && npm run build
+    buildCommand: npm install && npx prisma generate --schema=./prisma/schema.prisma && npx prisma db push --schema=./prisma/schema.prisma --accept-data-loss
     startCommand: npm run start:article
     rootDir: .
     autoDeploy: true
