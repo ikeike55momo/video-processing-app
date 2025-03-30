@@ -54,6 +54,20 @@ const transcription_service_1 = require("../services/transcription-service");
 dotenv.config();
 // Prismaクライアントの初期化
 const prisma = new client_1.PrismaClient();
+// Redisクライアントの初期化
+(async () => {
+  try {
+    const client = await (0, queue_1.initRedisClient)();
+    if (client) {
+      console.log('Redis client initialized successfully');
+    } else {
+      console.warn('Redis client initialization returned null, will retry when needed');
+    }
+  } catch (error) {
+    console.error('Failed to initialize Redis client:', error);
+    // エラーをログに出力するだけで、プロセスは終了しない
+  }
+})();
 // キュー名の定義
 const QUEUE_NAME = 'transcription';
 const SUMMARY_QUEUE = 'summary';
