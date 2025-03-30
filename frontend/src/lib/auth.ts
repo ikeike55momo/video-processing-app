@@ -44,7 +44,7 @@ type CustomJWT = JWT & {
 };
 
 // 環境変数からサイトURLを取得
-const SITE_URL = process.env.NEXTAUTH_URL || 'https://vpm.ririaru-stg.cloud';
+const SITE_URL = process.env.NEXTAUTH_URL || 'https://video-processing-frontend.onrender.com';
 
 export const authOptions: NextAuthOptions = {
   providers: [

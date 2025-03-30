@@ -3,7 +3,7 @@ import 'dotenv/config';
 import fetch from 'node-fetch';
 
 // 本番環境のAPI URL
-const API_URL = process.env.NEXT_PUBLIC_APP_URL || 'https://vpa.ririaru-stg.cloud';
+const API_URL = process.env.NEXT_PUBLIC_APP_URL || 'https://video-processing-frontend.onrender.com';
 
 async function fetchRecords() {
   try {

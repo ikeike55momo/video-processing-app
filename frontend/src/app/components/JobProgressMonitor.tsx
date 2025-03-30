@@ -25,7 +25,7 @@ interface JobProgressMonitorProps {
 
 // API URLの設定
 const API_URL = process.env.NEXT_PUBLIC_API_URL || '';
-const SOCKET_URL = API_URL ? API_URL.replace(/^https?:\/\//, '') : 'vpm.ririaru-stg.cloud';
+const SOCKET_URL = API_URL ? API_URL.replace(/^https?:\/\//, '') : 'video-processing-api.onrender.com';
 
 const JobProgressMonitor: React.FC<JobProgressMonitorProps> = ({
   jobId,
