@@ -71,6 +71,18 @@ try {
   console.log('DATABASE_URL:', process.env.DATABASE_URL ? '設定されています' : '設定されていません');
   console.log('プロセスの作業ディレクトリ:', process.cwd());
   
+  // Prismaクライアントをインポートする前に、prisma generateを実行
+  const { execSync } = require('child_process');
+  console.log('prisma generateを実行します...');
+  try {
+    execSync('npx prisma generate --schema=./prisma/schema.prisma', { 
+      stdio: 'inherit',
+      env: { ...process.env, NODE_ENV: 'production' }
+    });
+    console.log('prisma generateが正常に完了しました');
+  } catch (genError) {
+    console.error('prisma generateの実行中にエラーが発生しました:', genError);
+  }  
   // スキーマの場所を明示的に指定
   const { PrismaClient } = require('@prisma/client');
   prisma = new PrismaClient({
@@ -153,6 +165,7 @@ app.post('/api/upload-url', (req, res) => __awaiter(void 0, void 0, void 0, func
             data: {
                 file_key: uploadData.key,
                 r2_bucket: uploadData.bucket,
+                file_url: uploadData.url, // file_urlフィールドを追加
                 status: 'UPLOADED'
             }
         });
