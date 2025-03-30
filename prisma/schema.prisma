@@ -13,7 +13,7 @@ datasource db {
 
 model Record {
   id              String    @id @default(uuid())
-  file_url        String
+  file_url        String?   // nullを許容するように変更
   file_key        String?
   r2_bucket       String?
   transcript_text String?
