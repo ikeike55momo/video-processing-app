@@ -64,7 +64,7 @@ function initRedisClient() {
             const url = process.env.REDIS_URL;
             if (!url) {
                 console.error('Missing REDIS_URL environment variable');
-                return null; // エラーをスローする代わりにnullを返す
+                process.exit(1); // 環境変数がない場合はプロセスを終了
             }
             redisClient = (0, redis_1.createClient)({
                 url: url,
@@ -73,7 +73,7 @@ function initRedisClient() {
                         // 最大5回まで再接続を試みる
                         if (retries > 5) {
                             console.error('Redis connection failed after 5 retries');
-                            return null;
+                            process.exit(1); // 再接続に失敗した場合はプロセスを終了
                         }
                         // 指数バックオフ（最大10秒）
                         return Math.min(retries * 1000, 10000);
@@ -83,7 +83,11 @@ function initRedisClient() {
             // エラーハンドリング
             redisClient.on('error', (err) => {
                 console.error('Redis Error:', err);
-                // エラーログのみ出力し、アプリケーションは継続
+                // 致命的なエラーの場合はプロセスを終了
+                if (err.code === 'ECONNREFUSED' || err.code === 'ENOTFOUND') {
+                    console.error('Fatal Redis connection error. Exiting process.');
+                    process.exit(1);
+                }
             });
             // 接続
             yield redisClient.connect();
@@ -91,7 +95,7 @@ function initRedisClient() {
             return redisClient;
         } catch (error) {
             console.error('Failed to initialize Redis client:', error);
-            return null; // エラーが発生した場合はnullを返す
+            process.exit(1); // 接続に失敗した場合はプロセスを終了
         }
     });
 }
@@ -118,9 +122,8 @@ function addJob(queue, data) {
         try {
             const client = yield getRedisClient();
             if (!client) {
-                console.warn(`Redis client unavailable, skipping job addition to queue ${queue}`);
-                // Redisが利用できない場合でもジョブIDを返す
-                return crypto.randomUUID();
+                console.error(`Redis client unavailable, cannot add job to queue ${queue}`);
+                process.exit(1); // Redisクライアントが利用できない場合はプロセスを終了
             }
             // ジョブIDを生成
             const jobId = `job-${crypto.randomBytes(8).toString('hex')}`;
@@ -133,7 +136,7 @@ function addJob(queue, data) {
             return jobId;
         } catch (error) {
             console.error('Error adding job to queue:', error);
-            return null;
+            process.exit(1); // エラーが発生した場合はプロセスを終了
         }
     });
 }
@@ -144,26 +147,31 @@ function addJob(queue, data) {
  */
 function getJob(queue) {
     return __awaiter(this, void 0, void 0, function* () {
-        const client = yield getRedisClient();
-        if (!client) {
-            console.warn(`Redis client unavailable, skipping job retrieval from queue ${queue}`);
-            return null;
-        }
-        // 処理中キューの名前
-        const processingQueue = `${queue}:processing`;
-        // キューの右側からジョブを取得し、処理中キューの左側に追加
-        const result = yield client.rPopLPush(queue, processingQueue);
-        if (!result) {
-            return null;
-        }
         try {
-            return JSON.parse(result);
-        }
-        catch (error) {
-            console.error('Error parsing job data:', error);
-            // 不正なデータの場合は処理中キューから削除
-            yield client.lRem(processingQueue, 1, result);
-            return null;
+            const client = yield getRedisClient();
+            if (!client) {
+                console.error(`Redis client unavailable, cannot get job from queue ${queue}`);
+                process.exit(1); // Redisクライアントが利用できない場合はプロセスを終了
+            }
+            
+            // キューからジョブを取得（右側から取得）
+            const jobData = yield client.rPop(queue);
+            if (!jobData) {
+                return null; // ジョブがなければnullを返す
+            }
+            
+            // ジョブデータをパース
+            const job = JSON.parse(jobData);
+            
+            // 処理中キューに追加
+            const processingQueue = `${queue}:processing`;
+            yield client.lPush(processingQueue, jobData);
+            
+            console.log(`Job ${job.id} moved to processing queue ${processingQueue}`);
+            return job;
+        } catch (error) {
+            console.error('Error getting job from queue:', error);
+            process.exit(1); // エラーが発生した場合はプロセスを終了
         }
     });
 }
