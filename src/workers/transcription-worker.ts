@@ -16,6 +16,9 @@ import * as crypto from 'crypto';
 // 環境変数の読み込み
 dotenv.config();
 
+// Redisの接続URL
+const redisUrl = process.env.REDIS_URL;
+
 // Prismaクライアントの初期化
 const prisma = new PrismaClient();
 
@@ -78,7 +81,7 @@ async function processTranscriptionJob(job: Job): Promise<any> {
     await prisma.record.update({
       where: { id: recordId },
       data: {
-        transcription_text: transcription,
+        transcript_text: transcription,
         status: 'TRANSCRIBED'
       }
     });
@@ -120,7 +123,7 @@ async function processTranscriptionJob(job: Job): Promise<any> {
         where: { id: job.data.recordId },
         data: {
           status: 'ERROR',
-          error_message: error instanceof Error ? error.message : '不明なエラー'
+          error: error instanceof Error ? error.message : '不明なエラー'
         }
       });
     } catch (dbError) {
@@ -158,7 +161,9 @@ const worker = new Worker(
   QUEUE_NAMES.TRANSCRIPTION,
   processTranscriptionJob,
   {
-    connection: {
+    connection: redisUrl ? {
+      url: redisUrl
+    } : {
       host: process.env.REDIS_HOST || 'localhost',
       port: parseInt(process.env.REDIS_PORT || '6379'),
       password: process.env.REDIS_PASSWORD

@@ -188,17 +188,55 @@ async function processJob() {
  * メインワーカー処理
  */
 async function startWorker() {
-    console.log('Article worker started');
     try {
+        console.log('========================================');
+        console.log(`記事生成ワーカー起動: ${new Date().toISOString()}`);
+        console.log(`Node環境: ${process.env.NODE_ENV}`);
+        console.log(`ワーカータイプ: ${process.env.WORKER_TYPE || 'article'}`);
+        
+        // 環境変数の確認（機密情報は隠す）
+        const redisUrl = process.env.REDIS_URL || '';
+        console.log(`Redis URL設定: ${redisUrl.replace(/:[^:]*@/, ':***@')}`);
+        
+        // Redisクライアントの初期化
+        console.log('Redisクライアントを初期化中...');
+        const client = await (0, queue_1.initRedisClient)();
+        if (!client) {
+            throw new Error('Redisクライアントの初期化に失敗しました');
+        }
+        console.log('Redisクライアント初期化完了');
+        
+        // プリズマクライアントの確認
+        console.log('データベース接続を確認中...');
+        await prisma.$connect();
+        console.log('データベース接続確認完了');
+        
+        console.log('記事生成ワーカーが正常に起動しました');
+        console.log('========================================');
+        
         // 継続的にジョブを処理
         while (true) {
-            await processJob();
+            try {
+                await processJob();
+            } catch (jobError) {
+                console.error('ジョブ処理中にエラーが発生しました:', jobError);
+                // ジョブエラーでは終了せず、次のジョブを処理
+            }
             // 少し待機してからポーリング
             await new Promise(resolve => setTimeout(resolve, 1000));
         }
     }
     catch (error) {
-        console.error('Fatal error in worker:', error);
+        console.error('ワーカーで致命的なエラーが発生しました:', error);
+        if (error.code) {
+            console.error(`エラーコード: ${error.code}`);
+        }
+        if (error.message) {
+            console.error(`エラーメッセージ: ${error.message}`);
+        }
+        if (error.stack) {
+            console.error(`スタックトレース: ${error.stack}`);
+        }
         process.exit(1);
     }
 }
