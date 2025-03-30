@@ -177,9 +177,5 @@ services:
     name: video-processing-queue
     plan: standard
     ipAllowList:
-      - source: 10.0.0.0/8  # 内部ネットワークのみ許可
-        description: internal-network
-      - source: 172.16.0.0/12
-        description: internal-network
-      - source: 192.168.0.0/16
-        description: internal-network
+      - source: 0.0.0.0/0  # すべてのIPアドレスを許可
+        description: allow-all-ips
