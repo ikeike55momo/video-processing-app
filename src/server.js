@@ -198,38 +198,88 @@ app.post('/api/upload-url', (req, res) => __awaiter(void 0, void 0, void 0, func
 // 処理開始エンドポイント
 app.post('/api/process', (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
-        const { recordId } = req.body;
-        if (!recordId) {
-            return res.status(400).json({ error: 'recordId is required' });
-        }
-        // レコードの存在確認
-        const record = yield prisma.record.findUnique({
-            where: { id: recordId }
-        });
-        if (!record) {
-            return res.status(404).json({ error: 'Record not found' });
-        }
-        if (record.status !== 'UPLOADED') {
-            return res.status(400).json({
-                error: 'Record is already being processed or completed',
-                status: record.status
+        console.log('Process API received request body:', req.body);
+        
+        // リクエストボディからrecordIdまたはfileKeyを取得
+        const { recordId, fileKey } = req.body;
+        
+        // recordIdが存在する場合はそれを使用
+        if (recordId) {
+            // レコードの存在確認
+            const record = yield prisma.record.findUnique({
+                where: { id: recordId }
+            });
+            
+            if (!record) {
+                return res.status(404).json({ error: 'Record not found' });
+            }
+            
+            if (record.status !== 'UPLOADED') {
+                return res.status(400).json({
+                    error: 'Record is already being processed or completed',
+                    status: record.status
+                });
+            }
+            
+            // 文字起こしキューにジョブを追加
+            yield (0, queue_1.addJob)('transcription', {
+                type: 'transcription',
+                recordId: recordId,
+                fileKey: record.file_key
+            });
+            
+            // ステータスを更新
+            yield prisma.record.update({
+                where: { id: recordId },
+                data: { status: 'PROCESSING' }
+            });
+            
+            res.status(200).json({
+                message: 'Processing started',
+                recordId: recordId
             });
         }
-        // 文字起こしキューにジョブを追加
-        yield (0, queue_1.addJob)('transcription', {
-            type: 'transcription',
-            recordId: recordId,
-            fileKey: record.file_key
-        });
-        // ステータスを更新
-        yield prisma.record.update({
-            where: { id: recordId },
-            data: { status: 'PROCESSING' }
-        });
-        res.status(200).json({
-            message: 'Processing started',
-            recordId: recordId
-        });
+        // fileKeyが存在する場合はそれを使用
+        else if (fileKey) {
+            // fileKeyからレコードを検索
+            const record = yield prisma.record.findFirst({
+                where: { file_key: fileKey }
+            });
+            
+            if (!record) {
+                return res.status(404).json({ error: 'Record not found with the provided fileKey' });
+            }
+            
+            if (record.status !== 'UPLOADED') {
+                return res.status(400).json({
+                    error: 'Record is already being processed or completed',
+                    status: record.status
+                });
+            }
+            
+            // 文字起こしキューにジョブを追加
+            yield (0, queue_1.addJob)('transcription', {
+                type: 'transcription',
+                recordId: record.id,
+                fileKey: record.file_key
+            });
+            
+            // ステータスを更新
+            yield prisma.record.update({
+                where: { id: record.id },
+                data: { status: 'PROCESSING' }
+            });
+            
+            res.status(200).json({
+                message: 'Processing started',
+                recordId: record.id
+            });
+        }
+        // どちらも存在しない場合はエラー
+        else {
+            console.log('recordId or fileKey is missing in the request body');
+            return res.status(400).json({ error: 'recordId or fileKey is required' });
+        }
     }
     catch (error) {
         console.error('Error starting process:', error);
