@@ -198,8 +198,8 @@ export default function UploadPage() {
       } else {
         // 通常のアップロード
         setUploadStage("アップロード中...");
-        await uploadFileWithProgress(file, result.url);
-        fileUrl = result.fileUrl;
+        await uploadFileWithProgress(file, result.uploadUrl);
+        fileUrl = result.fileUrl || result.uploadUrl;
       }
 
       // 処理開始リクエスト
