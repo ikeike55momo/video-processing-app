@@ -84,47 +84,6 @@ try {
     console.error('prisma generateの実行中にエラーが発生しました:', genError);
   }
   
-  // Prismaクエリエンジンの場所を環境変数で指定
-  console.log('Prismaクエリエンジンの設定を行います...');
-  
-  // Renderの環境では明示的にクエリエンジンのパスを設定
-  if (process.env.NODE_ENV === 'production') {
-    process.env.PRISMA_QUERY_ENGINE_BINARY = '/opt/render/project/src/node_modules/@prisma/engines/query-engine-debian-openssl-3.0.x';
-    process.env.PRISMA_SCHEMA_ENGINE_BINARY = '/opt/render/project/src/node_modules/@prisma/engines/schema-engine-debian-openssl-3.0.x';
-    console.log('Renderの環境用にPrismaエンジンパスを設定しました');
-  }
-  
-  // クエリエンジンのパスを確認
-  const enginePath = path.join(process.cwd(), 'node_modules', '@prisma', 'engines');
-  console.log('Prismaエンジンディレクトリの存在確認:', fs.existsSync(enginePath));
-  
-  if (fs.existsSync(enginePath)) {
-    try {
-      const files = fs.readdirSync(enginePath);
-      console.log('Prismaエンジンディレクトリの内容:', files);
-      
-      // 環境に応じたクエリエンジンを探す（ローカル開発環境用）
-      if (process.env.NODE_ENV !== 'production') {
-        const queryEngine = files.find(file => file.includes('query-engine'));
-        const schemaEngine = files.find(file => file.includes('schema-engine'));
-        
-        if (queryEngine) {
-          process.env.PRISMA_QUERY_ENGINE_BINARY = path.join(enginePath, queryEngine);
-        }
-        if (schemaEngine) {
-          process.env.PRISMA_SCHEMA_ENGINE_BINARY = path.join(enginePath, schemaEngine);
-        }
-      }
-    } catch (err) {
-      console.error('エンジンディレクトリの読み取りエラー:', err);
-    }
-  } else {
-    console.log('Prismaエンジンディレクトリが見つかりません。デフォルトのパスを使用します。');
-    // デフォルトのパスを設定
-    process.env.PRISMA_QUERY_ENGINE_BINARY = '/opt/render/project/src/node_modules/@prisma/engines/query-engine-debian-openssl-3.0.x';
-    process.env.PRISMA_SCHEMA_ENGINE_BINARY = '/opt/render/project/src/node_modules/@prisma/engines/schema-engine-debian-openssl-3.0.x';
-  }
-  
   // スキーマの場所を明示的に指定
   const { PrismaClient } = require('@prisma/client');
   prisma = new PrismaClient({
