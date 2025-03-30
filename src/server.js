@@ -71,8 +71,28 @@ try {
   console.log('DATABASE_URL:', process.env.DATABASE_URL ? '設定されています' : '設定されていません');
   console.log('プロセスの作業ディレクトリ:', process.cwd());
   
+  // Prismaクライアントをインポートする前に、prisma generateを実行
+  const { execSync } = require('child_process');
+  console.log('prisma generateを実行します...');
+  try {
+    execSync('npx prisma generate --schema=./prisma/schema.prisma', { 
+      stdio: 'inherit',
+      env: { ...process.env, NODE_ENV: 'production' }
+    });
+    console.log('prisma generateが正常に完了しました');
+  } catch (genError) {
+    console.error('prisma generateの実行中にエラーが発生しました:', genError);
+  }
+  
   // Prismaクエリエンジンの場所を環境変数で指定
   console.log('Prismaクエリエンジンの設定を行います...');
+  
+  // Renderの環境では明示的にクエリエンジンのパスを設定
+  if (process.env.NODE_ENV === 'production') {
+    process.env.PRISMA_QUERY_ENGINE_BINARY = '/opt/render/project/src/node_modules/@prisma/engines/query-engine-debian-openssl-3.0.x';
+    process.env.PRISMA_SCHEMA_ENGINE_BINARY = '/opt/render/project/src/node_modules/@prisma/engines/schema-engine-debian-openssl-3.0.x';
+    console.log('Renderの環境用にPrismaエンジンパスを設定しました');
+  }
   
   // クエリエンジンのパスを確認
   const enginePath = path.join(process.cwd(), 'node_modules', '@prisma', 'engines');
@@ -83,18 +103,17 @@ try {
       const files = fs.readdirSync(enginePath);
       console.log('Prismaエンジンディレクトリの内容:', files);
       
-      // debian-openssl-3.0.x用のクエリエンジンを探す
-      const queryEngine = files.find(file => file.includes('query-engine-debian-openssl-3.0.x'));
-      const schemaEngine = files.find(file => file.includes('schema-engine-debian-openssl-3.0.x'));
-      
-      if (queryEngine) {
-        process.env.PRISMA_QUERY_ENGINE_BINARY = path.join(enginePath, queryEngine);
-        console.log('クエリエンジンを設定:', process.env.PRISMA_QUERY_ENGINE_BINARY);
-      }
-      
-      if (schemaEngine) {
-        process.env.PRISMA_SCHEMA_ENGINE_BINARY = path.join(enginePath, schemaEngine);
-        console.log('スキーマエンジンを設定:', process.env.PRISMA_SCHEMA_ENGINE_BINARY);
+      // 環境に応じたクエリエンジンを探す（ローカル開発環境用）
+      if (process.env.NODE_ENV !== 'production') {
+        const queryEngine = files.find(file => file.includes('query-engine'));
+        const schemaEngine = files.find(file => file.includes('schema-engine'));
+        
+        if (queryEngine) {
+          process.env.PRISMA_QUERY_ENGINE_BINARY = path.join(enginePath, queryEngine);
+        }
+        if (schemaEngine) {
+          process.env.PRISMA_SCHEMA_ENGINE_BINARY = path.join(enginePath, schemaEngine);
+        }
       }
     } catch (err) {
       console.error('エンジンディレクトリの読み取りエラー:', err);
