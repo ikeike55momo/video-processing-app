@@ -5,6 +5,13 @@ const nextConfig = {
   images: {
     domains: ['storage.googleapis.com'],
   },
+  // キャッシュを無効化（開発用）
+  onDemandEntries: {
+    // サーバーサイドのページキャッシュの有効期間（ms）
+    maxInactiveAge: 10 * 1000,
+    // 同時にメモリにキャッシュするページの最大数
+    pagesBufferLength: 1,
+  },
   async headers() {
     return [
       {

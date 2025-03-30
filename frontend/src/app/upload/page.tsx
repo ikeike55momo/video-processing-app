@@ -125,6 +125,7 @@ export default function UploadPage() {
                     window.location.origin; // 同一オリジンのAPIを使用（プロキシ経由）
       
       console.log("使用するAPIエンドポイント:", apiUrl);
+      console.log("現在の時刻:", new Date().toISOString());
       
       // 最大3回まで再試行
       let response;
