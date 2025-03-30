@@ -62,8 +62,8 @@ let redisClient;
 function initRedisClient() {
     return __awaiter(this, void 0, void 0, function* () {
         let retryCount = 0;
-        const maxRetries = 3;
-        const retryDelay = 2000; // 2秒
+        const maxRetries = 5;
+        const retryDelay = 3000; // 3秒に増やす
         
         while (retryCount < maxRetries) {
             try {
@@ -80,11 +80,22 @@ function initRedisClient() {
                 console.log(`Node環境: ${process.env.NODE_ENV}`);
                 
                 // SSL接続の場合は証明書検証をスキップするオプションを追加
+                // タイムアウト設定を増やす
                 const options = {
                     url: url,
                     socket: {
                         tls: isSSL,
-                        rejectUnauthorized: false // 自己署名証明書を許可
+                        rejectUnauthorized: false, // 自己署名証明書を許可
+                        connectTimeout: 30000,     // 接続タイムアウトを30秒に設定
+                        timeout: 30000,            // 操作タイムアウトを30秒に設定
+                        keepAlive: 5000            // キープアライブを5秒ごとに設定
+                    },
+                    // リトライ戦略を設定
+                    retry: {
+                        retries: 3,
+                        factor: 2,
+                        minTimeout: 1000,
+                        maxTimeout: 15000
                     }
                 };
                 
@@ -94,6 +105,11 @@ function initRedisClient() {
                 // エラーイベントハンドラを追加
                 redisClient.on('error', (err) => {
                     console.error('Redisエラー発生:', err);
+                });
+                
+                // 再接続イベントハンドラを追加
+                redisClient.on('reconnecting', () => {
+                    console.log('Redisに再接続中...');
                 });
                 
                 console.log('Redisに接続中...');
