@@ -107,8 +107,15 @@ export default function CloudUploadPage() {
       } else {
         // 通常のアップロード
         setUploadStage("アップロード中...");
-        await uploadFileWithProgress(file, result.url);
-        fileUrl = result.fileUrl;
+        
+        // uploadUrlが存在するか確認
+        if (!result.uploadUrl) {
+          console.error("アップロードURLが取得できませんでした", result);
+          throw new Error("アップロードURLが取得できませんでした");
+        }
+        
+        await uploadFileWithProgress(file, result.uploadUrl);
+        fileUrl = result.fileUrl || result.uploadUrl;
       }
 
       // 処理開始リクエスト
