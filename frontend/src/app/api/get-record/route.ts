@@ -32,7 +32,7 @@ export async function POST(request: NextRequest) {
 
     // ファイルキーからレコードを検索
     const record = await prisma.record.findFirst({
-      where: { file_key: fileKey }
+      where: { file_url: fileKey }
     });
 
     if (!record) {
