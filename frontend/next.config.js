@@ -57,11 +57,24 @@ const nextConfig = {
     console.log('API URL for rewrites:', apiUrl);
     
     return [
-      // Next Authのエンドポイントはリダイレクトしない
+      // 特定のAPIエンドポイントのみをバックエンドに転送
       {
-        source: '/api/(?!auth/).*',
-        destination: `${apiUrl}/api/:path*`,
+        source: '/api/get-record',
+        destination: `${apiUrl}/api/get-record`,
       },
+      {
+        source: '/api/get-upload-url',
+        destination: `${apiUrl}/api/get-upload-url`,
+      },
+      {
+        source: '/api/process',
+        destination: `${apiUrl}/api/process`,
+      },
+      {
+        source: '/api/upload-url',
+        destination: `${apiUrl}/api/upload-url`,
+      },
+      // 他のAPIエンドポイントも必要に応じて追加
     ];
   },
 }
