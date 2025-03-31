@@ -17,6 +17,31 @@ const nextConfig = {
     disableOptimizedLoading: true,
     optimizeCss: false,
   },
+  // Node.jsモジュールのポリフィル設定
+  webpack: (config, { isServer }) => {
+    if (!isServer) {
+      // クライアントサイドのビルド時にNode.js固有のモジュールをポリフィルする
+      config.resolve.fallback = {
+        fs: false,
+        path: false,
+        os: false,
+        crypto: require.resolve('crypto-browserify'),
+        stream: require.resolve('stream-browserify'),
+        buffer: require.resolve('buffer'),
+        util: require.resolve('util'),
+        process: require.resolve('process/browser'),
+      };
+      
+      // Buffer polyfill
+      config.plugins.push(
+        new config.webpack.ProvidePlugin({
+          Buffer: ['buffer', 'Buffer'],
+          process: 'process/browser',
+        })
+      );
+    }
+    return config;
+  },
   // バージョンを強制的に更新するためのランダム値
   generateBuildId: () => {
     return 'build-' + Date.now();

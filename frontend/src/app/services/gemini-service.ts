@@ -1,14 +1,18 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
-import * as fs from 'fs';
-import * as path from 'path';
-import * as os from 'os';
-import * as util from 'util';
-import * as stream from 'stream';
 import * as crypto from 'crypto';
 import axios from 'axios';
 import { S3Client, GetObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
-import { exec } from 'child_process';
+
+// ブラウザ環境用のpath代替関数
+const pathBasename = (filepath: string) => {
+  return filepath.split('/').pop() || filepath;
+};
+
+const pathExtname = (filepath: string) => {
+  const parts = filepath.split('.');
+  return parts.length > 1 ? `.${parts.pop()}` : '';
+};
 
 /**
  * Gemini AIサービスクラス
@@ -17,7 +21,6 @@ export class GeminiService {
   private genAI: GoogleGenerativeAI;
   private model: string;
   private s3Client: any;
-  private pipeline = util.promisify(stream.pipeline);
 
   constructor() {
     // APIキーの取得
@@ -78,10 +81,10 @@ export class GeminiService {
    * @returns 文字起こし結果
    */
   async transcribeAudio(fileUrl: string): Promise<string> {
+    console.log(`文字起こし処理を開始: ${fileUrl}`);
+    
     try {
-      console.log(`文字起こし処理を開始: ${fileUrl}`);
-      
-      // ファイルURLからバケット名とキーを抽出
+      // URLからバケット名とキーを抽出
       let bucketName: string;
       let key: string;
       
@@ -103,49 +106,46 @@ export class GeminiService {
         // 公開URLの場合は直接ダウンロード
         try {
           // 一時ディレクトリを作成
-          const tempDir = path.join(os.tmpdir(), 'video-processing-' + crypto.randomBytes(6).toString('hex'));
-          fs.mkdirSync(tempDir, { recursive: true });
-          
-          // ファイルをダウンロード
-          const localFilePath = path.join(tempDir, path.basename(key));
+          const tempDir = URL.createObjectURL(new Blob());
+          const localFilePath = `${tempDir}/${pathBasename(key)}`;
           console.log(`公開URLからファイルをダウンロード中: ${localFilePath}`);
           
           const response = await axios({
             method: 'get',
             url: fileUrl,
-            responseType: 'stream'
+            responseType: 'blob'
           });
           
-          await this.pipeline(
-            response.data,
-            fs.createWriteStream(localFilePath)
-          );
+          const file = new File([response.data], pathBasename(key), { type: response.data.type });
+          const objectUrl = URL.createObjectURL(file);
+          const fileObject = await fetch(objectUrl).then(response => response.blob());
+          const fileBuffer = await fileObject.arrayBuffer();
+          const fileArray = new Uint8Array(fileBuffer);
           
           console.log(`公開URLからのダウンロード完了: ${localFilePath}`);
           
           // ファイルサイズを確認
-          const stats = fs.statSync(localFilePath);
-          const fileSizeInMB = stats.size / (1024 * 1024);
+          const fileSizeInMB = fileArray.length / (1024 * 1024);
           console.log(`ファイルサイズ: ${fileSizeInMB.toFixed(2)} MB`);
           
           // ファイル拡張子を確認
-          const fileExt = path.extname(localFilePath).toLowerCase();
+          const fileExt = pathExtname(localFilePath).toLowerCase();
           console.log(`ファイル拡張子: ${fileExt}`);
           
           // 大きなファイルの場合は分割処理
           if (fileSizeInMB > 50) {
             console.log(`ファイルサイズが大きいため（${fileSizeInMB.toFixed(2)} MB）、分割処理を行います`);
-            return await this.processLargeFile(localFilePath, fileExt);
+            return await this.processLargeFile(fileArray, fileExt);
           }
           
           // ファイルの種類に応じた処理
-          let audioData: Buffer;
+          let audioData: Uint8Array;
           let mimeType: string;
           
           if (['.mp3', '.wav', '.ogg'].includes(fileExt)) {
             // 音声ファイルの場合はそのまま処理
             console.log('音声ファイルを直接処理します');
-            audioData = fs.readFileSync(localFilePath);
+            audioData = fileArray;
             
             // MIMEタイプを設定
             if (fileExt === '.mp3') {
@@ -161,29 +161,22 @@ export class GeminiService {
             
             // ファイルの先頭10MBを読み込む（ヘッダー部分を避けるため）
             const AUDIO_CHUNK_SIZE = 10 * 1024 * 1024; // 10MB
-            const fileSize = stats.size;
+            const fileSize = fileArray.length;
             const readSize = Math.min(AUDIO_CHUNK_SIZE, fileSize);
             
             // ファイルの先頭部分を読み込む
-            audioData = Buffer.alloc(readSize);
-            const fd = fs.openSync(localFilePath, 'r');
-            fs.readSync(fd, audioData, 0, readSize, 0);
-            fs.closeSync(fd);
+            audioData = fileArray.slice(0, readSize);
             
             // 音声ファイルとして扱うためのMIMEタイプを設定
             mimeType = 'audio/mpeg'; // mp3として扱う
           }
           
           // Base64エンコード
-          const audioBase64 = audioData.toString('base64');
+          const audioBase64 = this.arrayBufferToBase64(audioData);
           console.log(`音声データをBase64エンコードしました (${audioBase64.length} 文字)`);
           
           // 文字起こし処理
           const transcript = await this.processAudioWithMimeType(audioBase64, mimeType);
-          
-          // 一時ファイルを削除
-          fs.unlinkSync(localFilePath);
-          fs.rmdirSync(tempDir, { recursive: true });
           
           console.log('文字起こし完了');
           
@@ -234,11 +227,8 @@ export class GeminiService {
       console.log(`R2からファイルを取得: バケット=${bucketName}, キー=${key}`);
       
       // 一時ディレクトリを作成
-      const tempDir = path.join(os.tmpdir(), 'video-processing-' + crypto.randomBytes(6).toString('hex'));
-      fs.mkdirSync(tempDir, { recursive: true });
-      
-      // ファイルをダウンロード
-      const localFilePath = path.join(tempDir, path.basename(key));
+      const tempDir = URL.createObjectURL(new Blob());
+      const localFilePath = `${tempDir}/${pathBasename(key)}`;
       console.log(`ファイルをダウンロード中: ${localFilePath} (バケット: ${bucketName}, キー: ${key})`);
       
       // 署名付きURLを生成
@@ -253,39 +243,39 @@ export class GeminiService {
       const response = await axios({
         method: 'get',
         url: signedUrl,
-        responseType: 'stream'
+        responseType: 'blob'
       });
       
-      await this.pipeline(
-        response.data,
-        fs.createWriteStream(localFilePath)
-      );
+      const file = new File([response.data], pathBasename(key), { type: response.data.type });
+      const objectUrl = URL.createObjectURL(file);
+      const fileObject = await fetch(objectUrl).then(response => response.blob());
+      const fileBuffer = await fileObject.arrayBuffer();
+      const fileArray = new Uint8Array(fileBuffer);
       
       console.log(`ファイルのダウンロード完了: ${localFilePath}`);
       
       // ファイルサイズを確認
-      const stats = fs.statSync(localFilePath);
-      const fileSizeInMB = stats.size / (1024 * 1024);
+      const fileSizeInMB = fileArray.length / (1024 * 1024);
       console.log(`ファイルサイズ: ${fileSizeInMB.toFixed(2)} MB`);
       
       // ファイル拡張子を確認
-      const fileExt = path.extname(localFilePath).toLowerCase();
+      const fileExt = pathExtname(localFilePath).toLowerCase();
       console.log(`ファイル拡張子: ${fileExt}`);
       
       // 大きなファイルの場合は分割処理
       if (fileSizeInMB > 50) {
         console.log(`ファイルサイズが大きいため（${fileSizeInMB.toFixed(2)} MB）、分割処理を行います`);
-        return await this.processLargeFile(localFilePath, fileExt);
+        return await this.processLargeFile(fileArray, fileExt);
       }
       
       // ファイルの種類に応じた処理
-      let audioData: Buffer;
+      let audioData: Uint8Array;
       let mimeType: string;
       
       if (['.mp3', '.wav', '.ogg'].includes(fileExt)) {
         // 音声ファイルの場合はそのまま処理
         console.log('音声ファイルを直接処理します');
-        audioData = fs.readFileSync(localFilePath);
+        audioData = fileArray;
         
         // MIMEタイプを設定
         if (fileExt === '.mp3') {
@@ -301,29 +291,22 @@ export class GeminiService {
         
         // ファイルの先頭10MBを読み込む（ヘッダー部分を避けるため）
         const AUDIO_CHUNK_SIZE = 10 * 1024 * 1024; // 10MB
-        const fileSize = stats.size;
+        const fileSize = fileArray.length;
         const readSize = Math.min(AUDIO_CHUNK_SIZE, fileSize);
         
         // ファイルの先頭部分を読み込む
-        audioData = Buffer.alloc(readSize);
-        const fd = fs.openSync(localFilePath, 'r');
-        fs.readSync(fd, audioData, 0, readSize, 0);
-        fs.closeSync(fd);
+        audioData = fileArray.slice(0, readSize);
         
         // 音声ファイルとして扱うためのMIMEタイプを設定
         mimeType = 'audio/mpeg'; // mp3として扱う
       }
       
       // Base64エンコード
-      const audioBase64 = audioData.toString('base64');
+      const audioBase64 = this.arrayBufferToBase64(audioData);
       console.log(`音声データをBase64エンコードしました (${audioBase64.length} 文字)`);
       
       // 文字起こし処理
       const transcript = await this.processAudioWithMimeType(audioBase64, mimeType);
-      
-      // 一時ファイルを削除
-      fs.unlinkSync(localFilePath);
-      fs.rmdirSync(tempDir, { recursive: true });
       
       console.log('文字起こし完了');
       
@@ -336,24 +319,23 @@ export class GeminiService {
   
   /**
    * 大きなファイルを分割して処理
-   * @param filePath ファイルパス
+   * @param fileArray ファイルデータ
    * @param fileExt ファイル拡張子
    * @returns 文字起こし結果
    */
-  private async processLargeFile(filePath: string, fileExt: string): Promise<string> {
-    console.log(`大きなファイルの分割処理を開始: ${filePath}`);
+  private async processLargeFile(fileArray: Uint8Array, fileExt: string): Promise<string> {
+    console.log(`大きなファイルの分割処理を開始: ${fileArray.length} bytes`);
     
     try {
       // メモリ使用量を表示
-      console.log(`分割処理開始時のメモリ使用量: ${Math.round(process.memoryUsage().heapUsed / 1024 / 1024)} MB`);
+      console.log(`分割処理開始時のメモリ使用量: ${Math.round(window.performance.now() / 1024 / 1024)} MB`);
       
       // ファイルサイズを確認
-      const fileSize = fs.statSync(filePath).size;
-      const fileSizeInMB = fileSize / (1024 * 1024);
+      const fileSizeInMB = fileArray.length / (1024 * 1024);
       
       // チャンクサイズを計算（最大20MB）
       const MAX_CHUNK_SIZE = 20 * 1024 * 1024; // 20MB
-      const numChunks = Math.ceil(fileSize / MAX_CHUNK_SIZE);
+      const numChunks = Math.ceil(fileArray.length / MAX_CHUNK_SIZE);
       console.log(`ファイルを${numChunks}個のチャンクに分割します（各チャンク最大20MB）`);
       
       let transcriptionResults: string[] = [];
@@ -377,17 +359,14 @@ export class GeminiService {
         
         // チャンクの開始位置と長さを計算
         const start = i * MAX_CHUNK_SIZE;
-        const end = Math.min((i + 1) * MAX_CHUNK_SIZE, fileSize);
+        const end = Math.min((i + 1) * MAX_CHUNK_SIZE, fileArray.length);
         const chunkSize = end - start;
         
         // ファイルの一部を読み込む
-        const chunkBuffer = Buffer.alloc(chunkSize);
-        const fd = fs.openSync(filePath, 'r');
-        fs.readSync(fd, chunkBuffer, 0, chunkSize, start);
-        fs.closeSync(fd);
+        const chunkBuffer = fileArray.slice(start, end);
         
         // Base64エンコード
-        const base64Chunk = chunkBuffer.toString('base64');
+        const base64Chunk = this.arrayBufferToBase64(chunkBuffer);
         console.log(`チャンク ${i + 1} をBase64エンコードしました (${base64Chunk.length} 文字)`);
         
         // Geminiモデルの取得
@@ -399,8 +378,8 @@ export class GeminiService {
 
         ## 文字起こしの指示
         1. 全ての言葉を省略せず、一語一句正確に文字起こししてください
-        2. 専門用語や固有名詞は特に注意して正確に書き起こしてください
-        3. 話者を識別し、適切にラベル付けしてください（「話者A：」「話者B：」など）
+        2. 専門用語や固有名詞のスペルや表記を統一し、正確にしてください
+        3. 話者の区別を明確にし、一貫性のある形式で表示してください（例：「話者A：」「話者B：」など）
         4. 聞き取れない部分は[不明]と記録してください
         5. 音声の特徴（笑い、ため息、強調など）も[笑い]のように記録してください
         6. 言い間違いや言い直しも忠実に書き起こしてください
@@ -445,7 +424,7 @@ export class GeminiService {
         }
         
         // メモリ使用量を表示
-        console.log(`チャンク ${i + 1} 処理後のメモリ使用量: ${Math.round(process.memoryUsage().heapUsed / 1024 / 1024)} MB`);
+        console.log(`チャンク ${i + 1} 処理後のメモリ使用量: ${Math.round(window.performance.now() / 1024 / 1024)} MB`);
         
         // 処理間隔を空ける（APIレート制限対策）
         if (i < numChunks - 1) {
@@ -673,5 +652,16 @@ ${text}
     return promptText;
   }
 
-  // ... (以下のコードは変更なし)
+  /**
+   * Uint8ArrayをBase64に変換
+   */
+  private arrayBufferToBase64(buffer: Uint8Array): string {
+    let binary = '';
+    const bytes = new Uint8Array(buffer);
+    const len = bytes.byteLength;
+    for (let i = 0; i < len; i++) {
+      binary += String.fromCharCode(bytes[i]);
+    }
+    return btoa(binary);
+  }
 }
