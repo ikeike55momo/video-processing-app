@@ -189,7 +189,14 @@ async function processJob() {
           if (job.fileKey) {
             // R2からファイルを取得
             console.log(`Downloading file with key: ${job.fileKey}`);
-            fileData = await (0, storage_1.getFileContents)(job.fileKey);
+            try {
+              console.log(`R2からファイルのダウンロードを開始します...`);
+              fileData = await (0, storage_1.getFileContents)(job.fileKey);
+              console.log(`R2からファイルのダウンロードが完了しました。サイズ: ${fileData.length} バイト`);
+            } catch (downloadError) {
+              console.error(`R2からのファイルダウンロードに失敗しました:`, downloadError);
+              throw downloadError;
+            }
           } else if (job.fileUrl) {
             // URLからファイルを取得
             console.log(`Downloading file from URL: ${job.fileUrl}`);
@@ -198,113 +205,153 @@ async function processJob() {
             fs.mkdirSync(tempDir, { recursive: true });
             
             // ファイルをダウンロード
-            tempFilePath = await downloadFile(job.fileUrl, tempDir);
-            fileData = fs.readFileSync(tempFilePath);
+            try {
+              console.log(`URLからファイルのダウンロードを開始します...`);
+              tempFilePath = await downloadFile(job.fileUrl, tempDir);
+              const stats = fs.statSync(tempFilePath);
+              console.log(`URLからファイルのダウンロードが完了しました。サイズ: ${stats.size} バイト, パス: ${tempFilePath}`);
+              fileData = fs.readFileSync(tempFilePath);
+            } catch (downloadError) {
+              console.error(`URLからのファイルダウンロードに失敗しました:`, downloadError);
+              throw downloadError;
+            }
           } else {
             throw new Error('Neither fileKey nor fileUrl provided in job');
           }
           
           // 一時ファイルの作成
           if (!tempFilePath) {
-            tempDir = tempDir || os.tmpdir();
-            tempFilePath = path.join(tempDir, `audio-${Date.now()}.mp3`);
-            fs.writeFileSync(tempFilePath, fileData);
+            try {
+              console.log(`一時ファイルの作成を開始します...`);
+              tempDir = tempDir || os.tmpdir();
+              tempFilePath = path.join(tempDir, `audio-${Date.now()}.mp3`);
+              fs.writeFileSync(tempFilePath, fileData);
+              const stats = fs.statSync(tempFilePath);
+              console.log(`一時ファイルの作成が完了しました。サイズ: ${stats.size} バイト, パス: ${tempFilePath}`);
+            } catch (tempFileError) {
+              console.error(`一時ファイルの作成に失敗しました:`, tempFileError);
+              throw tempFileError;
+            }
           }
           
-          console.log(`Temporary file created: ${tempFilePath}`);
-          
-          // 文字起こし処理
-          const fullTranscript = await transcribeAudio(tempFilePath);
-          console.log(`Transcription completed for job ${job.id}`);
-          
-          // 文字起こし完了を記録
-          await prisma.record.update({
-            where: { id: job.recordId },
-            data: {
-              transcript_text: fullTranscript,
-              status: 'PROCESSING',
-              processing_step: 'TIMESTAMPS'
-            }
-          });
-          
-          // タイムスタンプ抽出処理
-          const timestampsData = await extractTimestamps(fullTranscript, tempFilePath);
-          
-          // タイムスタンプをJSONとして保存
-          await prisma.record.update({
-            where: { id: job.recordId },
-            data: {
-              timestamps_json: JSON.stringify(timestampsData),
-              status: 'TRANSCRIBED',
-              processing_step: null
-            }
-          });
-          
-          // 要約キューにジョブを追加
-          await (0, queue_1.addJob)(SUMMARY_QUEUE, {
-            type: 'summary',
-            recordId: job.recordId,
-            fileKey: job.fileKey,
-            fileUrl: job.fileUrl
-          });
-          
-          // 一時ファイルの削除
+          // 音声ファイルの処理
           try {
-            fs.unlinkSync(tempFilePath);
-            if (tempDir && tempDir !== os.tmpdir()) {
-              fs.rmdirSync(tempDir, { recursive: true });
+            console.log(`音声ファイルの処理を開始します...`);
+            console.log(`メモリ使用量: ${process.memoryUsage().heapUsed / 1024 / 1024} MB`);
+            
+            // ファイルサイズを確認
+            const stats = fs.statSync(tempFilePath);
+            const fileSizeMB = stats.size / (1024 * 1024);
+            console.log(`ファイルサイズ: ${fileSizeMB.toFixed(2)} MB`);
+            
+            let transcriptionResult;
+            
+            // 大きなファイルの場合は分割処理
+            if (fileSizeMB > 10) {
+              console.log(`ファイルサイズが10MBを超えるため、分割処理を行います...`);
+              transcriptionResult = await processLargeFile(tempFilePath);
+            } else {
+              console.log(`通常の処理を行います...`);
+              transcriptionResult = await transcribeAudio(tempFilePath);
             }
-            console.log(`Temporary file deleted: ${tempFilePath}`);
-          } catch (err) {
-            console.error(`Failed to delete temporary file: ${tempFilePath}`, err);
-          }
-          
-          // ジョブを完了としてマーク
-          await (0, queue_1.completeJob)(QUEUE_NAME, job.id);
-          console.log(`Transcription job ${job.id} completed successfully`);
-        } catch (error) {
-          console.error('Error processing transcription job:', error);
-          
-          // 一時ファイルの削除（エラー時も）
-          if (tempFilePath) {
+            
+            console.log(`音声ファイルの処理が完了しました。結果の長さ: ${transcriptionResult.length} 文字`);
+            
+            // 文字起こし完了を記録
+            await prisma.record.update({
+              where: { id: job.recordId },
+              data: {
+                transcript_text: transcriptionResult,
+                status: 'PROCESSING',
+                processing_step: 'TIMESTAMPS'
+              }
+            });
+            
+            // タイムスタンプ抽出処理
+            const timestampsData = await extractTimestamps(transcriptionResult, tempFilePath);
+            
+            // タイムスタンプをJSONとして保存
+            await prisma.record.update({
+              where: { id: job.recordId },
+              data: {
+                timestamps_json: JSON.stringify(timestampsData),
+                status: 'TRANSCRIBED',
+                processing_step: null
+              }
+            });
+            
+            // 要約キューにジョブを追加
+            await (0, queue_1.addJob)(SUMMARY_QUEUE, {
+              type: 'summary',
+              recordId: job.recordId,
+              fileKey: job.fileKey,
+              fileUrl: job.fileUrl
+            });
+            
+            // 一時ファイルの削除
             try {
               fs.unlinkSync(tempFilePath);
               if (tempDir && tempDir !== os.tmpdir()) {
                 fs.rmdirSync(tempDir, { recursive: true });
               }
+              console.log(`Temporary file deleted: ${tempFilePath}`);
             } catch (err) {
               console.error(`Failed to delete temporary file: ${tempFilePath}`, err);
             }
-          }
-          
-          // ジョブIDがある場合のみリトライを実行
-          if (job?.id) {
-            await (0, queue_1.failJob)(QUEUE_NAME, job.id);
-            // エラーステータスを記録
-            try {
-              await prisma.record.update({
-                where: { id: job.recordId },
-                data: {
-                  status: 'ERROR',
-                  error: error instanceof Error ? error.message : String(error),
-                  processing_step: null
+            
+            // ジョブを完了としてマーク
+            await (0, queue_1.completeJob)(QUEUE_NAME, job.id);
+            console.log(`Transcription job ${job.id} completed successfully`);
+          } catch (error) {
+            console.error('Error processing transcription job:', error);
+            
+            // 一時ファイルの削除（エラー時も）
+            if (tempFilePath) {
+              try {
+                fs.unlinkSync(tempFilePath);
+                if (tempDir && tempDir !== os.tmpdir()) {
+                  fs.rmdirSync(tempDir, { recursive: true });
                 }
-              });
-            } catch (dbError) {
-              if (dbError.code === 'P2025') {
-                console.warn(`Record ${job.recordId} not found in database when updating error status.`);
-              } else {
-                console.error('Failed to update record status:', dbError);
+              } catch (err) {
+                console.error(`Failed to delete temporary file: ${tempFilePath}`, err);
               }
             }
+            
+            // ジョブIDがある場合のみリトライを実行
+            if (job?.id) {
+              await (0, queue_1.failJob)(QUEUE_NAME, job.id);
+              // エラーステータスを記録
+              try {
+                await prisma.record.update({
+                  where: { id: job.recordId },
+                  data: {
+                    status: 'ERROR',
+                    error: error instanceof Error ? error.message : String(error),
+                    processing_step: null
+                  }
+                });
+              } catch (dbError) {
+                if (dbError.code === 'P2025') {
+                  console.warn(`Record ${job.recordId} not found in database when updating error status.`);
+                } else {
+                  console.error('Failed to update record status:', dbError);
+                }
+              }
+            }
+            
+            throw error;
           }
-          
-          throw error;
+        } catch (error) {
+          console.error('Fatal error in processJob:', error);
+          // エラーをスローせずに処理を続行（startWorkerでキャッチされる）
         }
-      } catch (error) {
-        console.error('Fatal error in processJob:', error);
-        // エラーをスローせずに処理を続行（startWorkerでキャッチされる）
-      }
+    }
+    catch (error) {
+        console.error('ジョブ処理中にエラーが発生しました:', error);
+        // ジョブエラーでは終了せず、次のジョブを処理
+    }
+    // 少し待機してからポーリング
+    await new Promise(resolve => setTimeout(resolve, 1000));
 }
 
 /**
