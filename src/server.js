@@ -463,7 +463,50 @@ app.get('/api/records/:id', (req, res) => __awaiter(void 0, void 0, void 0, func
         });
     }
 }));
-// すべてのレコード取得エンドポイント
+
+// ファイルキーからレコードを取得するエンドポイント
+app.post('/api/get-record', (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    try {
+        const { fileKey } = req.body;
+        
+        if (!fileKey) {
+            return res.status(400).json({
+                error: 'Missing required field',
+                details: 'fileKey is required'
+            });
+        }
+        
+        console.log(`ファイルキー ${fileKey} からレコードを検索中...`);
+        
+        // ファイルキーからレコードを検索
+        const record = yield prisma.record.findFirst({
+            where: { file_key: fileKey }
+        });
+        
+        if (!record) {
+            return res.status(404).json({
+                error: 'Record not found',
+                details: `No record found with file key: ${fileKey}`
+            });
+        }
+        
+        console.log(`レコードが見つかりました: ${record.id}`);
+        
+        res.status(200).json({
+            recordId: record.id,
+            status: record.status
+        });
+    }
+    catch (error) {
+        console.error('Error retrieving record by file key:', error);
+        res.status(500).json({
+            error: 'Error retrieving record',
+            details: error instanceof Error ? error.message : 'Unknown error'
+        });
+    }
+}));
+
+// レコード一覧取得エンドポイント
 app.get('/api/records', (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
         // クエリパラメータからページネーション情報を取得
