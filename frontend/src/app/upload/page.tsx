@@ -214,20 +214,22 @@ export default function UploadPage() {
       console.log("処理開始リクエストの内容:", {
         recordId: result.recordId
       });
-      const processResponse = await fetch(`${apiUrl}/api/process`, {
+      
+      // rewritesを使用するため、相対パスでAPIにアクセス
+      const processResponse = await fetch(`/api/process`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
-        mode: "cors", // CORSモードを明示的に指定
-        credentials: "include", // 認証情報を含める
         body: JSON.stringify({
           recordId: result.recordId // recordIdのみを送信
         }),
       });
 
       if (!processResponse.ok) {
-        throw new Error("処理の開始に失敗しました");
+        const errorText = await processResponse.text();
+        console.error("処理開始エラー:", processResponse.status, errorText);
+        throw new Error(`処理の開始に失敗しました: ${processResponse.status} ${errorText}`);
       }
 
       const { recordId, jobId } = await processResponse.json();
