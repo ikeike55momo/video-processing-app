@@ -85,6 +85,7 @@ const authOptions: NextAuthOptions = {
   secret: process.env.NEXTAUTH_SECRET,
   pages: {
     signIn: "/login",
+    error: "/login",
   },
   callbacks: {
     async jwt({ token, user }) {
@@ -101,6 +102,11 @@ const authOptions: NextAuthOptions = {
       return session;
     },
   },
+  events: {
+    async signIn({ user }) {
+      console.log(`ユーザーがログインしました: ${user.email}`);
+    }
+  }
 };
 
 export { authOptions };
