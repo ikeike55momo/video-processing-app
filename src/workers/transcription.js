@@ -257,18 +257,26 @@ async function processJob() {
             
             console.log(`音声ファイルの処理が完了しました。結果の長さ: ${transcriptionResult.length} 文字`);
             
+            // 文字起こし結果が配列の場合は文字列に変換
+            let transcriptText = transcriptionResult;
+            if (Array.isArray(transcriptionResult)) {
+              console.log(`文字起こし結果が配列形式です。配列の長さ: ${transcriptionResult.length}`);
+              transcriptText = transcriptionResult.join(' ');
+              console.log(`配列を文字列に変換しました。文字列の長さ: ${transcriptText.length}`);
+            }
+            
             // 文字起こし完了を記録
             await prisma.record.update({
               where: { id: job.recordId },
               data: {
-                transcript_text: transcriptionResult,
+                transcript_text: transcriptText,
                 status: 'PROCESSING',
                 processing_step: 'TIMESTAMPS'
               }
             });
             
             // タイムスタンプ抽出処理
-            const timestampsData = await extractTimestamps(transcriptionResult, tempFilePath);
+            const timestampsData = await extractTimestamps(transcriptText, tempFilePath);
             
             // タイムスタンプをJSONとして保存
             await prisma.record.update({
