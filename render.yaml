@@ -56,14 +56,14 @@ services:
         value: production
       - key: PORT
         value: "3000"
-      - key: DATABASE_URL
-        value: "postgresql://wado_wado_user:U5YqVgZ8xL4OaqGGybLqdJOs4ZwSIWqG@dpg-cve55ldrie7s73e158c0-a/wado_wado"
-      - key: DIRECT_URL
-        value: "postgresql://wado_wado_user:U5YqVgZ8xL4OaqGGybLqdJOs4ZwSIWqG@dpg-cve55ldrie7s73e158c0-a/wado_wado"
       - key: NEXTAUTH_URL
         value: "https://video-processing-frontend.onrender.com"
       - key: NEXTAUTH_SECRET
         sync: false
+      - key: DATABASE_URL
+        value: "postgresql://wado_wado_user:U5YqVgZ8xL4OaqGGybLqdJOs4ZwSIWqG@dpg-cve55ldrie7s73e158c0-a/wado_wado"
+      - key: DIRECT_URL
+        value: "postgresql://wado_wado_user:U5YqVgZ8xL4OaqGGybLqdJOs4ZwSIWqG@dpg-cve55ldrie7s73e158c0-a/wado_wado"
       - key: NEXT_PUBLIC_API_URL
         value: "https://video-processing-api.onrender.com"
       - key: R2_ENDPOINT
