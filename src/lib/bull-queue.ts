@@ -1,5 +1,4 @@
 import { Queue, Worker, Job, QueueEvents } from 'bullmq';
-import { QueueScheduler } from 'bullmq';
 import IORedis from 'ioredis';
 import * as crypto from 'crypto';
 import { EventEmitter } from 'events';
@@ -59,7 +58,7 @@ const defaultQueueOptions = {
 export class QueueManager {
   private queues: Map<string, Queue> = new Map();
   private workers: Map<string, Worker> = new Map();
-  private schedulers: Map<string, QueueScheduler> = new Map();
+  private schedulers: Map<string, any> = new Map();
   private queueEvents: Map<string, QueueEvents> = new Map();
 
   /**
@@ -100,8 +99,8 @@ export class QueueManager {
     // プロセッサが指定されている場合はワーカーを作成
     if (processor) {
       // スケジューラを作成（タイムアウトジョブの管理用）
-      const scheduler = new QueueScheduler(queueName, { connection });
-      this.schedulers.set(queueName, scheduler);
+      // const scheduler = new QueueScheduler(queueName, { connection });
+      // this.schedulers.set(queueName, scheduler);
 
       // ワーカーを作成
       const worker = new Worker(queueName, processor, {
