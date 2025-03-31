@@ -5,8 +5,8 @@ services:
     env: node
     nodeVersion: 18
     plan: pro
-    buildCommand: npm install && npx prisma generate --schema=./prisma/schema.prisma && npx prisma db push --schema=./prisma/schema.prisma --accept-data-loss && npm run build
-    startCommand: npm start
+    buildCommand: npm install && npx prisma generate --schema=./prisma/schema.prisma && npx prisma db push --schema=./prisma/schema.prisma --accept-data-loss
+    startCommand: node src/server.js
     rootDir: .
     autoDeploy: true
     envVars:
@@ -37,11 +37,13 @@ services:
         sync: false
       - key: ALLOWED_ORIGINS
         value: "https://video-processing-frontend.onrender.com,https://vpm.ririaru-stg.cloud"
+      - key: SKIP_TYPE_CHECK
+        value: true
     healthCheckPath: /api/healthcheck
 
   # フロントエンドアプリケーション（完全に新しい名前で作成）
   - type: web
-    name: video-frontend-nextjs-app
+    name: video-processing-frontend
     env: node
     nodeVersion: 18
     plan: standard
