@@ -5,47 +5,7 @@ import { useRouter } from "next/navigation";
 import { useSession } from "next-auth/react";
 import { uploadMultipart } from "@/lib/storage";
 import JobProgressMonitor from "../components/JobProgressMonitor";
-
-// 環境変数の読み込み確認
-const checkR2Config = async () => {
-  try {
-    // フロントエンドの環境変数をチェック
-    const response = await fetch('/api/check-env', {
-      method: 'GET',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-    });
-
-    if (!response.ok) {
-      console.error('環境変数チェックAPIエラー:', response.status);
-      return { isConfigured: false, error: `APIエラー: ${response.status}` };
-    }
-
-    const config = await response.json();
-    console.log('環境変数チェック（クライアントサイド）:', config);
-    
-    // APIレスポンスにisConfiguredフラグが含まれている場合はそれを使用
-    if ('isConfigured' in config) {
-      return config;
-    }
-    
-    // そうでない場合は、必要な環境変数が設定されているか確認
-    const isConfigured = 
-      config.hasAccessKey && 
-      config.hasSecretKey && 
-      config.hasEndpoint && 
-      config.hasBucket;
-    
-    return { 
-      isConfigured, 
-      ...config 
-    };
-  } catch (error: any) {
-    console.error('環境変数チェックエラー:', error);
-    return { isConfigured: false, error: error.message };
-  }
-};
+import { ProcessingPipeline } from "../services/processing-pipeline";
 
 export default function UploadPage() {
   const { data: session, status } = useSession();
@@ -56,6 +16,11 @@ export default function UploadPage() {
   const [error, setError] = useState("");
   const [uploadStage, setUploadStage] = useState<string>("");
   const [jobId, setJobId] = useState<string | null>(null);
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [processingProgress, setProcessingProgress] = useState(0);
+  const [processingError, setProcessingError] = useState(false);
+  const [statusMessage, setStatusMessage] = useState("");
+  const [uploadError, setUploadError] = useState(false);
 
   // セッションチェック
   if (status === "loading") {
@@ -99,225 +64,112 @@ export default function UploadPage() {
     setFile(selectedFile);
   };
 
-  // アップロードハンドラー
-  const handleUpload = async () => {
-    if (!file) {
-      setError("ファイルを選択してください");
-      return;
-    }
-
+  // ファイルアップロード処理
+  const handleFileUpload = async (file: File) => {
     try {
-      // 環境変数が読み込まれているか確認
-      const r2Config = await checkR2Config();
-      if (!r2Config.isConfigured) {
-        setError("ストレージ設定が読み込まれていません。しばらく待ってから再試行してください。");
-        console.error("R2設定エラー:", r2Config);
-        return;
-      }
-
       setUploading(true);
       setUploadProgress(0);
-      setUploadStage("準備中...");
-
-      // バックエンドAPIのURLを設定
-      // 環境変数から読み込むか、デフォルト値を使用
-      const apiUrl = process.env.NEXT_PUBLIC_API_URL || 
-                    window.location.origin; // 同一オリジンのAPIを使用（プロキシ経由）
+      setStatusMessage('ファイルをアップロード中...');
       
-      console.log("使用するAPIエンドポイント:", apiUrl);
-      console.log("現在の時刻:", new Date().toISOString());
+      // ファイル名からファイルキーを生成
+      const timestamp = Date.now();
+      const randomString = Math.random().toString(36).substring(2, 10);
+      const fileKey = `${timestamp}-${randomString}-${file.name}`;
       
-      // 最大3回まで再試行
-      let response;
-      let retryCount = 0;
-      const maxRetries = 3;
+      console.log('ファイルアップロード開始:', file.name);
+      console.log('ファイルサイズ:', (file.size / (1024 * 1024)).toFixed(2), 'MB');
       
-      while (retryCount < maxRetries) {
-        try {
-          setUploadStage(`APIに接続中... (試行 ${retryCount + 1}/${maxRetries})`);
-          
-          // 同一オリジンのAPIエンドポイントを使用
-          response = await fetch(`/api/upload-url`, {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-            },
-            body: JSON.stringify({
-              fileName: file.name,
-              contentType: file.type,
-              fileSize: file.size, // ファイルサイズを送信
-            }),
-          });
-          
-          // 成功したらループを抜ける
-          if (response.ok) break;
-          
-          // エラーレスポンスの詳細を取得
-          const errorData = await response.text();
-          console.error(`APIエラー (${response.status}):`, errorData);
-          
-          // 再試行
-          retryCount++;
-          if (retryCount < maxRetries) {
-            setUploadStage(`再接続を試みています... (${retryCount}/${maxRetries})`);
-            await new Promise(resolve => setTimeout(resolve, 2000)); // 2秒待機
-          }
-        } catch (fetchError: unknown) {
-          console.error("フェッチエラー:", fetchError);
-          retryCount++;
-          if (retryCount < maxRetries) {
-            setUploadStage(`再接続を試みています... (${retryCount}/${maxRetries})`);
-            await new Promise(resolve => setTimeout(resolve, 2000)); // 2秒待機
-          } else {
-            throw new Error(`APIへの接続に失敗しました: ${fetchError instanceof Error ? fetchError.message : String(fetchError)}`);
-          }
-        }
-      }
-
-      if (!response || !response.ok) {
-        throw new Error(`署名付きURLの取得に失敗しました (ステータス: ${response?.status || 'unknown'})`);
-      }
-
-      const result = await response.json();
-      let fileUrl: string;
-
-      // アップロード方法の選択
-      if (result.isMultipart) {
-        // マルチパートアップロードの場合
-        setUploadStage("マルチパートアップロード準備中...");
-        console.log("マルチパートアップロードを開始します", result);
-        
-        // マルチパートアップロードの実行
-        const uploadResult = await uploadMultipart(file, result, (progress) => {
-          setUploadProgress(progress);
-          console.log(`マルチパートアップロード進捗: ${progress}%`);
-        });
-        
-        fileUrl = uploadResult.fileUrl;
-        console.log("マルチパートアップロード完了:", fileUrl);
-      } else {
-        // 通常のアップロード
-        setUploadStage("アップロード中...");
-        
-        // uploadUrlが存在するか確認
-        if (!result.uploadUrl) {
-          console.error("アップロードURLが取得できませんでした", result);
-          throw new Error("アップロードURLが取得できませんでした");
-        }
-        
-        await uploadFileWithProgress(file, result.uploadUrl);
-        fileUrl = result.fileUrl || result.uploadUrl;
-      }
-
-      // 処理開始リクエスト
-      setUploadStage("処理を開始中...");
-      console.log("処理開始リクエストの内容:", {
-        recordId: result.recordId
+      // R2へのアップロード用のURLを取得
+      const uploadUrlResponse = await fetch('/api/get-upload-url', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ fileName: file.name, fileKey }),
       });
       
-      // rewritesを使用するため、相対パスでAPIにアクセス
-      const processResponse = await fetch(`/api/process`, {
-        method: "POST",
+      if (!uploadUrlResponse.ok) {
+        throw new Error('アップロードURLの取得に失敗しました');
+      }
+      
+      const { uploadUrl, fileUrl } = await uploadUrlResponse.json();
+      console.log('アップロードURL取得成功:', uploadUrl);
+      console.log('ファイルURL:', fileUrl);
+      
+      // ファイルをR2にアップロード
+      const uploadResponse = await fetch(uploadUrl, {
+        method: 'PUT',
+        body: file,
         headers: {
-          "Content-Type": "application/json",
+          'Content-Type': file.type,
+        },
+      });
+      
+      if (!uploadResponse.ok) {
+        throw new Error('ファイルのアップロードに失敗しました');
+      }
+      
+      console.log('ファイルアップロード成功');
+      setUploadProgress(100);
+      setStatusMessage('ファイルのアップロードが完了しました。処理を開始します...');
+      
+      // データベースにレコードを作成
+      const recordResponse = await fetch('/api/records', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          recordId: result.recordId // recordIdのみを送信
+          title: file.name,
+          file_url: fileUrl,
+          file_key: fileKey,
+          file_size: file.size,
+          status: 'UPLOADED',
         }),
       });
-
-      if (!processResponse.ok) {
-        const errorText = await processResponse.text();
-        console.error("処理開始エラー:", processResponse.status, errorText);
-        throw new Error(`処理の開始に失敗しました: ${processResponse.status} ${errorText}`);
+      
+      if (!recordResponse.ok) {
+        throw new Error('レコードの作成に失敗しました');
       }
-
-      const { recordId, jobId } = await processResponse.json();
       
-      // ジョブIDを設定
-      setJobId(jobId);
-      setUploadStage("処理中...");
+      const record = await recordResponse.json();
+      console.log('レコード作成成功:', record);
       
-      // 結果ページへのリダイレクトは行わず、このページで進捗を表示する
-      // router.push(`/results?recordId=${recordId}`);
-    } catch (err) {
-      console.error("アップロードエラー:", err);
-      setError(
-        err instanceof Error
-          ? err.message
-          : "アップロード中にエラーが発生しました"
-      );
+      // 処理パイプラインを初期化
+      const pipeline = new ProcessingPipeline();
+      
+      // 処理状態を更新
       setUploading(false);
-    }
-  };
-
-  // 進捗表示付きアップロード（小さなファイル用）
-  const uploadFileWithProgress = (file: File, signedUrl: string) => {
-    return new Promise<void>((resolve, reject) => {
-      // signedUrlがundefinedの場合はエラーを返す
-      if (!signedUrl) {
-        console.error("署名付きURLが取得できませんでした");
-        reject(new Error("署名付きURLが取得できませんでした"));
-        return;
+      setIsProcessing(true);
+      setStatusMessage('文字起こし処理を開始します...');
+      
+      try {
+        // フロントエンドで直接処理を実行
+        console.log('フロントエンドで処理を開始します...');
+        
+        // 進捗状況の更新関数
+        const updateProgress = (stage: string, progress: number) => {
+          setStatusMessage(`${stage} (${progress.toFixed(0)}%)`);
+          setProcessingProgress(progress);
+        };
+        
+        // 処理パイプラインを実行
+        await pipeline.processVideo(record.id, updateProgress);
+        
+        // 処理完了後、結果ページに遷移
+        router.push(`/results?recordId=${record.id}`);
+      } catch (processingError) {
+        console.error('処理エラー:', processingError);
+        setStatusMessage(`処理中にエラーが発生しました: ${processingError instanceof Error ? processingError.message : '不明なエラー'}`);
+        setIsProcessing(false);
+        setProcessingError(true);
       }
-
-      const xhr = new XMLHttpRequest();
-
-      // タイムアウトを設定（4時間 = 14400000ミリ秒）
-      xhr.timeout = 14400000;
-
-      xhr.open("PUT", signedUrl, true);
-      
-      // Content-Typeヘッダーを設定
-      xhr.setRequestHeader("Content-Type", file.type);
-      
-      // CORSを有効にする
-      xhr.withCredentials = false;
-
-      // 進捗イベントのリスナー
-      xhr.upload.onprogress = (event) => {
-        if (event.lengthComputable) {
-          const progress = Math.round((event.loaded / event.total) * 100);
-          setUploadProgress(progress);
-          console.log(`アップロード進捗: ${progress}%`);
-        }
-      };
-
-      // 成功時のハンドラー
-      xhr.onload = () => {
-        if (xhr.status >= 200 && xhr.status < 300) {
-          console.log("アップロード成功:", xhr.status);
-          resolve();
-        } else {
-          console.error("アップロード失敗:", xhr.status, xhr.statusText, xhr.responseText);
-          reject(new Error(`アップロード失敗: ${xhr.status} ${xhr.statusText}`));
-        }
-      };
-
-      // エラーハンドラー
-      xhr.onerror = (e) => {
-        console.error("アップロードエラー:", e);
-        console.error("署名付きURL:", signedUrl);
-        console.error("ファイル情報:", { name: file.name, type: file.type, size: file.size });
-        reject(new Error("アップロード中にネットワークエラーが発生しました"));
-      };
-
-      // タイムアウトハンドラー
-      xhr.ontimeout = () => {
-        console.error("アップロードがタイムアウトしました");
-        reject(new Error("アップロードがタイムアウトしました"));
-      };
-
-      // アップロード中断ハンドラー
-      xhr.onabort = () => {
-        console.error("アップロードが中断されました");
-        reject(new Error("アップロードが中断されました"));
-      };
-
-      // ファイル送信
-      console.log("アップロード開始:", file.name, file.size, "URL:", signedUrl && signedUrl.length > 0 ? (signedUrl.substring(0, 100) + "...") : "URL not available");
-      xhr.send(file);
-    });
+    } catch (error) {
+      console.error('アップロードエラー:', error);
+      setStatusMessage(`エラーが発生しました: ${error instanceof Error ? error.message : '不明なエラー'}`);
+      setUploading(false);
+      setUploadError(true);
+    }
   };
 
   return (
@@ -349,13 +201,13 @@ export default function UploadPage() {
 
           <div className="mb-6">
             <div className="flex justify-between items-center mb-4">
-              <h2 className="text-xl font-semibold text-slate-800">動画処理</h2>
+              <h2 className="text-xl font-semibold text-slate-800">Vercel処理</h2>
               <div className="bg-yellow-100 text-yellow-800 text-xs font-medium px-2.5 py-0.5 rounded">
                 タイムアウト: 4時間
               </div>
             </div>
             <p className="text-slate-600 mb-4">
-              アップロードした動画の文字起こし、要約、記事生成を行います。処理時間が4時間を超えるとタイムアウトします。
+              Vercelのサーバーレス関数を使用して処理を行います。処理時間が4時間を超えるとタイムアウトします。
             </p>
           </div>
 
@@ -405,6 +257,21 @@ export default function UploadPage() {
             </div>
           )}
 
+          {isProcessing && (
+            <div className="mt-4 w-full">
+              <div className="text-center mb-2">{statusMessage}</div>
+              <div className="w-full bg-gray-200 rounded-full h-2.5">
+                <div
+                  className="bg-blue-600 h-2.5 rounded-full transition-all duration-300"
+                  style={{ width: `${processingProgress}%` }}
+                ></div>
+              </div>
+              <div className="text-center mt-2 text-sm text-gray-600">
+                処理中はページを閉じないでください。処理が完了すると自動的に結果ページに遷移します。
+              </div>
+            </div>
+          )}
+
           {jobId && (
             <div className="mb-6">
               <JobProgressMonitor 
@@ -429,7 +296,7 @@ export default function UploadPage() {
           )}
 
           <button
-            onClick={handleUpload}
+            onClick={() => file && handleFileUpload(file)}
             disabled={!file || uploading}
             className="w-full rounded-md bg-blue-600 px-4 py-2 text-white hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:bg-blue-300"
           >
