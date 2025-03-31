@@ -288,6 +288,11 @@ export class ProcessingPipeline {
 
       const fileUrl = record.file_url;
       
+      // ファイルURLが存在しない場合はエラー
+      if (!fileUrl) {
+        throw new Error(`ファイルURLが見つかりません。レコードID: ${recordId}`);
+      }
+      
       // ステップに応じて処理を実行
       switch (step) {
         case 1: // アップロードからやり直し（何もしない）
