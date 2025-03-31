@@ -53,12 +53,13 @@ const nextConfig = {
   },
   // APIリクエストをバックエンドに転送する設定
   async rewrites() {
-    const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'https://video-processing-app.onrender.com';
+    const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'https://video-processing-api.onrender.com';
     console.log('API URL for rewrites:', apiUrl);
     
     return [
+      // Next Authのエンドポイントはリダイレクトしない
       {
-        source: '/api/:path*',
+        source: '/api/(?!auth/).*',
         destination: `${apiUrl}/api/:path*`,
       },
     ];
