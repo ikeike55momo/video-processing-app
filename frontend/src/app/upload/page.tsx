@@ -5,7 +5,6 @@ import { useRouter } from "next/navigation";
 import { useSession } from "next-auth/react";
 import { uploadMultipart } from "@/lib/storage";
 import JobProgressMonitor from "../components/JobProgressMonitor";
-import { ProcessingPipeline } from "../services/processing-pipeline";
 
 export default function UploadPage() {
   const { data: session, status } = useSession();
@@ -65,7 +64,12 @@ export default function UploadPage() {
   };
 
   // ファイルアップロード処理
-  const handleFileUpload = async (file: File) => {
+  const handleUpload = async () => {
+    if (!file) {
+      setError("ファイルを選択してください");
+      return;
+    }
+
     try {
       setUploading(true);
       setUploadProgress(0);
@@ -80,7 +84,7 @@ export default function UploadPage() {
       console.log('ファイルサイズ:', (file.size / (1024 * 1024)).toFixed(2), 'MB');
       
       // R2へのアップロード用のURLを取得
-      const uploadUrlResponse = await fetch('/api/get-upload-url', {
+      const uploadUrlResponse = await fetch('/api/upload-url', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -113,62 +117,57 @@ export default function UploadPage() {
       setUploadProgress(100);
       setStatusMessage('ファイルのアップロードが完了しました。処理を開始します...');
       
-      // データベースにレコードを作成
-      const recordResponse = await fetch('/api/records', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          title: file.name,
-          file_url: fileUrl,
-          file_key: fileKey,
-          file_size: file.size,
-          status: 'UPLOADED',
-        }),
-      });
-      
-      if (!recordResponse.ok) {
-        throw new Error('レコードの作成に失敗しました');
-      }
-      
-      const record = await recordResponse.json();
-      console.log('レコード作成成功:', record);
-      
-      // 処理パイプラインを初期化
-      const pipeline = new ProcessingPipeline();
-      
       // 処理状態を更新
       setUploading(false);
       setIsProcessing(true);
       setStatusMessage('文字起こし処理を開始します...');
       
       try {
-        // フロントエンドで直接処理を実行
-        console.log('フロントエンドで処理を開始します...');
+        // APIを通じて処理を開始
+        console.log('APIを通じて処理を開始します...');
         
-        // 進捗状況の更新関数
-        const updateProgress = (stage: string, progress: number) => {
-          setStatusMessage(`${stage} (${progress.toFixed(0)}%)`);
-          setProcessingProgress(progress);
-        };
+        // /api/transcribeエンドポイントを呼び出して処理を開始
+        const processResponse = await fetch('/api/transcribe', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            fileKey: fileKey,
+            fileName: file.name,
+            fileUrl: fileUrl
+          }),
+        });
         
-        // 処理パイプラインを実行
-        await pipeline.processVideo(record.id, updateProgress);
+        if (!processResponse.ok) {
+          throw new Error('処理の開始に失敗しました');
+        }
         
-        // 処理完了後、結果ページに遷移
-        router.push(`/results?recordId=${record.id}`);
-      } catch (processingError) {
-        console.error('処理エラー:', processingError);
-        setStatusMessage(`処理中にエラーが発生しました: ${processingError instanceof Error ? processingError.message : '不明なエラー'}`);
-        setIsProcessing(false);
+        const processResult = await processResponse.json();
+        console.log('処理開始成功:', processResult);
+        
+        // ジョブIDを設定（あれば）
+        if (processResult.jobId) {
+          setJobId(processResult.jobId);
+        }
+        
+        // 処理の進捗を表示し、結果ページへのリダイレクトは行わない
+        setUploadStage("処理中...");
+      } catch (error) {
+        console.error('処理開始エラー:', error);
         setProcessingError(true);
+        setStatusMessage(`処理開始中にエラーが発生しました: ${error instanceof Error ? error.message : '不明なエラー'}`);
+        setIsProcessing(false);
       }
-    } catch (error) {
-      console.error('アップロードエラー:', error);
-      setStatusMessage(`エラーが発生しました: ${error instanceof Error ? error.message : '不明なエラー'}`);
-      setUploading(false);
+    } catch (err) {
+      console.error('アップロードエラー:', err);
       setUploadError(true);
+      setStatusMessage(
+        err instanceof Error
+          ? `アップロード中にエラーが発生しました: ${err.message}`
+          : 'アップロード中に不明なエラーが発生しました'
+      );
+      setUploading(false);
     }
   };
 
@@ -296,7 +295,7 @@ export default function UploadPage() {
           )}
 
           <button
-            onClick={() => file && handleFileUpload(file)}
+            onClick={handleUpload}
             disabled={!file || uploading}
             className="w-full rounded-md bg-blue-600 px-4 py-2 text-white hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:bg-blue-300"
           >

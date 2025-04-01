@@ -51,32 +51,6 @@ const nextConfig = {
       },
     ]
   },
-  // APIリクエストをバックエンドに転送する設定
-  async rewrites() {
-    const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'https://video-processing-api.onrender.com';
-    console.log('API URL for rewrites:', apiUrl);
-    
-    return [
-      // 特定のAPIエンドポイントのみをバックエンドに転送
-      {
-        source: '/api/get-record',
-        destination: `${apiUrl}/api/get-record`,
-      },
-      {
-        source: '/api/get-upload-url',
-        destination: `${apiUrl}/api/get-upload-url`,
-      },
-      {
-        source: '/api/process',
-        destination: `${apiUrl}/api/process`,
-      },
-      {
-        source: '/api/upload-url',
-        destination: `${apiUrl}/api/upload-url`,
-      },
-      // 他のAPIエンドポイントも必要に応じて追加
-    ];
-  },
 }
 
 module.exports = nextConfig
