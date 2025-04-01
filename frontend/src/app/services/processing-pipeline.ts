@@ -87,6 +87,11 @@ export class ProcessingPipeline {
         console.log(`[${recordId}] フォールバック: 従来のGemini文字起こしを試行します...`);
         
         try {
+          // fileUrlがnullでないことを確認
+          if (!fileUrl) {
+            throw new Error(`ファイルURLがnullです: recordId=${recordId}`);
+          }
+          
           transcript = await this.transcriptionService.transcribeFile(fileUrl);
           
           // 文字起こし結果をデータベースに保存
@@ -476,6 +481,11 @@ ${originalTranscript}
               console.log(`[${recordId}] フォールバック: 従来のGemini文字起こしを試行します...`);
               
               try {
+                // fileUrlがnullでないことを確認
+                if (!fileUrl) {
+                  throw new Error(`ファイルURLがnullです: recordId=${recordId}`);
+                }
+                
                 transcript = await this.transcriptionService.transcribeFile(fileUrl);
                 
                 // 文字起こし結果をデータベースに保存
