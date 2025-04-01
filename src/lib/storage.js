@@ -52,6 +52,17 @@ const s3_request_presigner_1 = require("@aws-sdk/s3-request-presigner");
 const fs = __importStar(require("fs"));
 const dotenv = __importStar(require("dotenv"));
 dotenv.config();
+
+// 環境変数のデバッグ出力
+console.log('R2環境変数チェック:', {
+    hasEndpoint: !!process.env.R2_ENDPOINT,
+    hasAccessKey: !!process.env.R2_ACCESS_KEY_ID,
+    hasSecretKey: !!process.env.R2_SECRET_ACCESS_KEY,
+    hasBucket: !!process.env.R2_BUCKET_NAME,
+    endpointValue: process.env.R2_ENDPOINT,
+    bucketValue: process.env.R2_BUCKET_NAME
+});
+
 const R2_ENDPOINT = process.env.R2_ENDPOINT;
 const R2_ACCESS_KEY_ID = process.env.R2_ACCESS_KEY_ID;
 const R2_SECRET_ACCESS_KEY = process.env.R2_SECRET_ACCESS_KEY;

@@ -10,6 +10,7 @@ generator client {
   previewFeatures = ["metrics"]
   // コネクションプールの設定
   engineType      = "binary"
+  binaryTargets   = ["native", "rhel-openssl-1.0.x", "debian-openssl-3.0.x"]
 }
 
 datasource db {
@@ -22,7 +23,7 @@ datasource db {
 
 model Record {
   id             String    @id @default(uuid())
-  file_url       String
+  file_url       String?
   transcript_text String?   @db.Text
   timestamps_json String?   @db.Text
   summary_text   String?   @db.Text

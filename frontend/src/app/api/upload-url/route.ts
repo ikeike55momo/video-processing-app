@@ -1,42 +1,43 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
-import { generateUploadUrl, generateAppropriateUploadUrl } from "@/lib/storage";
+
+// バックエンドAPIのURL
+const API_URL = "https://video-processing-api.onrender.com";
 
 export async function POST(request: NextRequest) {
   try {
-    // セッションの確認
-    const session = await getServerSession(authOptions);
-    if (!session) {
-      return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
-    }
-
     // リクエストボディの取得
-    const { fileName, contentType, fileSize } = await request.json();
+    const body = await request.json();
 
-    // 必須パラメータの確認
-    if (!fileName || !contentType) {
+    console.log("アップロードURLリクエスト:", body);
+    console.log("バックエンドAPI URL:", API_URL);
+
+    // バックエンドAPIにリクエストを転送
+    const backendResponse = await fetch(`${API_URL}/api/upload-url`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(body),
+    });
+
+    // バックエンドからのレスポンスを取得
+    const data = await backendResponse.json();
+    console.log("バックエンドAPIレスポンス:", data);
+
+    // レスポンスコードを保持してクライアントに返す
+    if (!backendResponse.ok) {
+      console.error("バックエンドAPIエラー:", data);
       return NextResponse.json(
-        { error: "fileName と contentType は必須です" },
-        { status: 400 }
+        { error: data.error || "バックエンドAPIでエラーが発生しました" },
+        { status: backendResponse.status }
       );
     }
 
-    // ファイルサイズに基づいて適切なアップロード方法を選択
-    let result;
-    if (fileSize && fileSize > 0) {
-      // ファイルサイズが指定されている場合は適切な方法を選択
-      result = await generateAppropriateUploadUrl(fileName, contentType, fileSize);
-    } else {
-      // 従来の方法（小さいファイル用）
-      result = await generateUploadUrl(fileName, contentType);
-    }
-
-    return NextResponse.json(result);
+    return NextResponse.json(data);
   } catch (error) {
     console.error("アップロードURL生成エラー:", error);
     return NextResponse.json(
-      { error: "アップロードURLの生成に失敗しました" },
+      { error: "アップロードURLの生成に失敗しました", details: String(error) },
       { status: 500 }
     );
   }

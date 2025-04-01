@@ -8,6 +8,7 @@ import path from 'path';
 import http from 'http';
 import { queueManager, QUEUE_NAMES } from './lib/bull-queue';
 import { socketManager } from './lib/socket-manager';
+import cors from 'cors';
 
 // 環境変数の読み込み
 dotenv.config();
@@ -33,25 +34,25 @@ const prisma = new PrismaClient();
 // JSON形式のリクエストボディを解析
 app.use(express.json());
 
-// CORSミドルウェア
-app.use((req: Request, res: Response, next: NextFunction) => {
-  // ALLOWED_ORIGINSが設定されている場合は、そのオリジンからのリクエストのみを許可
-  const allowedOrigins = process.env.ALLOWED_ORIGINS ? process.env.ALLOWED_ORIGINS.split(',') : ['*'];
-  
-  const origin = req.headers.origin;
-  if (origin && (allowedOrigins.includes('*') || allowedOrigins.includes(origin))) {
-    res.header('Access-Control-Allow-Origin', origin);
-  } else {
-    res.header('Access-Control-Allow-Origin', '*');
-  }
-  
-  res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
-  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-  if (req.method === 'OPTIONS') {
-    return res.sendStatus(204);
-  }
-  next();
-});
+// CORSミドルウェアの設定
+const corsOptions = {
+  origin: function(origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) {
+    const allowedOrigins = ['https://vpm.ririaru-stg.cloud', 'https://video-frontend-nextjs-app.onrender.com', 'https://video-processing-frontend.onrender.com'];
+    // undefinedの場合はサーバー間リクエスト（Postmanなど）
+    if (!origin || allowedOrigins.includes(origin)) {
+      callback(null, true);
+    } else {
+      callback(null, false);
+    }
+  },
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Origin', 'X-Requested-With', 'Content-Type', 'Accept', 'Authorization'],
+  credentials: true,
+  optionsSuccessStatus: 200
+};
+
+// グローバルCORS設定
+app.use(cors(corsOptions));
 
 // ルートエンドポイント - APIの情報を返す
 app.get('/', (req: Request, res: Response) => {
@@ -97,9 +98,9 @@ app.post('/api/upload-url', async (req: Request, res: Response) => {
     const record = await prisma.record.create({
       data: {
         file_key: uploadData.key,
-        r2_bucket: uploadData.bucket,
+        r2_bucket: uploadData.bucket || '',
         status: 'UPLOADED',
-        file_url: uploadData.fileUrl || '' // 空文字列をデフォルト値として設定
+        file_url: uploadData.url
       }
     });
 
@@ -146,7 +147,7 @@ app.post('/api/process', async (req: Request, res: Response) => {
     await addJob('transcription', {
       type: 'transcription',
       recordId: recordId,
-      fileKey: record.file_key
+      fileKey: record.file_key || '' // nullの場合に空文字列を使用
     });
 
     // ステータスを更新
@@ -290,7 +291,7 @@ app.post('/api/records/:id/retry', async (req: Request<{ id: string }>, res: Res
     await addJob(queueName, {
       type: jobType,
       recordId: recordId,
-      fileKey: record.file_key
+      fileKey: record.file_key || '' // nullの場合に空文字列を使用
     });
 
     // ステータスを更新

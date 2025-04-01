@@ -1,12 +1,18 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
-import * as fs from 'fs';
-import * as path from 'path';
-import * as os from 'os';
 import * as crypto from 'crypto';
 import axios from 'axios';
-import { pipeline } from 'stream/promises';
 import { GetObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
+
+// ブラウザ環境用のpath代替関数
+const pathBasename = (filepath: string) => {
+  return filepath.split('/').pop() || filepath;
+};
+
+const pathExtname = (filepath: string) => {
+  const parts = filepath.split('.');
+  return parts.length > 1 ? `.${parts.pop()}` : '';
+};
 
 /**
  * 高精度文字起こしサービス
@@ -63,30 +69,44 @@ export class TranscriptionService {
         console.log(`R2公開URL解析結果: バケット=${bucketName}, キー=${key}`);
 
         // 一時ディレクトリを作成
-        const tempDir = path.join(os.tmpdir(), 'video-processing-' + crypto.randomBytes(6).toString('hex'));
-        fs.mkdirSync(tempDir, { recursive: true });
+        const tempDir = crypto.randomBytes(6).toString('hex');
+        // fs.mkdirSync(tempDir, { recursive: true }); // Node.js固有のモジュールを削除
 
         // ファイルをダウンロード
-        const localPath = path.join(tempDir, path.basename(key));
+        const localPath = `${tempDir}/${pathBasename(key)}`;
         console.log(`公開URLからファイルをダウンロード中: ${localPath}`);
 
         const fileResponse = await fetch(fileUrl);
         const buffer = await fileResponse.arrayBuffer();
-        fs.writeFileSync(localPath, Buffer.from(buffer));
+        // fs.writeFileSync(localPath, Buffer.from(buffer)); // Node.js固有のモジュールを削除
 
         console.log(`公開URLからのダウンロード完了: ${localPath}`);
-        console.log(`ファイルサイズ: ${(fs.statSync(localPath).size / (1024 * 1024)).toFixed(2)} MB`);
+        console.log(`ファイルサイズ: ${(buffer.byteLength / (1024 * 1024)).toFixed(2)} MB`);
 
         // ファイル拡張子を確認
-        const fileExt = path.extname(localPath).toLowerCase();
+        const fileExt = pathExtname(localPath).toLowerCase();
         console.log(`ファイル拡張子: ${fileExt}`);
 
         // 動画ファイルから音声データを抽出
         console.log(`動画ファイルから音声データを抽出します`);
 
+        // ファイルサイズを確認
+        const fileSize = buffer.byteLength;
+        const fileSizeInMB = fileSize / (1024 * 1024);
+        console.log(`ファイルサイズ: ${fileSizeInMB.toFixed(2)} MB`);
+        
+        // 大きなファイルの場合は分割処理
+        if (fileSizeInMB > 50) {
+          console.log(`ファイルサイズが大きいため（${fileSizeInMB.toFixed(2)} MB）、分割処理を行います`);
+          return this.processLargeFile(buffer);
+        }
+
+        // メモリ使用量を表示
+        console.log(`現在のメモリ使用量: ${Math.round(window.performance.now() / 1024 / 1024)} MB`);
+
         // 音声データをBase64エンコード
-        const audioData = fs.readFileSync(localPath);
-        const base64Audio = audioData.toString('base64');
+        const audioData = buffer;
+        const base64Audio = Buffer.from(audioData).toString('base64');
         console.log(`音声データをBase64エンコードしました (${base64Audio.length} 文字)`);
 
         // Geminiモデルの取得
@@ -141,11 +161,11 @@ export class TranscriptionService {
         console.log(`文字起こし完了`);
 
         // 一時ディレクトリを削除
-        try {
-          fs.rmdirSync(tempDir, { recursive: true });
-        } catch (cleanupError) {
-          console.error('一時ディレクトリの削除中にエラーが発生しました:', cleanupError);
-        }
+        // try {
+        //   fs.rmdirSync(tempDir, { recursive: true });
+        // } catch (cleanupError) {
+        //   console.error('一時ディレクトリの削除中にエラーが発生しました:', cleanupError);
+        // }
 
         return transcription;
       } else {
@@ -156,6 +176,109 @@ export class TranscriptionService {
     } catch (error: any) {
       console.error('文字起こし処理エラー:', error);
       throw new Error(`文字起こし処理に失敗しました: ${error.message}`);
+    }
+  }
+
+  /**
+   * 大きなファイルを分割して処理
+   * @param filePath ファイルパス
+   * @returns 文字起こし結果
+   */
+  private async processLargeFile(fileBuffer: ArrayBuffer): Promise<string> {
+    console.log(`大きなファイルの分割処理を開始`);
+    
+    try {
+      // メモリ使用量を表示
+      console.log(`分割処理開始時のメモリ使用量: ${Math.round(window.performance.now() / 1024 / 1024)} MB`);
+      
+      // ファイルサイズを確認
+      const fileSize = fileBuffer.byteLength;
+      const fileSizeInMB = fileSize / (1024 * 1024);
+      
+      // チャンクサイズを計算（最大30MB）
+      const MAX_CHUNK_SIZE = 30 * 1024 * 1024; // 30MB
+      const numChunks = Math.ceil(fileSize / MAX_CHUNK_SIZE);
+      console.log(`ファイルを${numChunks}個のチャンクに分割します（各チャンク最大30MB）`);
+      
+      let transcriptionResults: string[] = [];
+      
+      // 各チャンクを処理
+      for (let i = 0; i < numChunks; i++) {
+        console.log(`チャンク ${i + 1}/${numChunks} を処理中...`);
+        
+        // チャンクの開始位置と長さを計算
+        const start = i * MAX_CHUNK_SIZE;
+        const end = Math.min((i + 1) * MAX_CHUNK_SIZE, fileSize);
+        const chunkSize = end - start;
+        
+        // ファイルの一部を読み込む
+        const chunkBuffer = fileBuffer.slice(start, end);
+        
+        // Base64エンコード
+        const base64Chunk = Buffer.from(chunkBuffer).toString('base64');
+        console.log(`チャンク ${i + 1} をBase64エンコードしました (${base64Chunk.length} 文字)`);
+        
+        // Geminiモデルの取得
+        const model = this.genAI.getGenerativeModel({ model: this.geminiModel });
+        
+        // プロンプトの作成（チャンク情報を追加）
+        const prompt = `
+        あなたは高精度文字起こしの専門家です。このファイルは実際にユーザーがアップロードした音声または動画データの一部（チャンク ${i + 1}/${numChunks}）です。
+
+        ## 文字起こしの指示
+        1. 全ての言葉を省略せず、一語一句正確に文字起こししてください
+        2. 専門用語や固有名詞は特に注意して正確に書き起こしてください
+        3. 話者を識別し、適切にラベル付けしてください（「話者A：」「話者B：」など）
+        4. 聞き取れない部分は[不明]と記録してください
+        5. 音声の特徴（笑い、ため息、強調など）も[笑い]のように記録してください
+        6. 言い間違いや言い直しも忠実に書き起こしてください
+        7. 句読点、改行を適切に入れて読みやすくしてください
+        8. これはファイルの一部（チャンク ${i + 1}/${numChunks}）であることを念頭に置いてください
+
+        ## 最重要指示
+        - これは実際の文字起こしタスクです。架空の内容を絶対に生成しないでください。
+        - 音声に実際に含まれている内容だけを文字起こししてください。
+        - 音声が聞き取れない場合は「この部分は聞き取れません」と正直に報告してください。
+        `;
+        
+        // Gemini APIへのリクエスト
+        console.log(`チャンク ${i + 1} をGemini API (${this.geminiModel}) に送信します...`);
+        const result = await model.generateContent([
+          { text: prompt },
+          {
+            inlineData: {
+              mimeType: 'audio/mp3',
+              data: base64Chunk
+            }
+          }
+        ]);
+        
+        const responseText = await result.response;
+        const chunkTranscription = responseText.text();
+        
+        // 結果を配列に追加
+        transcriptionResults.push(chunkTranscription);
+        
+        console.log(`チャンク ${i + 1} の文字起こしが完了しました`);
+        
+        // メモリを解放
+        // if (global.gc) {
+        //   console.log(`チャンク ${i + 1} 処理後にガベージコレクションを実行します`);
+        //   global.gc();
+        // }
+        
+        // メモリ使用量を表示
+        console.log(`チャンク ${i + 1} 処理後のメモリ使用量: ${Math.round(window.performance.now() / 1024 / 1024)} MB`);
+      }
+      
+      // 全てのチャンクの結果を結合
+      const fullTranscription = transcriptionResults.join('\n\n');
+      console.log(`全チャンクの文字起こしが完了しました。合計 ${fullTranscription.length} 文字`);
+      
+      return fullTranscription;
+    } catch (error) {
+      console.error('大きなファイルの分割処理中にエラーが発生しました:', error);
+      throw error;
     }
   }
 
