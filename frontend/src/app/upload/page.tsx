@@ -79,10 +79,18 @@ export default function UploadPage() {
       });
 
       if (!response.ok) {
-        throw new Error("署名付きURLの取得に失敗しました");
+        throw new Error(`署名付きURLの取得に失敗しました: ${response.status} ${response.statusText}`);
       }
 
       const result = await response.json();
+      
+      // レスポンスの検証
+      if (!result) {
+        throw new Error("APIレスポンスが空です");
+      }
+      
+      console.log("アップロードURL取得結果:", result);
+      
       let fileUrl: string;
 
       // アップロード方法の選択
@@ -90,6 +98,10 @@ export default function UploadPage() {
         // マルチパートアップロードの場合
         setUploadStage("マルチパートアップロード準備中...");
         console.log("マルチパートアップロードを開始します", result);
+        
+        if (!result.partUrls || !result.key || !result.uploadId) {
+          throw new Error("マルチパートアップロードに必要な情報が不足しています");
+        }
         
         // マルチパートアップロードの実行
         const uploadResult = await uploadMultipart(file, result, (progress) => {
@@ -102,12 +114,29 @@ export default function UploadPage() {
       } else {
         // 通常のアップロード
         setUploadStage("アップロード中...");
-        await uploadFileWithProgress(file, result.url);
+        
+        // uploadUrlが存在するか確認
+        if (!result.uploadUrl) {
+          console.error("アップロードURLが取得できませんでした", result);
+          throw new Error("アップロードURLが取得できませんでした");
+        }
+        
+        await uploadFileWithProgress(file, result.uploadUrl);
+        
+        if (!result.fileUrl && !result.fileKey) {
+          throw new Error("ファイルURLまたはファイルキーが取得できませんでした");
+        }
+        
         fileUrl = result.fileUrl;
       }
 
       // 処理開始リクエスト
       setUploadStage("処理を開始中...");
+      
+      if (!result.fileKey) {
+        throw new Error("ファイルキーが取得できませんでした");
+      }
+      
       const processResponse = await fetch("/api/transcribe", {
         method: "POST",
         headers: {
@@ -120,10 +149,16 @@ export default function UploadPage() {
       });
 
       if (!processResponse.ok) {
-        throw new Error("処理の開始に失敗しました");
+        throw new Error(`処理の開始に失敗しました: ${processResponse.status} ${processResponse.statusText}`);
       }
 
-      const { recordId, jobId } = await processResponse.json();
+      const processResult = await processResponse.json();
+      
+      if (!processResult || !processResult.jobId) {
+        throw new Error("処理の開始に失敗しました: 無効なレスポンス");
+      }
+      
+      const { recordId, jobId } = processResult;
       
       // ジョブIDを設定
       setJobId(jobId);
@@ -145,6 +180,13 @@ export default function UploadPage() {
   // 進捗表示付きアップロード（小さなファイル用）
   const uploadFileWithProgress = (file: File, signedUrl: string) => {
     return new Promise<void>((resolve, reject) => {
+      // signedUrlがundefinedまたは空の場合はエラーを返す
+      if (!signedUrl) {
+        console.error("署名付きURLが取得できませんでした");
+        reject(new Error("署名付きURLが取得できませんでした"));
+        return;
+      }
+
       const xhr = new XMLHttpRequest();
 
       // タイムアウトを設定（4時間 = 14400000ミリ秒）
@@ -181,7 +223,7 @@ export default function UploadPage() {
       // エラーハンドラー
       xhr.onerror = (e) => {
         console.error("アップロードエラー:", e);
-        console.error("署名付きURL:", signedUrl);
+        console.error("署名付きURL:", signedUrl && signedUrl.substring(0, 100) + "...");
         console.error("ファイル情報:", { name: file.name, type: file.type, size: file.size });
         reject(new Error("アップロード中にネットワークエラーが発生しました"));
       };
@@ -199,7 +241,7 @@ export default function UploadPage() {
       };
 
       // ファイル送信
-      console.log("アップロード開始:", file.name, file.size, "URL:", signedUrl.substring(0, 100) + "...");
+      console.log("アップロード開始:", file.name, file.size, "URL:", signedUrl && signedUrl.substring(0, 100) + "...");
       xhr.send(file);
     });
   };
