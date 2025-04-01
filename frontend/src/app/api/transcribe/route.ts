@@ -16,11 +16,11 @@ export async function POST(request: Request) {
 
     // リクエストボディを解析
     const body = await request.json();
-    const { fileKey, fileName, fileUrl } = body;
+    const { fileKey, fileName } = body;
 
-    if (!fileKey || !fileName || !fileUrl) {
+    if (!fileKey || !fileName) {
       return NextResponse.json(
-        { error: 'fileKey、fileName、fileUrlは必須です' },
+        { error: 'fileKeyとfileNameは必須です' },
         { status: 400 }
       );
     }
@@ -28,7 +28,6 @@ export async function POST(request: Request) {
     // レコードを作成
     const record = await prisma.record.create({
       data: {
-        file_url: fileUrl,
         status: 'PROCESSING', // 直接処理中に設定
       },
     });

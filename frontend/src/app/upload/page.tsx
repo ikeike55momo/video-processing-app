@@ -89,7 +89,11 @@ export default function UploadPage() {
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ fileName: file.name, fileKey }),
+        body: JSON.stringify({
+          fileName: file.name,
+          contentType: file.type,
+          fileSize: file.size
+        }),
       });
       
       if (!uploadUrlResponse.ok) {
@@ -134,8 +138,7 @@ export default function UploadPage() {
           },
           body: JSON.stringify({
             fileKey: fileKey,
-            fileName: file.name,
-            fileUrl: fileUrl
+            fileName: file.name
           }),
         });
         
@@ -151,7 +154,7 @@ export default function UploadPage() {
           setJobId(processResult.jobId);
         }
         
-        // 処理の進捗を表示し、結果ページへのリダイレクトは行わない
+        // 処理の進捗を表示
         setUploadStage("処理中...");
       } catch (error) {
         console.error('処理開始エラー:', error);
