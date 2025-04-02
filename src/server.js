@@ -243,7 +243,7 @@ app.post('/api/process', (req, res) => __awaiter(void 0, void 0, void 0, functio
         else if (fileKey) {
             // fileKeyからレコードを検索
             const record = yield prisma.record.findFirst({
-                where: { file_key: fileKey }
+                where: { file_url: fileUrl }
             });
             
             if (!record) {
@@ -286,7 +286,7 @@ app.post('/api/process', (req, res) => __awaiter(void 0, void 0, void 0, functio
             
             // fileKeyからレコードを検索
             const record = yield prisma.record.findFirst({
-                where: { file_key: extractedFileKey }
+                where: { file_url: fileUrl }
             });
             
             if (!record) {
@@ -480,7 +480,7 @@ app.post('/api/get-record', (req, res) => __awaiter(void 0, void 0, void 0, func
         
         // ファイルキーからレコードを検索
         const record = yield prisma.record.findFirst({
-            where: { file_key: fileKey }
+            where: { file_url: fileUrl }
         });
         
         if (!record) {
