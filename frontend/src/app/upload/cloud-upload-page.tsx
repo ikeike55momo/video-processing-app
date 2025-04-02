@@ -117,7 +117,7 @@ export default function CloudUploadPage() {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          fileUrl,
+          fileUrl: fileUrl,
         }),
       });
 

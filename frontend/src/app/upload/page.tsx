@@ -120,8 +120,7 @@ export default function UploadPage() {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          fileKey: result.fileKey,
-          fileName: file.name,
+          fileUrl: fileUrl,
         }),
       });
 
