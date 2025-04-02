@@ -19,7 +19,7 @@ export async function POST(req: NextRequest) {
     // }
 
     // リクエストボディの解析
-    const { recordId, fileUrl } = await req.json();
+    const { recordId, fileUrl, fileKey } = await req.json();
     
     if (!recordId && !fileUrl) {
       return NextResponse.json(
@@ -27,6 +27,8 @@ export async function POST(req: NextRequest) {
         { status: 400 }
       );
     }
+    
+    console.log('処理リクエスト:', { recordId, fileUrl, fileKey });
 
     let record;
     
@@ -71,6 +73,7 @@ export async function POST(req: NextRequest) {
       record = await prisma.record.create({
         data: {
           file_url: fileUrl,
+          file_key: fileKey, // fileKeyを追加
           status: 'UPLOADED',
         },
       });
@@ -100,6 +103,7 @@ export async function POST(req: NextRequest) {
         body: JSON.stringify({
           recordId: record!.id,
           fileUrl: record!.file_url,
+          fileKey: fileKey, // fileKeyを追加
         }),
       });
 
@@ -127,6 +131,7 @@ export async function POST(req: NextRequest) {
                 body: JSON.stringify({
                   recordId: record!.id,
                   fileUrl: record!.file_url,
+                  fileKey: fileKey, // fileKeyを追加
                 }),
               });
               

@@ -9,15 +9,31 @@ const R2_ENDPOINT = process.env.R2_ENDPOINT;
 const R2_ACCESS_KEY_ID = process.env.R2_ACCESS_KEY_ID;
 const R2_SECRET_ACCESS_KEY = process.env.R2_SECRET_ACCESS_KEY;
 const R2_BUCKET_NAME = process.env.R2_BUCKET_NAME;
+const R2_PUBLIC_URL = process.env.R2_PUBLIC_URL;
 
+// 環境変数の状態をログ出力
+console.log('R2環境変数チェック:', {
+  hasEndpoint: !!R2_ENDPOINT,
+  hasAccessKey: !!R2_ACCESS_KEY_ID,
+  hasSecretKey: !!R2_SECRET_ACCESS_KEY,
+  hasBucket: !!R2_BUCKET_NAME,
+  hasPublicUrl: !!R2_PUBLIC_URL,
+  endpointLength: R2_ENDPOINT?.length || 0,
+  accessKeyLength: R2_ACCESS_KEY_ID?.length || 0,
+  secretKeyLength: R2_SECRET_ACCESS_KEY?.length || 0,
+  bucketName: R2_BUCKET_NAME || '',
+  publicUrl: R2_PUBLIC_URL || '',
+});
+
+// 警告メッセージを表示（エラーではなく）
 if (!R2_ENDPOINT || !R2_ACCESS_KEY_ID || !R2_SECRET_ACCESS_KEY || !R2_BUCKET_NAME) {
-  console.error('Missing R2 configuration. Please check your .env file.');
+  console.warn('一部のR2設定が不足しています。S3機能が制限される可能性があります。');
 }
 
 // R2はS3互換APIを使用
 const s3Client = new S3Client({
   region: "auto",
-  endpoint: R2_ENDPOINT,
+  endpoint: R2_ENDPOINT || undefined,
   credentials: {
     accessKeyId: R2_ACCESS_KEY_ID || '',
     secretAccessKey: R2_SECRET_ACCESS_KEY || '',
@@ -27,12 +43,14 @@ const s3Client = new S3Client({
 });
 
 // 初期化時にR2設定情報をログ出力
-console.log('R2設定情報:', {
+console.log('R2クライアント設定:', {
   endpoint: R2_ENDPOINT ? '設定あり' : '未設定',
   accessKeyId: R2_ACCESS_KEY_ID ? '設定あり' : '未設定',
   secretAccessKey: R2_SECRET_ACCESS_KEY ? '設定あり（長さ: ' + (R2_SECRET_ACCESS_KEY?.length || 0) + '）' : '未設定',
-  bucketName: R2_BUCKET_NAME,
+  bucketName: R2_BUCKET_NAME || '',
+  publicUrl: R2_PUBLIC_URL || '',
   region: 'auto',
+  forcePathStyle: false,
 });
 
 /**

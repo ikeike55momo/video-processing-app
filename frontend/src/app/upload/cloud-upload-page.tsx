@@ -116,19 +116,40 @@ export default function CloudUploadPage() {
           throw new Error("アップロードURLが取得できませんでした");
         }
         
-        await uploadFileWithProgress(file, result.uploadUrl);
+        const uploadResult = await uploadFileWithProgress(file, result.uploadUrl);
         fileUrl = result.fileUrl || result.uploadUrl;
+        
+        // 抽出したファイルキーがあれば使用
+        if (uploadResult.fileKey && !result.fileKey) {
+          console.log("アップロードから抽出したファイルキーを使用:", uploadResult.fileKey);
+          result.fileKey = uploadResult.fileKey;
+        }
       }
 
       // 処理開始リクエスト
       setUploadStage("処理を開始中...");
+      
+      // recordIdが存在するか確認
+      const uploadRecordId = result.recordId;
+      if (!uploadRecordId) {
+        console.warn("recordIdが取得できませんでした。fileUrlを使用します。", result);
+      }
+      
+      console.log("処理開始リクエスト:", {
+        recordId: uploadRecordId || "なし",
+        fileKey: result.fileKey || "なし",
+        fileUrl: fileUrl || "なし"
+      });
+      
       const processResponse = await fetch(`/api/process`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          fileUrl,
+          recordId: uploadRecordId,
+          fileKey: result.fileKey,
+          fileUrl: fileUrl,
         }),
       });
 
@@ -136,7 +157,8 @@ export default function CloudUploadPage() {
         throw new Error("処理の開始に失敗しました");
       }
 
-      const { recordId } = await processResponse.json();
+      const processResult = await processResponse.json();
+      const recordId = processResult.recordId;
 
       // 結果ページへリダイレクト（recordIdを指定）
       router.push(`/results?recordId=${recordId}`);
@@ -153,12 +175,27 @@ export default function CloudUploadPage() {
 
   // 進捗表示付きアップロード
   const uploadFileWithProgress = (file: File, signedUrl: string) => {
-    return new Promise<void>((resolve, reject) => {
+    return new Promise<{ fileKey?: string }>((resolve, reject) => {
       // signedUrlがundefinedの場合はエラーを返す
       if (!signedUrl) {
         console.error("署名付きURLが取得できませんでした");
         reject(new Error("署名付きURLが取得できませんでした"));
         return;
+      }
+      
+      // URLからファイルキーを抽出
+      let extractedFileKey: string | undefined;
+      try {
+        const urlObj = new URL(signedUrl);
+        const pathname = urlObj.pathname;
+        // パスの先頭の/を削除
+        let fileKey = pathname.startsWith('/') ? pathname.substring(1) : pathname;
+        // クエリパラメータを削除（?以降を削除）
+        fileKey = fileKey.split('?')[0];
+        console.log("抽出したファイルキー:", fileKey);
+        extractedFileKey = fileKey;
+      } catch (error) {
+        console.warn("ファイルキーの抽出に失敗しました:", error);
       }
 
       const xhr = new XMLHttpRequest();
@@ -187,7 +224,7 @@ export default function CloudUploadPage() {
       xhr.onload = () => {
         if (xhr.status >= 200 && xhr.status < 300) {
           console.log("アップロード成功:", xhr.status);
-          resolve();
+          resolve({ fileKey: extractedFileKey });
         } else {
           console.error("アップロード失敗:", xhr.status, xhr.statusText, xhr.responseText);
           reject(new Error(`アップロード失敗: ${xhr.status} ${xhr.statusText}`));
