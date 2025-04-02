@@ -510,6 +510,8 @@ async function downloadFile(fileUrl, tempDir) {
           
           // R2の公開URLを使用してみる
           const publicUrl = process.env.R2_PUBLIC_URL;
+          const bucketName = process.env.R2_BUCKET_NAME; // bucketNameを再定義
+          
           if (publicUrl) {
             try {
               // URLからfileKeyを抽出（再度）
@@ -517,6 +519,7 @@ async function downloadFile(fileUrl, tempDir) {
               let fileKey = pathname.startsWith('/') ? pathname.substring(1) : pathname;
               fileKey = fileKey.split('?')[0];
               
+              // バケット名がパスに含まれている場合は削除
               if (bucketName && fileKey.startsWith(bucketName + '/')) {
                 fileKey = fileKey.substring(bucketName.length + 1);
               }
