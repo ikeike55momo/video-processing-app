@@ -113,9 +113,35 @@ export async function POST(req: NextRequest) {
         if (!processResponse.ok) {
           console.warn('バックエンドAPI処理警告:', responseData);
           
-          // 「既に処理中」エラーの場合は、エラーとして扱わない
+          // 「既に処理中」エラーの場合は、transcribeエンドポイントを呼び出す
           if (responseData.error && responseData.error.includes("already being processed")) {
-            console.log('レコードは既に処理中です。処理を続行します。');
+            console.log('レコードは既に処理中です。transcribeエンドポイントを呼び出します。');
+            
+            // transcribeエンドポイントを呼び出す
+            try {
+              const transcribeResponse = await fetch(`${apiUrl}/api/transcribe`, {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                  recordId: record!.id,
+                  fileUrl: record!.file_url,
+                }),
+              });
+              
+              console.log('transcribeエンドポイントレスポンスステータス:', transcribeResponse.status);
+              
+              if (transcribeResponse.ok) {
+                const transcribeResult = await transcribeResponse.json();
+                console.log('transcribeエンドポイント処理結果:', transcribeResult);
+                processResult = transcribeResult;
+              } else {
+                console.error('transcribeエンドポイントエラー:', await transcribeResponse.text());
+              }
+            } catch (transcribeError) {
+              console.error('transcribeエンドポイントリクエストエラー:', transcribeError);
+            }
           } else {
             // その他のエラーの場合は、エラー情報をデータベースに保存
             await prisma.record.update({
