@@ -60,7 +60,13 @@ console.log('R2クライアント設定:', {
  * @returns 署名付きURLとメタデータ
  */
 export async function generateUploadUrl(fileName: string, contentType: string) {
-  const key = `uploads/${Date.now()}-${fileName}`;
+  // 安全なキーを生成（タイムスタンプとランダム文字列を含む）
+  const timestamp = Date.now();
+  const randomString = Math.random().toString(36).substring(2, 15);
+  const extension = fileName.split('.').pop();
+  const key = `uploads/${timestamp}_${randomString}.${extension}`;
+  
+  console.log('生成されたキー:', key);
   
   const command = new PutObjectCommand({
     Bucket: R2_BUCKET_NAME,
@@ -71,10 +77,17 @@ export async function generateUploadUrl(fileName: string, contentType: string) {
   // 1時間有効な署名付きURL
   const signedUrl = await getSignedUrl(s3Client, command, { expiresIn: 3600 });
   
+  // 公開アクセス用URLを構築（R2_PUBLIC_URLが設定されている場合）
+  let fileUrl = signedUrl;
+  if (R2_PUBLIC_URL) {
+    fileUrl = `${R2_PUBLIC_URL}/${key}`;
+  }
+  
   return {
     url: signedUrl,
     key: key,
     bucket: R2_BUCKET_NAME,
+    fileUrl: fileUrl
   };
 }
 

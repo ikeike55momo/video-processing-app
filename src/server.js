@@ -335,21 +335,26 @@ app.post('/api/process', (req, res) => __awaiter(void 0, void 0, void 0, functio
 // 文字起こしAPIエンドポイント
 app.post('/api/transcribe', async (req, res) => {
   try {
+    // メモリ使用量をログ記録
+    const memoryUsage = process.memoryUsage();
+    console.log(`メモリ使用量（リクエスト開始時）: RSS=${Math.round(memoryUsage.rss / 1024 / 1024)}MB Heap=${Math.round(memoryUsage.heapUsed / 1024 / 1024)}/${Math.round(memoryUsage.heapTotal / 1024 / 1024)}MB`);
+
     // リクエストボディからファイルURLとレコードIDを取得
-    const { fileUrl, recordId } = req.body;
-    
+    const { fileUrl, recordId, fileKey } = req.body;
+
     if (!fileUrl) {
       return res.status(400).json({ error: 'ファイルURLが指定されていません' });
     }
-    
+
     console.log(`文字起こしリクエスト受信: ${fileUrl}`);
-    
+
     // レコードIDが指定されていない場合は新しいレコードを作成
     let record;
     if (!recordId) {
       record = await prisma.record.create({
         data: {
           file_url: fileUrl,
+          file_key: fileKey,
           status: 'PROCESSING',
           processing_step: 'TRANSCRIPTION'
         }
@@ -359,11 +364,11 @@ app.post('/api/transcribe', async (req, res) => {
       record = await prisma.record.findUnique({
         where: { id: recordId }
       });
-      
+
       if (!record) {
         return res.status(404).json({ error: 'レコードが見つかりません' });
       }
-      
+
       // ステータスを更新
       record = await prisma.record.update({
         where: { id: recordId },
@@ -373,68 +378,125 @@ app.post('/api/transcribe', async (req, res) => {
         }
       });
     }
-    
-    // TranscriptionServiceが初期化されていない場合は初期化
-    if (!transcriptionService) {
-      console.log('TranscriptionServiceを初期化します');
+
+    // 処理を非同期で実行し、即座にレスポンスを返す
+    res.status(202).json({
+      message: '文字起こし処理を開始しました',
+      recordId: record.id,
+      jobId: record.id
+    });
+
+    // 非同期処理を開始
+    (async () => {
       try {
-        const transcriptionServicePath = path.join(__dirname, 'services', 'transcription-service.js');
-        console.log(`TranscriptionServiceのパス: ${transcriptionServicePath}`);
-        const { TranscriptionService } = require(transcriptionServicePath);
-        transcriptionService = new TranscriptionService();
-      } catch (error) {
-        console.error('TranscriptionServiceの初期化に失敗しました:', error);
-        return res.status(500).json({ error: `TranscriptionServiceの初期化に失敗しました: ${error.message}` });
+        // TranscriptionServiceが初期化されていない場合は初期化
+        if (!transcriptionService) {
+          console.log('TranscriptionServiceを初期化します');
+          try {
+            const transcriptionServicePath = path.join(__dirname, 'services', 'transcription-service.js');
+            console.log(`TranscriptionServiceのパス: ${transcriptionServicePath}`);
+            const { TranscriptionService } = require(transcriptionServicePath);
+            transcriptionService = new TranscriptionService();
+          } catch (error) {
+            console.error('TranscriptionServiceの初期化に失敗しました:', error);
+            await prisma.record.update({
+              where: { id: record.id },
+              data: {
+                status: 'ERROR',
+                error: `TranscriptionServiceの初期化に失敗しました: ${error.message}`
+              }
+            });
+            return;
+          }
+        }
+
+        // 一時ディレクトリを作成
+        const tempDir = path.join(os.tmpdir(), 'transcription-' + crypto.randomBytes(6).toString('hex'));
+        fs.mkdirSync(tempDir, { recursive: true });
+
+        try {
+          // ファイルをダウンロード
+          const filePath = await downloadFile(fileUrl, tempDir);
+          console.log(`ファイルをダウンロードしました: ${filePath}`);
+
+          // ファイルサイズを確認
+          const fileSize = fs.statSync(filePath).size;
+          console.log(`ファイルサイズ: ${fileSize} バイト (${Math.round(fileSize / 1024 / 1024)} MB)`);
+
+          // 現在処理中のレコードIDをグローバル変数に設定（transcriptionServiceで使用）
+          global.currentRecordId = record.id;
+          
+          // Prismaクライアントをグローバル変数に設定（transcriptionServiceで使用）
+          global.prisma = prisma;
+          
+          // 文字起こし処理
+          const transcript = await transcriptionService.transcribeAudio(filePath);
+          
+          // グローバル変数をクリア
+          global.currentRecordId = null;
+
+          // タイムスタンプ抽出処理
+          console.log(`タイムスタンプ抽出処理を開始します`);
+          const timestampsData = await transcriptionService.extractTimestamps(transcript, filePath);
+
+          // 文字起こし結果とタイムスタンプをデータベースに保存
+          await prisma.record.update({
+            where: { id: record.id },
+            data: {
+              transcript_text: transcript,
+              timestamps_json: JSON.stringify(timestampsData),
+              status: 'TRANSCRIBED',
+              processing_step: null
+            }
+          });
+
+          // 要約キューにジョブを追加
+          await (0, queue_1.addJob)('summary', {
+            type: 'summary',
+            recordId: record.id,
+            fileKey: record.file_key || fileKey || path.basename(fileUrl)
+          });
+
+          console.log(`文字起こし処理が完了し、要約処理をキューに追加しました: ${record.id}`);
+        } catch (processingError) {
+          console.error('文字起こし処理中にエラーが発生しました:', processingError);
+          await prisma.record.update({
+            where: { id: record.id },
+            data: {
+              status: 'ERROR',
+              error: `文字起こし処理に失敗しました: ${processingError.message}`
+            }
+          });
+        } finally {
+          // 一時ディレクトリを削除
+          try {
+            fs.rmSync(tempDir, { recursive: true, force: true });
+            console.log(`一時ディレクトリを削除しました: ${tempDir}`);
+          } catch (err) {
+            console.error(`一時ディレクトリの削除に失敗しました: ${tempDir}`, err);
+          }
+
+          // メモリ使用量をログ記録
+          const finalMemoryUsage = process.memoryUsage();
+          console.log(`メモリ使用量（処理完了時）: RSS=${Math.round(finalMemoryUsage.rss / 1024 / 1024)}MB Heap=${Math.round(finalMemoryUsage.heapUsed / 1024 / 1024)}/${Math.round(finalMemoryUsage.heapTotal / 1024 / 1024)}MB`);
+
+          // 明示的にガベージコレクションを促す
+          if (global.gc) {
+            global.gc();
+            console.log('ガベージコレクションを実行しました');
+          }
+        }
+      } catch (asyncError) {
+        console.error('非同期処理中にエラーが発生しました:', asyncError);
+        await prisma.record.update({
+          where: { id: record.id },
+          data: {
+            status: 'ERROR',
+            error: `非同期処理中にエラーが発生しました: ${asyncError.message}`
+          }
+        });
       }
-    }
-    // 一時ディレクトリを作成
-    const tempDir = path.join(os.tmpdir(), 'transcription-' + crypto.randomBytes(6).toString('hex'));
-    fs.mkdirSync(tempDir, { recursive: true });
-    
-    // ファイルをダウンロード
-    const filePath = await downloadFile(fileUrl, tempDir);
-    console.log(`ファイルをダウンロードしました: ${filePath}`);
-    
-    // 文字起こし処理
-    const transcript = await transcriptionService.transcribeAudio(filePath);
-    
-    // タイムスタンプ抽出処理
-    console.log(`タイムスタンプ抽出処理を開始します`);
-    const timestampsData = await transcriptionService.extractTimestamps(transcript, filePath);
-    
-    // 一時ディレクトリを削除
-    try {
-      fs.rmSync(tempDir, { recursive: true, force: true });
-      console.log(`一時ディレクトリを削除しました: ${tempDir}`);
-    } catch (err) {
-      console.error(`一時ディレクトリの削除に失敗しました: ${tempDir}`, err);
-    }
-    
-    // 文字起こし結果とタイムスタンプをデータベースに保存
-    await prisma.record.update({
-      where: { id: record.id },
-      data: {
-        transcript_text: transcript,
-        timestamps_json: JSON.stringify(timestampsData),
-        status: 'TRANSCRIBED',
-        processing_step: null
-      }
-    });
-    
-    // 要約キューにジョブを追加
-    await (0, queue_1.addJob)('summary', {
-      type: 'summary',
-      recordId: record.id,
-      fileKey: record.file_key || path.basename(fileUrl)
-    });
-    
-    console.log(`文字起こし処理が完了し、要約処理をキューに追加しました: ${record.id}`);
-    
-    return res.json({ 
-      transcript, 
-      recordId: record.id,
-      jobId: record.id // ジョブIDとしてレコードIDを返す
-    });
+    })();
   } catch (error) {
     console.error('文字起こし処理エラー:', error);
     return res.status(500).json({ error: `文字起こし処理に失敗しました: ${error.message}` });
