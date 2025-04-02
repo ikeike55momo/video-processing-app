@@ -82,8 +82,7 @@ try {
     console.log('prisma generateが正常に完了しました');
   } catch (genError) {
     console.error('prisma generateの実行中にエラーが発生しました:', genError);
-  }
-  
+  }  
   // スキーマの場所を明示的に指定
   const { PrismaClient } = require('@prisma/client');
   prisma = new PrismaClient({
@@ -161,11 +160,24 @@ app.post('/api/upload-url', (req, res) => __awaiter(void 0, void 0, void 0, func
         }
         // 署名付きURLの生成
         const uploadData = yield (0, storage_1.generateUploadUrl)(fileName, contentType);
+        
+        // URLが正しく生成されたか確認
+        if (!uploadData || !uploadData.url) {
+            console.error('署名付きURLの生成に失敗しました:', uploadData);
+            return res.status(500).json({
+                error: '署名付きURLの生成に失敗しました'
+            });
+        }
+        
+        // デバッグ情報
+        console.log('生成された署名付きURL:', uploadData.url.substring(0, 100) + '...');
+        
         // 新しいレコードをデータベースに作成
         const record = yield prisma.record.create({
             data: {
                 file_key: uploadData.key,
                 r2_bucket: uploadData.bucket,
+                file_url: uploadData.url, // file_urlフィールドを追加
                 status: 'UPLOADED'
             }
         });
@@ -186,38 +198,131 @@ app.post('/api/upload-url', (req, res) => __awaiter(void 0, void 0, void 0, func
 // 処理開始エンドポイント
 app.post('/api/process', (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
-        const { recordId } = req.body;
-        if (!recordId) {
-            return res.status(400).json({ error: 'recordId is required' });
-        }
-        // レコードの存在確認
-        const record = yield prisma.record.findUnique({
-            where: { id: recordId }
-        });
-        if (!record) {
-            return res.status(404).json({ error: 'Record not found' });
-        }
-        if (record.status !== 'UPLOADED') {
-            return res.status(400).json({
-                error: 'Record is already being processed or completed',
-                status: record.status
+        console.log('Process API received request body:', req.body);
+        
+        // リクエストボディからrecordId、fileKey、またはfileUrlを取得
+        const { recordId, fileKey, fileUrl, fileName } = req.body;
+        
+        // recordIdが存在する場合はそれを使用
+        if (recordId) {
+            // レコードの存在確認
+            const record = yield prisma.record.findUnique({
+                where: { id: recordId }
+            });
+            
+            if (!record) {
+                return res.status(404).json({ error: 'Record not found' });
+            }
+            
+            if (record.status !== 'UPLOADED') {
+                return res.status(400).json({
+                    error: 'Record is already being processed or completed',
+                    status: record.status
+                });
+            }
+            
+            // 文字起こしキューにジョブを追加
+            yield (0, queue_1.addJob)('transcription', {
+                type: 'transcription',
+                recordId: recordId,
+                fileKey: record.file_key
+            });
+            
+            // ステータスを更新
+            yield prisma.record.update({
+                where: { id: recordId },
+                data: { status: 'PROCESSING' }
+            });
+            
+            res.status(200).json({
+                message: 'Processing started',
+                recordId: recordId
             });
         }
-        // 文字起こしキューにジョブを追加
-        yield (0, queue_1.addJob)('transcription', {
-            type: 'transcription',
-            recordId: recordId,
-            fileKey: record.file_key
-        });
-        // ステータスを更新
-        yield prisma.record.update({
-            where: { id: recordId },
-            data: { status: 'PROCESSING' }
-        });
-        res.status(200).json({
-            message: 'Processing started',
-            recordId: recordId
-        });
+        // fileKeyが存在する場合はそれを使用
+        else if (fileKey) {
+            // fileKeyからレコードを検索
+            const record = yield prisma.record.findFirst({
+                where: { file_url: fileUrl }
+            });
+            
+            if (!record) {
+                return res.status(404).json({ error: 'Record not found with the provided fileKey' });
+            }
+            
+            if (record.status !== 'UPLOADED') {
+                return res.status(400).json({
+                    error: 'Record is already being processed or completed',
+                    status: record.status
+                });
+            }
+            
+            // 文字起こしキューにジョブを追加
+            yield (0, queue_1.addJob)('transcription', {
+                type: 'transcription',
+                recordId: record.id,
+                fileKey: record.file_key
+            });
+            
+            // ステータスを更新
+            yield prisma.record.update({
+                where: { id: record.id },
+                data: { status: 'PROCESSING' }
+            });
+            
+            res.status(200).json({
+                message: 'Processing started',
+                recordId: record.id
+            });
+        }
+        // fileUrlが存在する場合はそれを使用
+        else if (fileUrl) {
+            // fileUrlからfileKeyを抽出
+            // 例: https://...r2.cloudflarestorage.com/uploads/1743352679651-30大プレゼント.mp4?...
+            const urlPath = new URL(fileUrl).pathname; // /uploads/1743352679651-30大プレゼント.mp4
+            const extractedFileKey = urlPath.startsWith('/') ? urlPath.substring(1) : urlPath;
+            
+            console.log('Extracted fileKey from fileUrl:', extractedFileKey);
+            
+            // fileKeyからレコードを検索
+            const record = yield prisma.record.findFirst({
+                where: { file_url: fileUrl }
+            });
+            
+            if (!record) {
+                return res.status(404).json({ error: 'Record not found with the extracted fileKey' });
+            }
+            
+            if (record.status !== 'UPLOADED') {
+                return res.status(400).json({
+                    error: 'Record is already being processed or completed',
+                    status: record.status
+                });
+            }
+            
+            // 文字起こしキューにジョブを追加
+            yield (0, queue_1.addJob)('transcription', {
+                type: 'transcription',
+                recordId: record.id,
+                fileKey: record.file_key
+            });
+            
+            // ステータスを更新
+            yield prisma.record.update({
+                where: { id: record.id },
+                data: { status: 'PROCESSING' }
+            });
+            
+            res.status(200).json({
+                message: 'Processing started',
+                recordId: record.id
+            });
+        }
+        // どれも存在しない場合はエラー
+        else {
+            console.log('recordId, fileKey, or fileUrl is missing in the request body');
+            return res.status(400).json({ error: 'recordId, fileKey, or fileUrl is required' });
+        }
     }
     catch (error) {
         console.error('Error starting process:', error);
@@ -416,7 +521,50 @@ app.get('/api/records/:id', (req, res) => __awaiter(void 0, void 0, void 0, func
         });
     }
 }));
-// すべてのレコード取得エンドポイント
+
+// ファイルキーからレコードを取得するエンドポイント
+app.post('/api/get-record', (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    try {
+        const { fileKey } = req.body;
+        
+        if (!fileKey) {
+            return res.status(400).json({
+                error: 'Missing required field',
+                details: 'fileKey is required'
+            });
+        }
+        
+        console.log(`ファイルキー ${fileKey} からレコードを検索中...`);
+        
+        // ファイルキーからレコードを検索
+        const record = yield prisma.record.findFirst({
+            where: { file_url: fileUrl }
+        });
+        
+        if (!record) {
+            return res.status(404).json({
+                error: 'Record not found',
+                details: `No record found with file key: ${fileKey}`
+            });
+        }
+        
+        console.log(`レコードが見つかりました: ${record.id}`);
+        
+        res.status(200).json({
+            recordId: record.id,
+            status: record.status
+        });
+    }
+    catch (error) {
+        console.error('Error retrieving record by file key:', error);
+        res.status(500).json({
+            error: 'Error retrieving record',
+            details: error instanceof Error ? error.message : 'Unknown error'
+        });
+    }
+}));
+
+// レコード一覧取得エンドポイント
 app.get('/api/records', (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
         // クエリパラメータからページネーション情報を取得
@@ -514,6 +662,50 @@ app.post('/api/records/:id/retry', (req, res) => __awaiter(void 0, void 0, void 
         });
     }
 }));
+// クラウドアップロード処理エンドポイント
+app.post('/api/process-cloud', async (req, res) => {
+  try {
+    const { fileUrl } = req.body;
+    
+    if (!fileUrl) {
+      return res.status(400).json({ error: 'ファイルURLが指定されていません' });
+    }
+    
+    console.log(`クラウドアップロード処理リクエスト受信: ${fileUrl}`);
+    
+    // 新しいレコードをデータベースに作成
+    const record = await prisma.record.create({
+      data: {
+        file_url: fileUrl,
+        status: 'UPLOADED'
+      }
+    });
+    
+    // 文字起こしキューにジョブを追加
+    try {
+      await (0, queue_1.addJob)('transcription', {
+        type: 'transcription',
+        recordId: record.id,
+        fileUrl: fileUrl
+      });
+      console.log(`ジョブをキューに追加しました: ${record.id}`);
+    } catch (queueError) {
+      console.error('キューへのジョブ追加に失敗しました:', queueError);
+      // エラーがあってもレスポンスは返す
+    }
+    
+    res.status(200).json({
+      message: 'Processing started',
+      recordId: record.id
+    });
+  } catch (error) {
+    console.error('Error processing cloud upload:', error);
+    res.status(500).json({
+      error: 'Error processing cloud upload',
+      details: error instanceof Error ? error.message : 'Unknown error'
+    });
+  }
+});
 // サーバーを起動
 app.listen(PORT, async () => {
   console.log(`サーバーが起動しました。ポート: ${PORT}`);

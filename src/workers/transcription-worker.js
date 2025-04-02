@@ -2,16 +2,16 @@
  * 文字起こしワーカー
  * BullMQを使用して非同期で文字起こし処理を実行します
  */
-import { Worker, Job } from 'bullmq';
-import { PrismaClient } from '@prisma/client';
-import { TranscriptionService } from '../services/transcription-service';
-import { getDownloadUrl } from '../lib/storage';
-import { queueManager, QUEUE_NAMES } from '../lib/bull-queue';
-import * as dotenv from 'dotenv';
-import * as path from 'path';
-import * as fs from 'fs';
-import * as os from 'os';
-import * as crypto from 'crypto';
+const { Worker, Job } = require('bullmq');
+const { PrismaClient } = require('@prisma/client');
+const { TranscriptionService } = require('../services/transcription-service');
+const { getDownloadUrl } = require('../lib/storage');
+const { queueManager, QUEUE_NAMES } = require('../lib/bull-queue');
+const dotenv = require('dotenv');
+const path = require('path');
+const fs = require('fs');
+const os = require('os');
+const crypto = require('crypto');
 
 // 環境変数の読み込み
 dotenv.config();
@@ -29,7 +29,7 @@ const transcriptionService = new TranscriptionService();
  * 文字起こしジョブの処理関数
  * @param job 文字起こしジョブ
  */
-async function processTranscriptionJob(job: Job): Promise<any> {
+async function processTranscriptionJob(job) {
   try {
     const { fileKey, recordId } = job.data;
     
@@ -137,7 +137,7 @@ async function processTranscriptionJob(job: Job): Promise<any> {
 /**
  * メモリ使用量を監視する関数
  */
-function monitorMemoryUsage(): void {
+function monitorMemoryUsage() {
   const memUsage = process.memoryUsage();
   const memUsageMB = Math.round(memUsage.heapUsed / 1024 / 1024);
   console.log(`メモリ使用量: ${memUsageMB}MB / ${Math.round(memUsage.heapTotal / 1024 / 1024)}MB`);
@@ -177,15 +177,15 @@ const worker = new Worker(
 );
 
 // ワーカーイベントリスナー
-worker.on('completed', (job: Job) => {
+worker.on('completed', (job) => {
   console.log(`ジョブ完了: ${job.id}`);
 });
 
-worker.on('failed', (job: Job | undefined, error: Error) => {
+worker.on('failed', (job, error) => {
   console.error(`ジョブ失敗: ${job?.id}`, error);
 });
 
-worker.on('error', (error: Error) => {
+worker.on('error', (error) => {
   console.error('ワーカーエラー:', error);
 });
 

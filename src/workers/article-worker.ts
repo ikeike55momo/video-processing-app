@@ -11,6 +11,9 @@ import axios from 'axios';
 // 環境変数の読み込み
 dotenv.config();
 
+// Redisの接続URL
+const redisUrl = process.env.REDIS_URL;
+
 // Prismaクライアントの初期化
 const prisma = new PrismaClient();
 
@@ -182,7 +185,9 @@ const worker = new Worker(
   QUEUE_NAMES.ARTICLE,
   processArticleJob,
   {
-    connection: {
+    connection: redisUrl ? {
+      url: redisUrl
+    } : {
       host: process.env.REDIS_HOST || 'localhost',
       port: parseInt(process.env.REDIS_PORT || '6379'),
       password: process.env.REDIS_PASSWORD

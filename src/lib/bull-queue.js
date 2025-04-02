@@ -1,7 +1,8 @@
-import { Queue, Worker, Job, QueueEvents } from 'bullmq';
-import IORedis from 'ioredis';
-import * as crypto from 'crypto';
-import { EventEmitter } from 'events';
+const { Queue, Worker, Job, QueueEvents } = require('bullmq');
+const { QueueScheduler } = require('bullmq');
+const IORedis = require('ioredis');
+const crypto = require('crypto');
+const { EventEmitter } = require('events');
 
 // Redis接続情報
 const redisUrl = process.env.REDIS_URL || '';
@@ -12,32 +13,14 @@ const connection = new IORedis(redisUrl, {
 });
 
 // グローバルイベントエミッター（進捗通知用）
-export const jobEvents = new EventEmitter();
+const jobEvents = new EventEmitter();
 
 // キュー名の定義
-export const QUEUE_NAMES = {
+const QUEUE_NAMES = {
   TRANSCRIPTION: 'transcription-queue',
   SUMMARY: 'summary-queue',
   ARTICLE: 'article-queue'
 };
-
-// ジョブデータのインターフェース
-export interface JobData {
-  id: string;
-  recordId: string;
-  fileKey: string;
-  type: 'transcription' | 'summary' | 'article';
-  metadata?: Record<string, any>;
-  createdAt?: number;
-}
-
-// ジョブ進捗データのインターフェース
-export interface JobProgress {
-  progress: number;
-  status: string;
-  message?: string;
-  timestamp: number;
-}
 
 // キューのオプション
 const defaultQueueOptions = {
@@ -55,21 +38,23 @@ const defaultQueueOptions = {
 };
 
 // キューマネージャークラス
-export class QueueManager {
-  private queues: Map<string, Queue> = new Map();
-  private workers: Map<string, Worker> = new Map();
-  private schedulers: Map<string, any> = new Map();
-  private queueEvents: Map<string, QueueEvents> = new Map();
+class QueueManager {
+  constructor() {
+    this.queues = new Map();
+    this.workers = new Map();
+    this.schedulers = new Map();
+    this.queueEvents = new Map();
+  }
 
   /**
    * キューを初期化する
    * @param queueName キュー名
    * @param processor ジョブ処理関数
    */
-  initQueue(queueName: string, processor?: (job: Job) => Promise<any>) {
+  initQueue(queueName, processor) {
     // キューが既に存在する場合は何もしない
     if (this.queues.has(queueName)) {
-      return this.queues.get(queueName)!;
+      return this.queues.get(queueName);
     }
 
     // キューを作成
@@ -99,8 +84,8 @@ export class QueueManager {
     // プロセッサが指定されている場合はワーカーを作成
     if (processor) {
       // スケジューラを作成（タイムアウトジョブの管理用）
-      // const scheduler = new QueueScheduler(queueName, { connection });
-      // this.schedulers.set(queueName, scheduler);
+      const scheduler = new QueueScheduler(queueName, { connection });
+      this.schedulers.set(queueName, scheduler);
 
       // ワーカーを作成
       const worker = new Worker(queueName, processor, {
@@ -132,7 +117,7 @@ export class QueueManager {
    * キューを取得する
    * @param queueName キュー名
    */
-  getQueue(queueName: string): Queue | undefined {
+  getQueue(queueName) {
     return this.queues.get(queueName);
   }
 
@@ -142,18 +127,14 @@ export class QueueManager {
    * @param data ジョブデータ
    * @param options ジョブオプション
    */
-  async addJob(
-    queueName: string,
-    data: Omit<JobData, 'id' | 'createdAt'>,
-    options: any = {}
-  ): Promise<string> {
+  async addJob(queueName, data, options = {}) {
     const queue = this.getQueue(queueName) || this.initQueue(queueName);
 
     // ジョブIDを生成
     const jobId = `job-${crypto.randomBytes(8).toString('hex')}`;
 
     // ジョブデータを作成
-    const jobData: JobData = {
+    const jobData = {
       ...data,
       id: jobId,
       createdAt: Date.now(),
@@ -186,138 +167,126 @@ export class QueueManager {
    * @param status ステータス
    * @param message メッセージ
    */
-  async updateJobProgress(
-    job: Job,
-    progress: number,
-    status: string,
-    message?: string
-  ): Promise<void> {
-    const progressData: JobProgress = {
+  async updateJobProgress(job, progress, status, message) {
+    const progressData = {
       progress,
       status,
       message,
       timestamp: Date.now(),
     };
 
-    await job.updateProgress(progressData);
-    jobEvents.emit(`job:progress:${job.id}`, { jobId: job.id, progress: progressData });
-  }
-
-  /**
-   * キューの統計情報を取得する
-   * @param queueName キュー名
-   */
-  async getQueueStats(queueName: string) {
-    const queue = this.getQueue(queueName);
-    if (!queue) {
-      throw new Error(`Queue ${queueName} not found`);
+    try {
+      await job.updateProgress(progressData);
+      console.log(`Job ${job.id} progress updated: ${progress}%`);
+      return true;
+    } catch (error) {
+      console.error(`Failed to update job progress: ${error.message}`);
+      return false;
     }
-
-    const [waiting, active, completed, failed, delayed] = await Promise.all([
-      queue.getWaitingCount(),
-      queue.getActiveCount(),
-      queue.getCompletedCount(),
-      queue.getFailedCount(),
-      queue.getDelayedCount(),
-    ]);
-
-    return {
-      waiting,
-      active,
-      completed,
-      failed,
-      delayed,
-      total: waiting + active + completed + failed + delayed,
-    };
   }
 
   /**
-   * すべてのキューをクリーンアップする
+   * ジョブを取得する
+   * @param queueName キュー名
+   * @param jobId ジョブID
    */
-  async cleanup() {
+  async getJob(queueName, jobId) {
+    const queue = this.getQueue(queueName) || this.initQueue(queueName);
+    return await queue.getJob(jobId);
+  }
+
+  /**
+   * ジョブを完了する
+   * @param queueName キュー名
+   * @param jobId ジョブID
+   * @param result 結果
+   */
+  async completeJob(queueName, jobId, result) {
+    const job = await this.getJob(queueName, jobId);
+    if (job) {
+      await job.moveToCompleted(result, queueName);
+      return true;
+    }
+    return false;
+  }
+
+  /**
+   * ジョブを失敗させる
+   * @param queueName キュー名
+   * @param jobId ジョブID
+   * @param error エラー
+   */
+  async failJob(queueName, jobId, error) {
+    const job = await this.getJob(queueName, jobId);
+    if (job) {
+      await job.moveToFailed(error, queueName);
+      return true;
+    }
+    return false;
+  }
+
+  /**
+   * ジョブをキャンセルする
+   * @param queueName キュー名
+   * @param jobId ジョブID
+   */
+  async cancelJob(queueName, jobId) {
+    const job = await this.getJob(queueName, jobId);
+    if (job) {
+      await job.remove();
+      return true;
+    }
+    return false;
+  }
+
+  /**
+   * 全てのキューを閉じる
+   */
+  async closeAll() {
     for (const [name, worker] of this.workers.entries()) {
-      console.log(`Closing worker for queue ${name}...`);
+      console.log(`Closing worker: ${name}`);
       await worker.close();
     }
 
     for (const [name, scheduler] of this.schedulers.entries()) {
-      console.log(`Closing scheduler for queue ${name}...`);
+      console.log(`Closing scheduler: ${name}`);
       await scheduler.close();
     }
 
     for (const [name, queueEvents] of this.queueEvents.entries()) {
-      console.log(`Closing queue events for queue ${name}...`);
+      console.log(`Closing queue events: ${name}`);
       await queueEvents.close();
     }
 
     for (const [name, queue] of this.queues.entries()) {
-      console.log(`Closing queue ${name}...`);
+      console.log(`Closing queue: ${name}`);
       await queue.close();
     }
 
-    console.log('All queues cleaned up');
-  }
-
-  /**
-   * デッドジョブをチェックして再キューに入れる
-   * @param queueName キュー名
-   * @param olderThanMs 処理デッドラインからの経過時間（ミリ秒）
-   */
-  async checkForDeadJobs(queueName: string, olderThanMs = 2 * 60 * 60 * 1000): Promise<number> {
-    const queue = this.getQueue(queueName);
-    if (!queue) {
-      throw new Error(`Queue ${queueName} not found`);
-    }
-
-    const activeJobs = await queue.getJobs(['active']);
-    const now = Date.now();
-    let requeued = 0;
-
-    for (const job of activeJobs) {
-      const processedOn = job.processedOn;
-      if (processedOn && now - processedOn > olderThanMs) {
-        console.log(`Dead job detected: ${job.id}, running time: ${(now - processedOn) / 1000 / 60} minutes`);
-
-        // ジョブを失敗としてマーク
-        await job.moveToFailed(new Error('Job timed out'), 'health-check');
-
-        // 再キューイング
-        const jobData = job.data;
-        const attempts = job.opts.attempts || 0;
-        
-        if (attempts < 3) { // 最大再試行回数を確認
-          await this.addJob(queueName, jobData, {
-            ...job.opts,
-            attempts: attempts + 1,
-          });
-          
-          console.log(`Job ${job.id} requeued`);
-          requeued++;
-        } else {
-          console.log(`Job ${job.id} exceeded maximum retry attempts`);
-        }
-      }
-    }
-
-    return requeued;
+    console.log('All queues closed');
   }
 }
 
 // シングルトンインスタンス
-export const queueManager = new QueueManager();
+const queueManager = new QueueManager();
 
 // 定期的にデッドジョブをチェック（15分ごと）
-if (typeof setInterval !== 'undefined') {
-  setInterval(async () => {
-    try {
-      for (const queueName of Object.values(QUEUE_NAMES)) {
-        const requeued = await queueManager.checkForDeadJobs(queueName);
-        if (requeued > 0) {
-          console.log(`Requeued ${requeued} dead jobs from queue ${queueName}`);
-        }
+setInterval(async () => {
+  try {
+    for (const queueName of Object.values(QUEUE_NAMES)) {
+      const queue = queueManager.getQueue(queueName);
+      if (queue) {
+        const jobs = await queue.getJobs(['failed'], 0, 100);
+        console.log(`Found ${jobs.length} failed jobs in queue ${queueName}`);
       }
-    } catch (error) {
-      console.error('Error checking for dead jobs:', error);
     }
-  }, 15 * 60 * 1000);
-}
+  } catch (error) {
+    console.error('Error checking dead jobs:', error);
+  }
+}, 15 * 60 * 1000);
+
+module.exports = {
+  jobEvents,
+  QUEUE_NAMES,
+  queueManager
+};

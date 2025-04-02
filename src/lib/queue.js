@@ -57,25 +57,96 @@ dotenv.config();
 let redisClient;
 /**
  * Redisクライアントを初期化する
+ * @returns {Promise<RedisClient>} Redisクライアント
  */
 function initRedisClient() {
     return __awaiter(this, void 0, void 0, function* () {
-        const url = process.env.REDIS_URL;
-        if (!url) {
-            console.error('Missing REDIS_URL environment variable');
-            throw new Error('Missing REDIS_URL environment variable');
+        let retryCount = 0;
+        const maxRetries = 5;
+        const retryDelay = 3000; // 3秒に増やす
+        
+        while (retryCount < maxRetries) {
+            try {
+                const url = process.env.REDIS_URL;
+                if (!url) {
+                    console.error('Missing REDIS_URL environment variable');
+                    return null;
+                }
+                
+                // URLがredissで始まる場合はSSL接続
+                const isSSL = url.startsWith('rediss://');
+                console.log(`Redis接続を開始します (試行 ${retryCount + 1}/${maxRetries}): ${url.replace(/:[^:]*@/, ':***@')}`);
+                console.log(`SSL接続: ${isSSL}`);
+                console.log(`Node環境: ${process.env.NODE_ENV}`);
+                
+                // SSL接続の場合は証明書検証をスキップするオプションを追加
+                // タイムアウト設定を増やす
+                const options = {
+                    url: url,
+                    socket: {
+                        tls: isSSL,
+                        rejectUnauthorized: false, // 自己署名証明書を許可
+                        connectTimeout: 30000,     // 接続タイムアウトを30秒に設定
+                        timeout: 30000,            // 操作タイムアウトを30秒に設定
+                        keepAlive: 5000            // キープアライブを5秒ごとに設定
+                    },
+                    // リトライ戦略を設定
+                    retry: {
+                        retries: 3,
+                        factor: 2,
+                        minTimeout: 1000,
+                        maxTimeout: 15000
+                    }
+                };
+                
+                console.log('Redisクライアントを作成中...');
+                redisClient = (0, redis_1.createClient)(options);
+                
+                // エラーイベントハンドラを追加
+                redisClient.on('error', (err) => {
+                    console.error('Redisエラー発生:', err);
+                });
+                
+                // 再接続イベントハンドラを追加
+                redisClient.on('reconnecting', () => {
+                    console.log('Redisに再接続中...');
+                });
+                
+                console.log('Redisに接続中...');
+                yield redisClient.connect();
+                console.log('Redisに正常に接続しました');
+                
+                // 接続テスト
+                try {
+                    const pingResult = yield redisClient.ping();
+                    console.log(`Redis PING結果: ${pingResult}`);
+                } catch (pingError) {
+                    console.error('Redis PING失敗:', pingError);
+                    throw pingError; // 再試行のためにエラーをスロー
+                }
+                
+                return redisClient;
+            } catch (error) {
+                retryCount++;
+                console.error(`Redisクライアント初期化エラー (試行 ${retryCount}/${maxRetries}):`, error);
+                if (error.code) {
+                    console.error(`エラーコード: ${error.code}`);
+                }
+                if (error.message) {
+                    console.error(`エラーメッセージ: ${error.message}`);
+                }
+                
+                // 最大リトライ回数に達した場合
+                if (retryCount >= maxRetries) {
+                    console.error(`Redis接続の最大リトライ回数(${maxRetries})に達しました。`);
+                    throw error;
+                }
+                
+                // リトライ前に待機
+                console.log(`${retryDelay}ミリ秒後に再試行します...`);
+                yield new Promise(resolve => setTimeout(resolve, retryDelay));
+            }
         }
-        redisClient = (0, redis_1.createClient)({
-            url: url,
-        });
-        // エラーハンドリング
-        redisClient.on('error', (err) => {
-            console.error('Redis Error:', err);
-        });
-        // 接続
-        yield redisClient.connect();
-        console.log('Connected to Redis');
-        return redisClient;
     });
 }
 /**
@@ -98,16 +169,28 @@ function getRedisClient() {
  */
 function addJob(queue, data) {
     return __awaiter(this, void 0, void 0, function* () {
-        const client = yield getRedisClient();
-        // ジョブIDを生成
-        const jobId = `job-${crypto.randomBytes(8).toString('hex')}`;
-        // 15分後の処理期限を設定
-        const processingDeadline = Date.now() + 15 * 60 * 1000;
-        const jobData = Object.assign(Object.assign({}, data), { id: jobId, createdAt: Date.now(), processingDeadline, retryCount: data.retryCount || 0 });
-        // キューにジョブを追加（左側に追加）
-        yield client.lPush(queue, JSON.stringify(jobData));
-        console.log(`Job added to queue ${queue}:`, jobId);
-        return jobId;
+        try {
+            const client = yield getRedisClient();
+            if (!client) {
+                console.warn(`Redis client unavailable, skipping job addition to queue ${queue}`);
+                // Redisが利用できない場合でもジョブIDを返す
+                return `job-${crypto.randomBytes(8).toString('hex')}`;
+            }
+            
+            // ジョブIDを生成
+            const jobId = `job-${crypto.randomBytes(8).toString('hex')}`;
+            // 15分後の処理期限を設定
+            const processingDeadline = Date.now() + 15 * 60 * 1000;
+            const jobData = Object.assign(Object.assign({}, data), { id: jobId, createdAt: Date.now(), processingDeadline, retryCount: data.retryCount || 0 });
+            // キューにジョブを追加（左側に追加）
+            yield client.lPush(queue, JSON.stringify(jobData));
+            console.log(`Job added to queue ${queue}:`, jobId);
+            return jobId;
+        } catch (error) {
+            console.error('Error adding job to queue:', error);
+            // エラーが発生した場合でもジョブIDを返す
+            return `job-${crypto.randomBytes(8).toString('hex')}`;
+        }
     });
 }
 /**
@@ -117,22 +200,34 @@ function addJob(queue, data) {
  */
 function getJob(queue) {
     return __awaiter(this, void 0, void 0, function* () {
-        const client = yield getRedisClient();
-        // 処理中キューの名前
-        const processingQueue = `${queue}:processing`;
-        // キューの右側からジョブを取得し、処理中キューの左側に追加
-        const result = yield client.rPopLPush(queue, processingQueue);
-        if (!result) {
-            return null;
-        }
         try {
-            return JSON.parse(result);
-        }
-        catch (error) {
-            console.error('Error parsing job data:', error);
-            // 不正なデータの場合は処理中キューから削除
-            yield client.lRem(processingQueue, 1, result);
-            return null;
+            const client = yield getRedisClient();
+            if (!client) {
+                console.warn(`Redis client unavailable, skipping job retrieval from queue ${queue}`);
+                return null;
+            }
+            
+            // 処理中キューの名前
+            const processingQueue = `${queue}:processing`;
+            
+            // キューの右側からジョブを取得し、処理中キューの左側に追加
+            const result = yield client.rPopLPush(queue, processingQueue);
+            if (!result) {
+                return null;
+            }
+            
+            try {
+                return JSON.parse(result);
+            }
+            catch (error) {
+                console.error('Error parsing job data:', error);
+                // 不正なデータの場合は処理中キューから削除
+                yield client.lRem(processingQueue, 1, result);
+                return null;
+            }
+        } catch (error) {
+            console.error('Error getting job from queue:', error);
+            return null; // エラーが発生した場合はnullを返す
         }
     });
 }
