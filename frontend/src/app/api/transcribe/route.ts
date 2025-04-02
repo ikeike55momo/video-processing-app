@@ -44,7 +44,6 @@ export async function POST(req: NextRequest) {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        recordId: newRecord.id,
         fileUrl,
       }),
     });
