@@ -28,13 +28,17 @@ export async function POST(request: Request) {
     // レコードを作成
     const record = await prisma.record.create({
       data: {
-        status: 'PROCESSING', // 直接処理中に設定
+        status: 'PROCESSING', // 処理中に設定
         file_url: fileUrl
       },
     });
 
+    console.log('新しいレコードを作成しました:', record);
+
     // バックエンドAPIに処理開始リクエストを送信
     const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'https://video-processing-api.onrender.com';
+    console.log(`バックエンドAPIに処理リクエストを送信: ${apiUrl}/api/process`);
+    
     const processResponse = await fetch(`${apiUrl}/api/process`, {
       method: 'POST',
       headers: {
@@ -48,10 +52,22 @@ export async function POST(request: Request) {
 
     if (!processResponse.ok) {
       const errorText = await processResponse.text();
+      console.error('バックエンドAPI処理エラー:', errorText);
+      
+      // エラー情報をデータベースに保存
+      await prisma.record.update({
+        where: { id: record.id },
+        data: { 
+          status: 'ERROR',
+          error: `処理の開始に失敗しました: ${errorText}`
+        },
+      });
+      
       throw new Error(`処理の開始に失敗しました: ${errorText}`);
     }
 
     const processResult = await processResponse.json();
+    console.log('バックエンドAPI処理結果:', processResult);
 
     return NextResponse.json({
       message: '処理を開始しました',

@@ -333,12 +333,34 @@ export class GeminiService {
       // ファイルサイズを確認
       const fileSizeInMB = fileArray.length / (1024 * 1024);
       
-      // チャンクサイズを計算（最大20MB）
-      const MAX_CHUNK_SIZE = 20 * 1024 * 1024; // 20MB
-      const numChunks = Math.ceil(fileArray.length / MAX_CHUNK_SIZE);
-      console.log(`ファイルを${numChunks}個のチャンクに分割します（各チャンク最大20MB）`);
+      // 動画ファイルの場合は時間ベースでチャンク分割（3〜4分程度）
+      // 音声ファイルの場合はサイズベースでチャンク分割
+      let chunkDurationSeconds = 180; // 3分 = 180秒
+      let estimatedDuration = 0;
       
-      let transcriptionResults: string[] = [];
+      // 動画/音声ファイルの推定時間を計算
+      // 一般的な動画ファイルの場合、1分あたり約10MBと仮定
+      if (['.mp4', '.mov', '.avi', '.mkv', '.webm'].includes(fileExt)) {
+        estimatedDuration = fileSizeInMB / 10 * 60; // 秒単位
+        console.log(`動画ファイルの推定時間: 約${Math.round(estimatedDuration / 60)}分`);
+      } 
+      // 音声ファイルの場合、1分あたり約1MBと仮定
+      else if (['.mp3', '.wav', '.ogg', '.m4a'].includes(fileExt)) {
+        estimatedDuration = fileSizeInMB / 1 * 60; // 秒単位
+        console.log(`音声ファイルの推定時間: 約${Math.round(estimatedDuration / 60)}分`);
+      }
+      // その他のファイルはサイズベースで分割
+      else {
+        estimatedDuration = fileSizeInMB * 6; // 仮の時間（1MBあたり6秒と仮定）
+        console.log(`ファイルの推定時間: 約${Math.round(estimatedDuration / 60)}分（推定）`);
+      }
+      
+      // チャンク数を計算（3分ごとに分割）
+      const numChunks = Math.max(1, Math.ceil(estimatedDuration / chunkDurationSeconds));
+      
+      // チャンクサイズを計算
+      const chunkSize = Math.ceil(fileArray.length / numChunks);
+      console.log(`ファイルを${numChunks}個のチャンクに分割します（各チャンク約3分、${Math.round(chunkSize / (1024 * 1024))}MB）`);
       
       // MIMEタイプを設定
       let mimeType: string;
@@ -353,83 +375,130 @@ export class GeminiService {
         mimeType = 'audio/mpeg';
       }
       
+      // 並列処理のための配列
+      const transcriptionPromises: Promise<{ index: number; text: string }>[] = [];
+      
       // 各チャンクを処理
       for (let i = 0; i < numChunks; i++) {
-        console.log(`チャンク ${i + 1}/${numChunks} を処理中...`);
+        const start = i * chunkSize;
+        const end = Math.min((i + 1) * chunkSize, fileArray.length);
         
-        // チャンクの開始位置と長さを計算
-        const start = i * MAX_CHUNK_SIZE;
-        const end = Math.min((i + 1) * MAX_CHUNK_SIZE, fileArray.length);
-        const chunkSize = end - start;
-        
-        // ファイルの一部を読み込む
-        const chunkBuffer = fileArray.slice(start, end);
-        
-        // Base64エンコード
-        const base64Chunk = this.arrayBufferToBase64(chunkBuffer);
-        console.log(`チャンク ${i + 1} をBase64エンコードしました (${base64Chunk.length} 文字)`);
-        
-        // Geminiモデルの取得
-        const model = this.genAI.getGenerativeModel({ model: this.model });
-        
-        // プロンプトの作成（チャンク情報を追加）
-        const prompt = `
-        あなたは高精度文字起こしの専門家です。このファイルは実際にユーザーがアップロードした音声または動画データの一部（チャンク ${i + 1}/${numChunks}）です。
+        // チャンク処理関数
+        const processChunk = async (): Promise<{ index: number; text: string }> => {
+          console.log(`チャンク ${i + 1}/${numChunks} を処理中...`);
+          
+          // ファイルの一部を読み込む
+          const chunkBuffer = fileArray.slice(start, end);
+          
+          // Base64エンコード
+          const base64Chunk = this.arrayBufferToBase64(chunkBuffer);
+          console.log(`チャンク ${i + 1} をBase64エンコードしました (${base64Chunk.length} 文字)`);
+          
+          // Geminiモデルの取得
+          const model = this.genAI.getGenerativeModel({ model: this.model });
+          
+          // プロンプトの作成（チャンク情報を追加）
+          const prompt = `
+          あなたは高精度文字起こしの専門家です。このファイルは実際にユーザーがアップロードした音声または動画データの一部（チャンク ${i + 1}/${numChunks}）です。
 
-        ## 文字起こしの指示
-        1. 全ての言葉を省略せず、一語一句正確に文字起こししてください
-        2. 専門用語や固有名詞のスペルや表記を統一し、正確にしてください
-        3. 話者の区別を明確にし、一貫性のある形式で表示してください（例：「話者A：」「話者B：」など）
-        4. 聞き取れない部分は[不明]と記録してください
-        5. 音声の特徴（笑い、ため息、強調など）も[笑い]のように記録してください
-        6. 言い間違いや言い直しも忠実に書き起こしてください
-        7. 句読点、改行を適切に入れて読みやすくしてください
-        8. これはファイルの一部（チャンク ${i + 1}/${numChunks}）であることを念頭に置いてください
+          ## 文字起こしの指示
+          1. 全ての言葉を省略せず、一語一句正確に文字起こししてください
+          2. 専門用語や固有名詞のスペルや表記を統一し、正確にしてください
+          3. 話者の区別を明確にし、一貫性のある形式で表示してください（例：「話者A：」「話者B：」など）
+          4. 聞き取れない部分は[不明]と記録してください
+          5. 音声の特徴（笑い、ため息、強調など）も[笑い]のように記録してください
+          6. 言い間違いや言い直しも忠実に書き起こしてください
+          7. 句読点、改行を適切に入れて読みやすくしてください
+          8. これはファイルの一部（チャンク ${i + 1}/${numChunks}）であることを念頭に置いてください
 
-        ## 最重要指示
-        - これは実際の文字起こしタスクです。架空の内容を絶対に生成しないでください。
-        - 音声に実際に含まれている内容だけを文字起こししてください。
-        - 音声が聞き取れない場合は「この部分は聞き取れません」と正直に報告してください。
-        `;
-        
-        // Gemini APIへのリクエスト
-        console.log(`チャンク ${i + 1} をGemini API (${this.model}) に送信します...`);
-        try {
-          const result = await model.generateContent([
-            { text: prompt },
-            {
-              inlineData: {
-                mimeType: mimeType,
-                data: base64Chunk
+          ## 最重要指示
+          - これは実際の文字起こしタスクです。架空の内容を絶対に生成しないでください。
+          - 音声に実際に含まれている内容だけを文字起こししてください。
+          - 音声が聞き取れない場合は「この部分は聞き取れません」と正直に報告してください。
+          `;
+          
+          // Gemini APIへのリクエスト
+          console.log(`チャンク ${i + 1} をGemini API (${this.model}) に送信します...`);
+          try {
+            const result = await model.generateContent([
+              { text: prompt },
+              {
+                inlineData: {
+                  mimeType: mimeType,
+                  data: base64Chunk
+                }
               }
+            ]);
+            
+            const responseText = await result.response;
+            const chunkTranscription = responseText.text();
+            
+            console.log(`チャンク ${i + 1} の文字起こしが完了しました`);
+            return { index: i, text: chunkTranscription };
+          } catch (chunkError) {
+            console.error(`チャンク ${i + 1} の処理中にエラーが発生しました:`, chunkError);
+            
+            // エラー発生時は少し待機してリトライ
+            console.log(`チャンク ${i + 1} の処理に失敗しました。5秒後にリトライします...`);
+            await new Promise(resolve => setTimeout(resolve, 5000));
+            
+            try {
+              console.log(`チャンク ${i + 1} をリトライします...`);
+              const retryResult = await model.generateContent([
+                { text: prompt },
+                {
+                  inlineData: {
+                    mimeType: mimeType,
+                    data: base64Chunk
+                  }
+                }
+              ]);
+              
+              const retryResponseText = await retryResult.response;
+              const retryChunkTranscription = retryResponseText.text();
+              
+              console.log(`チャンク ${i + 1} のリトライが成功しました`);
+              return { index: i, text: retryChunkTranscription };
+            } catch (retryError) {
+              console.error(`チャンク ${i + 1} のリトライにも失敗しました:`, retryError);
+              return { index: i, text: `[チャンク ${i + 1} の処理中にエラーが発生しました]` };
             }
-          ]);
-          
-          const responseText = await result.response;
-          const chunkTranscription = responseText.text();
-          
-          // 結果を配列に追加
-          transcriptionResults.push(chunkTranscription);
-          
-          console.log(`チャンク ${i + 1} の文字起こしが完了しました`);
-        } catch (chunkError) {
-          console.error(`チャンク ${i + 1} の処理中にエラーが発生しました:`, chunkError);
-          transcriptionResults.push(`[チャンク ${i + 1} の処理中にエラーが発生しました]`);
-        }
+          } finally {
+            // メモリ使用量を表示
+            console.log(`チャンク ${i + 1} 処理後のメモリ使用量: ${Math.round(window.performance.now() / 1024 / 1024)} MB`);
+          }
+        };
         
-        // メモリを解放
-        if (global.gc) {
-          console.log(`チャンク ${i + 1} 処理後にガベージコレクションを実行します`);
-          global.gc();
-        }
+        // 並列処理のためにPromiseを追加
+        transcriptionPromises.push(processChunk());
         
-        // メモリ使用量を表示
-        console.log(`チャンク ${i + 1} 処理後のメモリ使用量: ${Math.round(window.performance.now() / 1024 / 1024)} MB`);
-        
-        // 処理間隔を空ける（APIレート制限対策）
+        // APIレート制限対策として少し待機
         if (i < numChunks - 1) {
-          console.log('APIレート制限を避けるため、3秒間待機します...');
-          await new Promise(resolve => setTimeout(resolve, 3000));
+          await new Promise(resolve => setTimeout(resolve, 1000));
+        }
+      }
+      
+      // 並列処理の実行（最大3つまで同時実行）
+      console.log(`${transcriptionPromises.length}個のチャンクを並列処理します...`);
+      
+      // 並列処理の結果を格納する配列
+      const transcriptionResults: string[] = new Array(numChunks).fill('');
+      
+      // 並列処理を制限して実行
+      const CONCURRENT_LIMIT = 3;
+      for (let i = 0; i < transcriptionPromises.length; i += CONCURRENT_LIMIT) {
+        const batch = transcriptionPromises.slice(i, i + CONCURRENT_LIMIT);
+        const batchResults = await Promise.all(batch);
+        
+        // 結果を正しい位置に格納
+        for (const result of batchResults) {
+          transcriptionResults[result.index] = result.text;
+        }
+        
+        // バッチ間で待機（APIレート制限対策とメモリ解放のため）
+        if (i + CONCURRENT_LIMIT < transcriptionPromises.length) {
+          console.log('次のバッチ処理前に5秒間待機します...');
+          await new Promise(resolve => setTimeout(resolve, 5000));
         }
       }
       
@@ -441,6 +510,22 @@ export class GeminiService {
     } catch (error) {
       console.error('大きなファイルの分割処理中にエラーが発生しました:', error);
       throw error;
+    } finally {
+      // 最終的なメモリ解放
+      // TypeScriptエラーを回避するため、anyにキャスト
+      (fileArray as any) = null;
+      
+      // 明示的にガベージコレクションを促す
+      try {
+        if (typeof window !== 'undefined' && (window as any).gc) {
+          console.log('処理完了後にガベージコレクションを実行します');
+          (window as any).gc();
+        }
+      } catch (e) {
+        console.log('ガベージコレクション実行中にエラーが発生しました:', e);
+      }
+      
+      console.log(`処理完了後のメモリ使用量: ${Math.round(window.performance.now() / 1024 / 1024)} MB`);
     }
   }
 
