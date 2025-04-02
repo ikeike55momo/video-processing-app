@@ -114,7 +114,7 @@ export default function UploadPage() {
 
       // 処理開始リクエスト
       setUploadStage("処理を開始中...");
-      const processResponse = await fetch(`https://video-processing-api.onrender.com/api/transcribe`, {
+      const processResponse = await fetch(`/api/transcribe`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
