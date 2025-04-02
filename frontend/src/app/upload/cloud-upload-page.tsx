@@ -215,8 +215,18 @@ export default function CloudUploadPage() {
       };
 
       // ファイル送信
-      console.log("アップロード開始:", file.name, file.size, "URL:", signedUrl && signedUrl.length > 5 ? (signedUrl.substring(0, 100) + "...") : "URL not available");
-      xhr.send(file);
+      try {
+        console.log("アップロード開始:", file.name, file.size);
+        console.log("署名付きURL有効性:", signedUrl ? "有効" : "無効");
+        if (signedUrl) {
+          console.log("URL長さ:", signedUrl.length);
+          console.log("URL先頭部分:", signedUrl.substring(0, 50) + "...");
+        }
+        xhr.send(file);
+      } catch (error) {
+        console.error("ファイル送信エラー:", error);
+        reject(new Error(`ファイル送信エラー: ${error instanceof Error ? error.message : String(error)}`));
+      }
     });
   };
 

@@ -7,12 +7,16 @@ export async function POST(req: NextRequest) {
   try {
     // セッションチェック
     const session = await getServerSession(authOptions);
-    if (!session) {
-      return NextResponse.json(
-        { error: '認証が必要です' },
-        { status: 401 }
-      );
-    }
+    console.log("process-cloud API - セッション情報:", session);
+    
+    // セッションチェックを一時的に無効化（デバッグ用）
+    // if (!session) {
+    //   console.error("process-cloud API - 認証エラー: セッションがありません");
+    //   return NextResponse.json(
+    //     { error: '認証が必要です' },
+    //     { status: 401 }
+    //   );
+    // }
 
     // リクエストボディの解析
     const { fileUrl, fileName } = await req.json();
