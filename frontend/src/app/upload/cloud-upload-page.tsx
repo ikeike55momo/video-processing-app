@@ -69,13 +69,12 @@ export default function CloudUploadPage() {
       setUploadStage("準備中...");
 
       // 署名付きURLの取得（ファイルサイズを含める）
-      const apiUrl = "https://video-processing-app.onrender.com"; 
-      const response = await fetch(`${apiUrl}/api/upload-url`, {
+      // フロントエンドのAPIエンドポイントを使用
+      const response = await fetch(`/api/upload-url`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
-        credentials: 'include', // 認証情報を含める
         body: JSON.stringify({
           fileName: file.name,
           contentType: file.type,
@@ -120,12 +119,11 @@ export default function CloudUploadPage() {
 
       // 処理開始リクエスト
       setUploadStage("処理を開始中...");
-      const processResponse = await fetch(`${apiUrl}/api/process`, {
+      const processResponse = await fetch(`/api/process`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
-        credentials: 'include', // 認証情報を含める
         body: JSON.stringify({
           fileUrl,
         }),
@@ -214,7 +212,7 @@ export default function CloudUploadPage() {
       };
 
       // ファイル送信
-      console.log("アップロード開始:", file.name, file.size, "URL:", signedUrl && signedUrl.length > 0 ? (signedUrl.substring(0, 100) + "...") : "URL not available");
+      console.log("アップロード開始:", file.name, file.size, "URL:", signedUrl && signedUrl.length > 5 ? (signedUrl.substring(0, 100) + "...") : "URL not available");
       xhr.send(file);
     });
   };

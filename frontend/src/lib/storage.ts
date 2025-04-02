@@ -43,7 +43,7 @@ console.log('R2設定:', {
   endpoint: R2_ENDPOINT,
   bucket: R2_BUCKET_NAME,
   // 機密情報なので完全には表示しない
-  accessKeyIdPrefix: R2_ACCESS_KEY_ID ? R2_ACCESS_KEY_ID.substring(0, 5) + '...' : undefined,
+  accessKeyIdPrefix: R2_ACCESS_KEY_ID && R2_ACCESS_KEY_ID.length > 0 ? R2_ACCESS_KEY_ID.substring(0, 5) + '...' : undefined,
   secretKeyExists: !!R2_SECRET_ACCESS_KEY,
   region: "auto",
   forcePathStyle: true

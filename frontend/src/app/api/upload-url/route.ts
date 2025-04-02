@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 
-// バックエンドAPIのURL
-const API_URL = "https://video-processing-api.onrender.com";
+// バックエンドAPIのURL（環境変数から取得、未設定の場合はデフォルト値を使用）
+const API_URL = process.env.NEXT_PUBLIC_API_URL || "https://video-processing-api.onrender.com";
 
 export async function POST(request: NextRequest) {
   try {
