@@ -1,12 +1,12 @@
 services:
   # WebサービスとしてのAPIサービス
   - type: web
-    name: video-processing-app
+    name: video-processing-api
     env: node
     nodeVersion: 18
     plan: pro
-    buildCommand: npm install && npx prisma generate --schema=./prisma/schema.prisma && npm run build
-    startCommand: npm start
+    buildCommand: npm install && npx prisma generate --schema=./prisma/schema.prisma && npx prisma db push --schema=./prisma/schema.prisma --accept-data-loss
+    startCommand: node --max-old-space-size=1024 src/server.js
     rootDir: .
     autoDeploy: true
     envVars:
@@ -36,16 +36,18 @@ services:
       - key: OPENROUTER_API_KEY
         sync: false
       - key: ALLOWED_ORIGINS
-        value: "https://video-processing-frontend.onrender.com"
+        value: "https://video-processing-frontend.onrender.com,https://vpm.ririaru-stg.cloud"
+      - key: SKIP_TYPE_CHECK
+        value: true
     healthCheckPath: /api/healthcheck
 
   # フロントエンドアプリケーション（完全に新しい名前で作成）
   - type: web
-    name: video-frontend-nextjs-app
+    name: video-processing-frontend
     env: node
     nodeVersion: 18
     plan: standard
-    buildCommand: cd frontend && apt-get update && apt-get install -y ffmpeg && npm install && npm run build
+    buildCommand: cd frontend && npm install --production=false && npx prisma db push --schema=./prisma/schema.prisma --accept-data-loss && npm run build
     startCommand: cd frontend && npm start
     rootDir: .
     autoDeploy: true
@@ -54,16 +56,16 @@ services:
         value: production
       - key: PORT
         value: "3000"
+      - key: NEXTAUTH_URL
+        value: "https://video-processing-frontend.onrender.com"
+      - key: NEXTAUTH_SECRET
+        sync: false
       - key: DATABASE_URL
         value: "postgresql://wado_wado_user:U5YqVgZ8xL4OaqGGybLqdJOs4ZwSIWqG@dpg-cve55ldrie7s73e158c0-a/wado_wado"
       - key: DIRECT_URL
         value: "postgresql://wado_wado_user:U5YqVgZ8xL4OaqGGybLqdJOs4ZwSIWqG@dpg-cve55ldrie7s73e158c0-a/wado_wado"
-      - key: NEXTAUTH_URL
-        value: "https://video-frontend-nextjs-app.onrender.com"
-      - key: NEXTAUTH_SECRET
-        sync: false
       - key: NEXT_PUBLIC_API_URL
-        value: "https://video-processing-app.onrender.com"
+        value: "https://video-processing-api.onrender.com"
       - key: R2_ENDPOINT
         sync: false
       - key: R2_ACCESS_KEY_ID
@@ -87,9 +89,9 @@ services:
   - type: worker
     name: transcription-worker
     env: node
-    nodeVersion: 18
+    nodeVersion: 18.x
     plan: pro
-    buildCommand: npm install && npx prisma generate --schema=./prisma/schema.prisma && npm run build
+    buildCommand: npm install && npx prisma generate --schema=./prisma/schema.prisma && npx prisma db push --schema=./prisma/schema.prisma --accept-data-loss
     startCommand: npm run start:transcription
     rootDir: .
     autoDeploy: true
@@ -122,9 +124,9 @@ services:
   - type: worker
     name: summary-worker
     env: node
-    nodeVersion: 18
+    nodeVersion: 18.x
     plan: standard
-    buildCommand: npm install && npx prisma generate --schema=./prisma/schema.prisma && npm run build
+    buildCommand: npm install && npx prisma generate --schema=./prisma/schema.prisma && npx prisma db push --schema=./prisma/schema.prisma --accept-data-loss
     startCommand: npm run start:summary
     rootDir: .
     autoDeploy: true
@@ -149,9 +151,9 @@ services:
   - type: worker
     name: article-worker
     env: node
-    nodeVersion: 18
+    nodeVersion: 18.x
     plan: standard
-    buildCommand: npm install && npx prisma generate --schema=./prisma/schema.prisma && npm run build
+    buildCommand: npm install && npx prisma generate --schema=./prisma/schema.prisma && npx prisma db push --schema=./prisma/schema.prisma --accept-data-loss
     startCommand: npm run start:article
     rootDir: .
     autoDeploy: true
@@ -177,9 +179,5 @@ services:
     name: video-processing-queue
     plan: standard
     ipAllowList:
-      - source: 10.0.0.0/8  # 内部ネットワークのみ許可
-        description: internal-network
-      - source: 172.16.0.0/12
-        description: internal-network
-      - source: 192.168.0.0/16
-        description: internal-network
+      - source: 0.0.0.0/0  # すべてのIPアドレスを許可
+        description: allow-all-ips
