@@ -1,9 +1,19 @@
 import { NextRequest, NextResponse } from "next/server";
+import { getServerSession } from "next-auth/next";
+import { authOptions } from "@/lib/auth";
 
 // バックエンドAPIのURL（環境変数から取得、未設定の場合はデフォルト値を使用）
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "https://video-processing-api.onrender.com";
 
 export async function POST(request: NextRequest) {
+  // セッションチェック
+  const session = await getServerSession(authOptions);
+  if (!session) {
+    return NextResponse.json(
+      { error: "認証が必要です" },
+      { status: 401 }
+    );
+  }
   try {
     // リクエストボディの取得
     const body = await request.json();

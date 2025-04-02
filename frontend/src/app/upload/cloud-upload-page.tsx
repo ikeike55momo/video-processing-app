@@ -31,6 +31,9 @@ export default function CloudUploadPage() {
     return null;
   }
 
+  // セッション情報をコンソールに出力（デバッグ用）
+  console.log("セッション情報:", session);
+
   // ファイル選択ハンドラー
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const selectedFile = e.target.files?.[0];
