@@ -22,6 +22,17 @@ const s3Client = new S3Client({
     accessKeyId: R2_ACCESS_KEY_ID || '',
     secretAccessKey: R2_SECRET_ACCESS_KEY || '',
   },
+  // forcePathStyleをfalseに設定（CloudflareのR2ではこちらが推奨）
+  forcePathStyle: false,
+});
+
+// 初期化時にR2設定情報をログ出力
+console.log('R2設定情報:', {
+  endpoint: R2_ENDPOINT ? '設定あり' : '未設定',
+  accessKeyId: R2_ACCESS_KEY_ID ? '設定あり' : '未設定',
+  secretAccessKey: R2_SECRET_ACCESS_KEY ? '設定あり（長さ: ' + (R2_SECRET_ACCESS_KEY?.length || 0) + '）' : '未設定',
+  bucketName: R2_BUCKET_NAME,
+  region: 'auto',
 });
 
 /**
