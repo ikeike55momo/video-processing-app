@@ -15,6 +15,7 @@ export default function UploadPage() {
   const [error, setError] = useState("");
   const [uploadStage, setUploadStage] = useState<string>("");
   const [jobId, setJobId] = useState<string | null>(null);
+  const [recordId, setRecordId] = useState<string | null>(null);
 
   // セッションチェック
   if (status === "loading") {
@@ -132,6 +133,7 @@ export default function UploadPage() {
       
       // ジョブIDを設定
       setJobId(jobId);
+      setRecordId(recordId);
       setUploadStage("処理中...");
       
       // 結果ページへのリダイレクトは行わず、このページで進捗を表示する

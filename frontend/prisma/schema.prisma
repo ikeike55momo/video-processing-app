@@ -22,7 +22,7 @@ datasource db {
 
 model Record {
   id             String    @id @default(uuid())
-  file_url       String?   // nullableに変更
+  file_url       String
   transcript_text String?   @db.Text
   timestamps_json String?   @db.Text
   summary_text   String?   @db.Text

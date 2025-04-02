@@ -354,33 +354,28 @@ app.get('/api/job-status/:jobId', async (req: Request<{ jobId: string }>, res: R
   }
 });
 
-// 文字起こし処理を開始するエンドポイント（BullMQバージョン）
+// 文字起こし処理を開始するエンドポイント
 app.post('/api/transcribe', async (req: Request, res: Response) => {
   try {
-    const { fileKey, recordId } = req.body;
+    const { fileKey, fileName } = req.body;
     
-    if (!fileKey || !recordId) {
+    if (!fileKey) {
       return res.status(400).json({
         error: 'Missing required fields',
-        details: 'fileKey and recordId are required'
+        details: 'fileKey is required'
       });
     }
     
-    // レコードの存在確認
-    const record = await prisma.record.findUnique({
-      where: { id: recordId }
+    // 新しいレコードをデータベースに作成
+    const record = await prisma.record.create({
+      data: {
+        file_key: fileKey,
+        file_name: fileName || 'unknown',
+        status: 'UPLOADED',
+        r2_bucket: process.env.R2_BUCKET_NAME || 'video-processing'
+      }
     });
-    
-    if (!record) {
-      return res.status(404).json({ error: 'Record not found' });
-    }
-    
-    // ステータスを更新
-    await prisma.record.update({
-      where: { id: recordId },
-      data: { status: 'PROCESSING' }
-    });
-    
+
     // ファイルサイズを取得（可能であれば）
     let fileSize: number | null = null;
     try {
@@ -394,14 +389,20 @@ app.post('/api/transcribe', async (req: Request, res: Response) => {
     const jobId = await queueManager.addJob(QUEUE_NAMES.TRANSCRIPTION, {
       type: 'transcription',
       fileKey,
-      recordId,
+      recordId: record.id,
       metadata: { fileSize }
+    });
+    
+    // ステータスを更新
+    await prisma.record.update({
+      where: { id: record.id },
+      data: { status: 'PROCESSING' }
     });
     
     res.status(200).json({
       message: 'Transcription job queued successfully',
       jobId,
-      recordId
+      recordId: record.id
     });
   } catch (error) {
     console.error('Error starting transcription:', error);
