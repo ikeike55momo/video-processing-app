@@ -8,7 +8,10 @@ const API_URL = process.env.NEXT_PUBLIC_API_URL || "https://video-processing-api
 export async function POST(request: NextRequest) {
   // セッションチェック
   const session = await getServerSession(authOptions);
+  console.log("upload-url API - セッション情報:", session);
+  
   if (!session) {
+    console.error("upload-url API - 認証エラー: セッションがありません");
     return NextResponse.json(
       { error: "認証が必要です" },
       { status: 401 }
@@ -22,17 +25,40 @@ export async function POST(request: NextRequest) {
     console.log("バックエンドAPI URL:", API_URL);
 
     // バックエンドAPIにリクエストを転送
-    const backendResponse = await fetch(`${API_URL}/api/upload-url`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(body),
-    });
-
-    // バックエンドからのレスポンスを取得
-    const data = await backendResponse.json();
-    console.log("バックエンドAPIレスポンス:", data);
+    console.log(`バックエンドAPIリクエスト送信: ${API_URL}/api/upload-url`);
+    console.log("リクエストボディ:", JSON.stringify(body));
+    
+    let data;
+    let backendResponse;
+    
+    try {
+      backendResponse = await fetch(`${API_URL}/api/upload-url`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(body),
+      });
+      
+      console.log("バックエンドAPIレスポンスステータス:", backendResponse.status);
+      console.log("バックエンドAPIレスポンスヘッダー:", Object.fromEntries(backendResponse.headers.entries()));
+      
+      // レスポンスのテキストを取得
+      const responseText = await backendResponse.text();
+      console.log("バックエンドAPIレスポンステキスト:", responseText);
+      
+      // JSONとして解析
+      try {
+        data = JSON.parse(responseText);
+        console.log("バックエンドAPIレスポンスJSON:", data);
+      } catch (jsonError) {
+        console.error("JSONパースエラー:", jsonError);
+        throw new Error(`バックエンドAPIからの応答をJSONとして解析できません: ${responseText}`);
+      }
+    } catch (fetchError) {
+      console.error("バックエンドAPIリクエストエラー:", fetchError);
+      throw new Error(`バックエンドAPIへのリクエストに失敗しました: ${fetchError instanceof Error ? fetchError.message : String(fetchError)}`);
+    }
 
     // レスポンスコードを保持してクライアントに返す
     if (!backendResponse.ok) {
