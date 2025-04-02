@@ -270,12 +270,12 @@ export default function RecordDetailPage() {
               </div>
               {record.timestamps_json ? (
                 <VideoWithTimestamps
-                  videoSrc={record.file_url}
+                  src={record.file_url}
                   timestamps={parseTimestamps(record.timestamps_json)}
                 />
               ) : record.summary_text && record.summary_text.includes('"timestamps"') ? (
                 <VideoWithTimestamps
-                  videoSrc={record.file_url}
+                  src={record.file_url}
                   timestamps={parseTimestamps(record.summary_text)}
                 />
               ) : (
