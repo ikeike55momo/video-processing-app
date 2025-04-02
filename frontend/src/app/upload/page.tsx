@@ -119,7 +119,7 @@ export default function UploadPage() {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          fileKey: result.fileKey,
+          fileKey: result.key || result.fileKey, // result.keyを優先的に使用し、存在しない場合はresult.fileKeyを使用
           fileName: file.name,
         }),
       });
