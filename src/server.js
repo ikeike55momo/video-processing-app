@@ -242,7 +242,7 @@ app.post('/api/transcribe', async (req, res) => {
     // レコードIDが指定されていない場合は新しいレコードを作成
     let record;
     if (!recordId) {
-      record = yield prisma.record.create({
+      record = await prisma.record.create({
         data: {
           file_url: fileUrl,
           status: 'PROCESSING',
@@ -251,7 +251,7 @@ app.post('/api/transcribe', async (req, res) => {
       });
       console.log(`新しいレコードを作成しました: ${record.id}`);
     } else {
-      record = yield prisma.record.findUnique({
+      record = await prisma.record.findUnique({
         where: { id: recordId }
       });
       
@@ -260,7 +260,7 @@ app.post('/api/transcribe', async (req, res) => {
       }
       
       // ステータスを更新
-      record = yield prisma.record.update({
+      record = await prisma.record.update({
         where: { id: recordId },
         data: {
           status: 'PROCESSING',
@@ -306,7 +306,7 @@ app.post('/api/transcribe', async (req, res) => {
     }
     
     // 文字起こし結果とタイムスタンプをデータベースに保存
-    yield prisma.record.update({
+    await prisma.record.update({
       where: { id: record.id },
       data: {
         transcript_text: transcript,
@@ -317,7 +317,7 @@ app.post('/api/transcribe', async (req, res) => {
     });
     
     // 要約キューにジョブを追加
-    yield (0, queue_1.addJob)('summary', {
+    await (0, queue_1.addJob)('summary', {
       type: 'summary',
       recordId: record.id,
       fileKey: record.file_key || path.basename(fileUrl)
