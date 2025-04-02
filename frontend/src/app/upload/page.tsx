@@ -205,7 +205,7 @@ export default function UploadPage() {
       };
 
       // ファイル送信
-      console.log("アップロード開始:", file.name, file.size, "URL:", signedUrl.substring(0, 100) + "...");
+      console.log("アップロード開始:", file.name, file.size, "URL:", signedUrl && signedUrl.length > 5 ? (signedUrl.substring(0, 100) + "...") : "URL not available");
       xhr.send(file);
     });
   };
