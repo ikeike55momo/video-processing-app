@@ -2,7 +2,7 @@ services:
   - type: web
     name: video-processing-frontend
     env: node
-    buildCommand: npm install && npm run build
+    buildCommand: npm install && npm install tailwindcss postcss autoprefixer && npm run build
     startCommand: npm start
     plan: starter
     autoDeploy: true
@@ -26,7 +26,7 @@ services:
       - key: CLOUDFLARE_ACCOUNT_ID
         sync: false
       - key: CLOUDFLARE_ACCESS_KEY_ID
-        sync: false
+        sync: false　
       - key: CLOUDFLARE_SECRET_ACCESS_KEY
         sync: false
       - key: CLOUDFLARE_R2_BUCKET
