@@ -449,6 +449,15 @@ app.post('/api/transcribe', async (req, res) => {
  */
 async function downloadFile(fileUrl, tempDir) {
   try {
+    // R2の設定情報をログ出力
+    console.log('R2設定情報:', {
+      endpoint: process.env.R2_ENDPOINT ? '設定あり' : '未設定',
+      accessKeyId: process.env.R2_ACCESS_KEY_ID ? '設定あり' : '未設定',
+      secretAccessKey: process.env.R2_SECRET_ACCESS_KEY ? '設定あり（長さ: ' + (process.env.R2_SECRET_ACCESS_KEY?.length || 0) + '）' : '未設定',
+      bucketName: process.env.R2_BUCKET_NAME,
+      publicUrl: process.env.R2_PUBLIC_URL,
+    });
+
     // URLの形式に応じた処理
     if (fileUrl.startsWith('http://') || fileUrl.startsWith('https://')) {
       // ファイル名を取得
@@ -467,8 +476,11 @@ async function downloadFile(fileUrl, tempDir) {
           // URLからfileKeyを抽出
           // 例: https://...r2.cloudflarestorage.com/uploads/1743352679651-30大プレゼント.mp4?...
           const pathname = urlObj.pathname;
-          // パスの先頭の/を削除し、バケット名がパスに含まれている場合はそれも削除
+          // パスの先頭の/を削除
           let fileKey = pathname.startsWith('/') ? pathname.substring(1) : pathname;
+          
+          // クエリパラメータを削除（?以降を削除）
+          fileKey = fileKey.split('?')[0];
           
           // バケット名がパスに含まれている場合は削除
           const bucketName = process.env.R2_BUCKET_NAME;
@@ -479,21 +491,66 @@ async function downloadFile(fileUrl, tempDir) {
           console.log(`抽出したファイルキー: ${fileKey}`);
           
           // R2から直接ファイルを取得
-          const { getFileContents } = require('./lib/storage');
-          const fileBuffer = await getFileContents(fileKey);
-          
-          // ファイルを一時ディレクトリに保存
-          fs.writeFileSync(localFilePath, fileBuffer);
-          console.log(`ファイルをR2から直接ダウンロードしました: ${localFilePath}`);
-          return localFilePath;
+          try {
+            console.log(`getFileContents関数を呼び出します。fileKey: ${fileKey}`);
+            const { getFileContents } = require('./lib/storage');
+            const fileBuffer = await getFileContents(fileKey);
+            console.log(`getFileContents関数が成功しました。ファイルサイズ: ${fileBuffer.length} bytes`);
+            
+            // ファイルを一時ディレクトリに保存
+            fs.writeFileSync(localFilePath, fileBuffer);
+            console.log(`ファイルをR2から直接ダウンロードしました: ${localFilePath}`);
+            return localFilePath;
+          } catch (getContentsError) {
+            console.error(`getFileContents関数でエラーが発生しました:`, getContentsError);
+            throw getContentsError;
+          }
         } catch (r2Error) {
-          console.error('R2からのダウンロードに失敗しました。HTTPリクエストを試みます:', r2Error);
-          // R2からの直接ダウンロードに失敗した場合は、HTTPリクエストを試みる
+          console.error('R2からのダウンロードに失敗しました。公開URLを試みます:', r2Error);
+          
+          // R2の公開URLを使用してみる
+          const publicUrl = process.env.R2_PUBLIC_URL;
+          if (publicUrl) {
+            try {
+              // URLからfileKeyを抽出（再度）
+              const pathname = urlObj.pathname;
+              let fileKey = pathname.startsWith('/') ? pathname.substring(1) : pathname;
+              fileKey = fileKey.split('?')[0];
+              
+              if (bucketName && fileKey.startsWith(bucketName + '/')) {
+                fileKey = fileKey.substring(bucketName.length + 1);
+              }
+              
+              const directUrl = `${publicUrl}/${fileKey}`;
+              console.log(`公開URLを使用してファイルにアクセスします: ${directUrl}`);
+              
+              const response = await axios({
+                method: 'get',
+                url: directUrl,
+                responseType: 'stream',
+                timeout: 30000,
+              });
+              
+              const writer = fs.createWriteStream(localFilePath);
+              response.data.pipe(writer);
+              
+              await new Promise((resolve, reject) => {
+                writer.on('finish', resolve);
+                writer.on('error', reject);
+              });
+              
+              console.log(`公開URLからのダウンロード完了: ${localFilePath}`);
+              return localFilePath;
+            } catch (publicUrlError) {
+              console.error('公開URLからのダウンロードに失敗しました:', publicUrlError);
+              // 失敗した場合は次の方法を試す
+            }
+          }
         }
       }
       
       // 通常のHTTPリクエストでダウンロード
-      console.log('公開URLからファイルをダウンロードします');
+      console.log('通常のHTTPリクエストでファイルをダウンロードします');
       console.log(`ファイルをダウンロード中: ${localFilePath}`);
       
       // ファイルをダウンロード
