@@ -100,14 +100,15 @@ app.post('/api/upload-url', async (req: Request, res: Response) => {
         file_key: uploadData.key,
         r2_bucket: uploadData.bucket || '',
         status: 'UPLOADED',
-        file_url: uploadData.url
+        file_url: uploadData.fileUrl || uploadData.url
       }
     });
 
     res.status(200).json({
       uploadUrl: uploadData.url,
       recordId: record.id,
-      fileKey: uploadData.key
+      fileKey: uploadData.key,
+      fileUrl: uploadData.fileUrl || uploadData.url
     });
   } catch (error) {
     console.error('Error generating upload URL:', error);

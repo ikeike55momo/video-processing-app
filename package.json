@@ -35,7 +35,7 @@
     "@google-cloud/speech": "^7.0.1",
     "@google/generative-ai": "^0.2.1",
     "@mui/material": "^7.0.0",
-    "@prisma/client": "5.10.2",
+    "@prisma/client": "^6.5.0",
     "@types/express": "^5.0.1",
     "@types/fluent-ffmpeg": "^2.1.27",
     "@types/node": "^22.13.10",
@@ -46,7 +46,6 @@
     "ffmpeg-static": "^5.2.0",
     "fluent-ffmpeg": "^2.1.3",
     "ioredis": "^5.6.0",
-    "prisma": "5.10.2",
     "redis": "^4.7.0",
     "rimraf": "^5.0.5",
     "socket.io": "^4.8.1",
@@ -55,6 +54,7 @@
   "devDependencies": {
     "ffprobe-static": "^3.1.0",
     "nodemon": "^3.1.0",
+    "prisma": "^6.5.0",
     "ts-node": "^10.9.2",
     "typescript": "^5.8.2"
   }

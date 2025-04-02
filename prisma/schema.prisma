@@ -12,19 +12,21 @@ datasource db {
 }
 
 model Record {
-  id              String    @id @default(uuid())
-  file_url        String?   // nullを許容するように変更
-  file_key        String?
-  r2_bucket       String?
-  transcript_text String?
-  timestamps_json String?   @db.Text
-  summary_text    String?
-  article_text    String?
-  error           String?
-  status          Status    @default(UPLOADED)
-  processing_step String?
-  created_at      DateTime  @default(now())
-  deleted_at      DateTime?
+  id                String    @id @default(uuid())
+  file_url          String?   // nullを許容するように変更
+  file_key          String?
+  file_name         String?   // ファイル名を保存するフィールドを追加
+  r2_bucket         String?
+  transcript_text   String?
+  timestamps_json   String?   @db.Text
+  summary_text      String?
+  article_text      String?
+  error             String?
+  status            Status    @default(UPLOADED)
+  processing_step   String?
+  processing_progress Float?   // 処理の進捗率（0-100%）を保存するフィールドを追加（Float型に変更）
+  created_at        DateTime  @default(now())
+  deleted_at        DateTime?
 
   @@map("records")
 }
