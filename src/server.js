@@ -451,20 +451,65 @@ async function downloadFile(fileUrl, tempDir) {
   try {
     // URLの形式に応じた処理
     if (fileUrl.startsWith('http://') || fileUrl.startsWith('https://')) {
-      // 公開URLの場合、一時ファイルにダウンロード
-      console.log('公開URLからファイルをダウンロードします');
-      
       // ファイル名を取得
-      const fileName = path.basename(new URL(fileUrl).pathname);
+      const urlObj = new URL(fileUrl);
+      const fileName = path.basename(urlObj.pathname);
       const localFilePath = path.join(tempDir, fileName);
       
+      // R2の署名付きURLかどうかを判断
+      const isR2Url = fileUrl.includes('r2.cloudflarestorage.com') || 
+                      fileUrl.includes('r2.dev');
+      
+      if (isR2Url) {
+        console.log('R2の署名付きURLからファイルをダウンロードします');
+        
+        try {
+          // URLからfileKeyを抽出
+          // 例: https://...r2.cloudflarestorage.com/uploads/1743352679651-30大プレゼント.mp4?...
+          const pathname = urlObj.pathname;
+          // パスの先頭の/を削除し、バケット名がパスに含まれている場合はそれも削除
+          let fileKey = pathname.startsWith('/') ? pathname.substring(1) : pathname;
+          
+          // バケット名がパスに含まれている場合は削除
+          const bucketName = process.env.R2_BUCKET_NAME;
+          if (bucketName && fileKey.startsWith(bucketName + '/')) {
+            fileKey = fileKey.substring(bucketName.length + 1);
+          }
+          
+          console.log(`抽出したファイルキー: ${fileKey}`);
+          
+          // R2から直接ファイルを取得
+          const { getFileContents } = require('./lib/storage');
+          const fileBuffer = await getFileContents(fileKey);
+          
+          // ファイルを一時ディレクトリに保存
+          fs.writeFileSync(localFilePath, fileBuffer);
+          console.log(`ファイルをR2から直接ダウンロードしました: ${localFilePath}`);
+          return localFilePath;
+        } catch (r2Error) {
+          console.error('R2からのダウンロードに失敗しました。HTTPリクエストを試みます:', r2Error);
+          // R2からの直接ダウンロードに失敗した場合は、HTTPリクエストを試みる
+        }
+      }
+      
+      // 通常のHTTPリクエストでダウンロード
+      console.log('公開URLからファイルをダウンロードします');
       console.log(`ファイルをダウンロード中: ${localFilePath}`);
       
       // ファイルをダウンロード
       const response = await axios({
         method: 'get',
         url: fileUrl,
-        responseType: 'stream'
+        responseType: 'stream',
+        // タイムアウトを設定（30秒）
+        timeout: 30000,
+        // リトライ設定
+        maxRedirects: 5,
+        // カスタムヘッダー
+        headers: {
+          'User-Agent': 'VideoProcessingApp/1.0',
+          'Accept': '*/*'
+        }
       });
       
       const writer = fs.createWriteStream(localFilePath);
