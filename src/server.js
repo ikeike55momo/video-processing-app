@@ -210,7 +210,7 @@ app.post('/api/process', (req, res) => __awaiter(void 0, void 0, void 0, functio
             fileKey: record.file_key
         });
         // ステータスを更新
-        await prisma.record.update({
+        yield prisma.record.update({
             where: { id: recordId },
             data: { status: 'PROCESSING' }
         });
@@ -487,7 +487,7 @@ app.post('/api/records/:id/retry', (req, res) => __awaiter(void 0, void 0, void 
                 jobType = 'transcription';
         }
         // ジョブをキューに追加
-        await (0, queue_1.addJob)(queueName, {
+        yield (0, queue_1.addJob)(queueName, {
             type: jobType,
             recordId: recordId,
             fileKey: record.file_key
