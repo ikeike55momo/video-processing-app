@@ -1,0 +1,41 @@
+services:
+  - type: web
+    name: video-processing-frontend
+    env: node
+    buildCommand: npm install && npm run build
+    startCommand: npm start
+    plan: starter
+    autoDeploy: true
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        sync: false
+      - key: DIRECT_URL
+        sync: false
+      - key: NEXTAUTH_URL
+        sync: false
+      - key: NEXTAUTH_SECRET
+        sync: false
+      - key: NEXT_PUBLIC_API_URL
+        sync: false
+      - key: GOOGLE_CLIENT_ID
+        sync: false
+      - key: GOOGLE_CLIENT_SECRET
+        sync: false
+      - key: CLOUDFLARE_ACCOUNT_ID
+        sync: false
+      - key: CLOUDFLARE_ACCESS_KEY_ID
+        sync: false
+      - key: CLOUDFLARE_SECRET_ACCESS_KEY
+        sync: false
+      - key: CLOUDFLARE_R2_BUCKET
+        sync: false
+      - key: CLOUDFLARE_PUBLIC_URL
+        sync: false
+    buildFilter:
+      paths:
+        - frontend/**/*
+    healthCheckPath: /api/healthcheck
+    # デプロイ後にマイグレーションを実行
+    postDeployCommand: cd frontend && node scripts/apply-migration.js
