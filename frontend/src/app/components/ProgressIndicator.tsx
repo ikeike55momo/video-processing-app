@@ -15,7 +15,7 @@ export default function ProgressIndicatorComponent({
   currentStep: number;
   totalSteps: number;
   status: string;
-  error?: string;
+  error?: string | null;
   onRetry?: () => void;
   onRetryStep?: (step: number) => void;
 }) {
