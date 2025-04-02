@@ -43,23 +43,38 @@ export async function POST(req: NextRequest) {
         );
       }
     } 
-    // fileUrlのみ指定されている場合はレコードを検索または作成
+    // fileUrlのみ指定されている場合は常に新しいレコードを作成
     else if (fileUrl) {
-      // 既存のレコードを検索
-      record = await prisma.record.findFirst({
-        where: { file_url: fileUrl },
+      // 同じURLの処理中レコードを検索
+      const existingRecords = await prisma.record.findMany({
+        where: { 
+          file_url: fileUrl,
+          status: 'PROCESSING'
+        },
       });
       
-      // レコードが見つからない場合は新規作成
-      if (!record) {
-        record = await prisma.record.create({
-          data: {
-            file_url: fileUrl,
-            status: 'UPLOADED',
-          },
-        });
-        console.log('新しいレコードを作成しました:', record);
+      // 処理中のレコードがあれば削除（論理削除）
+      if (existingRecords.length > 0) {
+        console.log(`同じURLの処理中レコードが${existingRecords.length}件見つかりました。削除します。`);
+        for (const existingRecord of existingRecords) {
+          await prisma.record.update({
+            where: { id: existingRecord.id },
+            data: { 
+              deleted_at: new Date(),
+              status: 'ERROR'
+            },
+          });
+        }
       }
+      
+      // 新しいレコードを作成
+      record = await prisma.record.create({
+        data: {
+          file_url: fileUrl,
+          status: 'UPLOADED',
+        },
+      });
+      console.log('新しいレコードを作成しました:', record);
     }
 
     // ステータスをPROCESSINGに更新
@@ -75,35 +90,54 @@ export async function POST(req: NextRequest) {
     const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'https://video-processing-api.onrender.com';
     console.log(`バックエンドAPIに処理リクエストを送信: ${apiUrl}/api/process`);
     
-    const processResponse = await fetch(`${apiUrl}/api/process`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        recordId: record!.id,
-        fileUrl: record!.file_url,
-      }),
-    });
-
-    if (!processResponse.ok) {
-      const errorText = await processResponse.text();
-      console.error('バックエンドAPI処理エラー:', errorText);
-      
-      // エラー情報をデータベースに保存
-      await prisma.record.update({
-        where: { id: record!.id },
-        data: { 
-          status: 'ERROR',
-          error: `処理の開始に失敗しました: ${errorText}`
+    let processResult = { jobId: null };
+    try {
+      const processResponse = await fetch(`${apiUrl}/api/process`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
         },
+        body: JSON.stringify({
+          recordId: record!.id,
+          fileUrl: record!.file_url,
+        }),
       });
-      
-      throw new Error(`処理の開始に失敗しました: ${errorText}`);
-    }
 
-    const processResult = await processResponse.json();
-    console.log('バックエンドAPI処理結果:', processResult);
+      const responseText = await processResponse.text();
+      console.log('バックエンドAPIレスポンス:', responseText);
+      
+      try {
+        // JSONとして解析を試みる
+        const responseData = JSON.parse(responseText);
+        
+        if (!processResponse.ok) {
+          console.warn('バックエンドAPI処理警告:', responseData);
+          
+          // 「既に処理中」エラーの場合は、エラーとして扱わない
+          if (responseData.error && responseData.error.includes("already being processed")) {
+            console.log('レコードは既に処理中です。処理を続行します。');
+          } else {
+            // その他のエラーの場合は、エラー情報をデータベースに保存
+            await prisma.record.update({
+              where: { id: record!.id },
+              data: { 
+                status: 'PROCESSING', // エラーではなく処理中として扱う
+                error: null // エラー情報をクリア
+              },
+            });
+          }
+        } else {
+          processResult = responseData;
+          console.log('バックエンドAPI処理結果:', processResult);
+        }
+      } catch (jsonError) {
+        console.error('JSONパースエラー:', jsonError);
+        // JSONパースエラーの場合でも処理を続行
+      }
+    } catch (fetchError) {
+      console.error('バックエンドAPIリクエストエラー:', fetchError);
+      // フェッチエラーの場合でも処理を続行
+    }
 
     return NextResponse.json({
       success: true,

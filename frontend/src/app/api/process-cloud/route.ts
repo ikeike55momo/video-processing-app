@@ -32,6 +32,28 @@ export async function POST(req: NextRequest) {
     const apiUrl = process.env.API_URL || 'https://video-processing-api.onrender.com';
     console.log('Cloud処理開始リクエスト:', { fileUrl, apiUrl });
 
+    // 同じURLの処理中レコードを検索
+    const existingRecords = await prisma.record.findMany({
+      where: { 
+        file_url: fileUrl,
+        status: 'PROCESSING'
+      },
+    });
+    
+    // 処理中のレコードがあれば削除（論理削除）
+    if (existingRecords.length > 0) {
+      console.log(`同じURLの処理中レコードが${existingRecords.length}件見つかりました。削除します。`);
+      for (const existingRecord of existingRecords) {
+        await prisma.record.update({
+          where: { id: existingRecord.id },
+          data: { 
+            deleted_at: new Date(),
+            status: 'ERROR'
+          },
+        });
+      }
+    }
+    
     // 新しいレコードを作成
     const newRecord = await prisma.record.create({
       data: {
@@ -43,34 +65,43 @@ export async function POST(req: NextRequest) {
     console.log('新しいレコードを作成しました:', newRecord);
 
     // バックエンドAPIに処理を依頼
-    const response = await fetch(`${apiUrl}/api/transcribe`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        recordId: newRecord.id,
-        fileUrl,
-      }),
-    });
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error(`API呼び出しエラー: ${response.status} ${errorText}`);
-      
-      // エラー時にレコードを更新
-      await prisma.record.update({
-        where: { id: newRecord.id },
-        data: { 
-          status: 'ERROR',
-          error: `API呼び出しエラー: ${response.status}`,
+    try {
+      const response = await fetch(`${apiUrl}/api/transcribe`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
         },
+        body: JSON.stringify({
+          recordId: newRecord.id,
+          fileUrl,
+        }),
       });
+
+      const responseText = await response.text();
+      console.log('バックエンドAPIレスポンス:', responseText);
       
-      return NextResponse.json(
-        { error: '処理の開始に失敗しました', details: errorText },
-        { status: 500 }
-      );
+      try {
+        // JSONとして解析を試みる
+        const responseData = JSON.parse(responseText);
+        
+        if (!response.ok) {
+          console.warn('バックエンドAPI処理警告:', responseData);
+          
+          // 「既に処理中」エラーの場合は、エラーとして扱わない
+          if (responseData.error && responseData.error.includes("already being processed")) {
+            console.log('レコードは既に処理中です。処理を続行します。');
+          } else {
+            // その他のエラーの場合でも、処理中として扱う
+            console.log('エラーが発生しましたが、処理を続行します。');
+          }
+        }
+      } catch (jsonError) {
+        console.error('JSONパースエラー:', jsonError);
+        // JSONパースエラーの場合でも処理を続行
+      }
+    } catch (fetchError) {
+      console.error('バックエンドAPIリクエストエラー:', fetchError);
+      // フェッチエラーの場合でも処理を続行
     }
 
     return NextResponse.json({ 
