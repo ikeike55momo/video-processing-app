@@ -230,14 +230,44 @@ app.post('/api/process', (req, res) => __awaiter(void 0, void 0, void 0, functio
 // 文字起こしAPIエンドポイント
 app.post('/api/transcribe', async (req, res) => {
   try {
-    // リクエストボディからファイルURLを取得
-    const { fileUrl } = req.body;
+    // リクエストボディからファイルURLとレコードIDを取得
+    const { fileUrl, recordId } = req.body;
     
     if (!fileUrl) {
       return res.status(400).json({ error: 'ファイルURLが指定されていません' });
     }
     
     console.log(`文字起こしリクエスト受信: ${fileUrl}`);
+    
+    // レコードIDが指定されていない場合は新しいレコードを作成
+    let record;
+    if (!recordId) {
+      record = yield prisma.record.create({
+        data: {
+          file_url: fileUrl,
+          status: 'PROCESSING',
+          processing_step: 'TRANSCRIPTION'
+        }
+      });
+      console.log(`新しいレコードを作成しました: ${record.id}`);
+    } else {
+      record = yield prisma.record.findUnique({
+        where: { id: recordId }
+      });
+      
+      if (!record) {
+        return res.status(404).json({ error: 'レコードが見つかりません' });
+      }
+      
+      // ステータスを更新
+      record = yield prisma.record.update({
+        where: { id: recordId },
+        data: {
+          status: 'PROCESSING',
+          processing_step: 'TRANSCRIPTION'
+        }
+      });
+    }
     
     // TranscriptionServiceが初期化されていない場合は初期化
     if (!transcriptionService) {
@@ -263,6 +293,10 @@ app.post('/api/transcribe', async (req, res) => {
     // 文字起こし処理
     const transcript = await transcriptionService.transcribeAudio(filePath);
     
+    // タイムスタンプ抽出処理
+    console.log(`タイムスタンプ抽出処理を開始します`);
+    const timestampsData = await transcriptionService.extractTimestamps(transcript, filePath);
+    
     // 一時ディレクトリを削除
     try {
       fs.rmSync(tempDir, { recursive: true, force: true });
@@ -271,7 +305,31 @@ app.post('/api/transcribe', async (req, res) => {
       console.error(`一時ディレクトリの削除に失敗しました: ${tempDir}`, err);
     }
     
-    return res.json({ transcript });
+    // 文字起こし結果とタイムスタンプをデータベースに保存
+    yield prisma.record.update({
+      where: { id: record.id },
+      data: {
+        transcript_text: transcript,
+        timestamps_json: JSON.stringify(timestampsData),
+        status: 'TRANSCRIBED',
+        processing_step: null
+      }
+    });
+    
+    // 要約キューにジョブを追加
+    yield (0, queue_1.addJob)('summary', {
+      type: 'summary',
+      recordId: record.id,
+      fileKey: record.file_key || path.basename(fileUrl)
+    });
+    
+    console.log(`文字起こし処理が完了し、要約処理をキューに追加しました: ${record.id}`);
+    
+    return res.json({ 
+      transcript, 
+      recordId: record.id,
+      jobId: record.id // ジョブIDとしてレコードIDを返す
+    });
   } catch (error) {
     console.error('文字起こし処理エラー:', error);
     return res.status(500).json({ error: `文字起こし処理に失敗しました: ${error.message}` });
