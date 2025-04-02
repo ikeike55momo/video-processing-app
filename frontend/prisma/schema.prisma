@@ -25,6 +25,7 @@ model Record {
   id                 String    @id @default(uuid())
   file_url           String?
   file_key           String?   // バックエンドとの互換性のために追加
+  file_name          String?   // ファイル名を保存するフィールドを追加
   r2_bucket          String?   // バックエンドとの互換性のために追加
   transcript_text    String?   @db.Text
   timestamps_json    String?   @db.Text

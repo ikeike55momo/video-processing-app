@@ -135,9 +135,18 @@ export default function CloudUploadPage() {
         console.warn("recordIdが取得できませんでした。fileUrlを使用します。", result);
       }
       
+      // fileKeyの確認
+      let fileKey = result.fileKey;
+      
+      // 通常アップロードの場合、抽出したファイルキーを使用
+      if (!result.isMultipart && !fileKey) {
+        // この時点では既にuploadResultは使用済みで、result.fileKeyに値が設定されている
+        console.log("アップロードから抽出したファイルキーを使用:", result.fileKey);
+      }
+      
       console.log("処理開始リクエスト:", {
         recordId: uploadRecordId || "なし",
-        fileKey: result.fileKey || "なし",
+        fileKey: fileKey || "なし",
         fileUrl: fileUrl || "なし"
       });
       
@@ -148,7 +157,7 @@ export default function CloudUploadPage() {
         },
         body: JSON.stringify({
           recordId: uploadRecordId,
-          fileKey: result.fileKey,
+          fileKey: fileKey,
           fileUrl: fileUrl,
         }),
       });
