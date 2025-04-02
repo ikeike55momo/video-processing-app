@@ -227,15 +227,19 @@ ${transcription}
     }
   }
 
-  // 大きな音声ファイルを分割して文字起こし
+  // 大きな音声ファイルを分割して文字起こし（並列処理対応）
   async transcribeLargeAudio(audioPath) {
     try {
       console.log(`大きな音声ファイルを分割して処理します: ${audioPath}`);
       
-      // 音声ファイルを5分（300秒）ごとに分割
-      const chunkDuration = 300; // 秒
+      // 音声ファイルを3分（180秒）ごとに分割（最適化）
+      const chunkDuration = 180; // 秒
       const tempDir = path.join(os.tmpdir(), 'audio-chunks-' + crypto.randomBytes(4).toString('hex'));
       fs.mkdirSync(tempDir, { recursive: true });
+      
+      // メモリ使用量をログ記録
+      const memoryUsage = process.memoryUsage();
+      console.log(`メモリ使用量（分割処理開始時）: RSS=${Math.round(memoryUsage.rss / 1024 / 1024)}MB, Heap=${Math.round(memoryUsage.heapUsed / 1024 / 1024)}/${Math.round(memoryUsage.heapTotal / 1024 / 1024)}MB`);
       
       // FFmpegを使用して音声ファイルの長さを取得
       const durationOutput = execSync(`ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "${audioPath}"`).toString().trim();
@@ -246,9 +250,10 @@ ${transcription}
       const numChunks = Math.ceil(totalDuration / chunkDuration);
       console.log(`分割するチャンク数: ${numChunks}`);
       
-      const transcriptions = [];
+      // チャンク処理用の配列
+      const chunkPaths = [];
       
-      // 各チャンクを処理
+      // チャンクを抽出
       for (let i = 0; i < numChunks; i++) {
         const startTime = i * chunkDuration;
         const chunkPath = path.join(tempDir, `chunk-${i}.wav`);
@@ -259,37 +264,97 @@ ${transcription}
         });
         
         console.log(`チャンク ${i+1}/${numChunks} を抽出しました: ${chunkPath}`);
-        
-        // チャンクを文字起こし
-        console.log(`チャンク ${i+1}/${numChunks} の文字起こしを開始します...`);
-        let chunkTranscription;
-        
+        chunkPaths.push(chunkPath);
+      }
+      
+      // 並列処理のための関数
+      const processChunk = async (chunkPath, index) => {
         try {
+          console.log(`チャンク ${index+1}/${numChunks} の文字起こしを開始します...`);
+          
           // 各チャンクに対して文脈を考慮したプロンプトを使用
-          chunkTranscription = await this.transcribeWithGemini(chunkPath);
-          console.log(`チャンク ${i+1}/${numChunks} の文字起こしが完了しました`);
+          const chunkTranscription = await this.transcribeWithGemini(chunkPath);
+          console.log(`チャンク ${index+1}/${numChunks} の文字起こしが完了しました`);
+          
+          // 一時ファイルを削除
+          fs.unlinkSync(chunkPath);
+          
+          // メモリ解放を促進
+          if (global.gc) {
+            global.gc();
+          }
+          
+          return { index, text: chunkTranscription };
         } catch (error) {
-          console.error(`チャンク ${i+1}/${numChunks} の文字起こし中にエラーが発生しました:`, error);
-          chunkTranscription = `[チャンク ${i+1} の文字起こしに失敗しました]`;
+          console.error(`チャンク ${index+1}/${numChunks} の文字起こし中にエラーが発生しました:`, error);
+          
+          // 一時ファイルを削除
+          try {
+            fs.unlinkSync(chunkPath);
+          } catch (unlinkError) {
+            console.error(`チャンクファイルの削除に失敗しました: ${chunkPath}`, unlinkError);
+          }
+          
+          return { index, text: `[チャンク ${index+1} の文字起こしに失敗しました]` };
+        }
+      };
+      
+      // 並列処理の実行（最大3つまで同時実行）
+      const CONCURRENT_LIMIT = 3;
+      const transcriptionResults = new Array(numChunks).fill('');
+      
+      for (let i = 0; i < chunkPaths.length; i += CONCURRENT_LIMIT) {
+        const batch = chunkPaths.slice(i, i + CONCURRENT_LIMIT).map((chunkPath, batchIndex) => 
+          processChunk(chunkPath, i + batchIndex)
+        );
+        
+        const batchResults = await Promise.all(batch);
+        
+        // 結果を正しい位置に格納
+        for (const result of batchResults) {
+          transcriptionResults[result.index] = result.text;
         }
         
-        transcriptions.push(chunkTranscription);
-        
-        // 一時ファイルを削除
-        fs.unlinkSync(chunkPath);
+        // バッチ間で待機（APIレート制限対策とメモリ解放のため）
+        if (i + CONCURRENT_LIMIT < chunkPaths.length) {
+          console.log('次のバッチ処理前に3秒間待機します...');
+          await new Promise(resolve => setTimeout(resolve, 3000));
+          
+          // メモリ使用量をログ記録
+          const batchMemoryUsage = process.memoryUsage();
+          console.log(`メモリ使用量（バッチ処理後）: RSS=${Math.round(batchMemoryUsage.rss / 1024 / 1024)}MB, Heap=${Math.round(batchMemoryUsage.heapUsed / 1024 / 1024)}/${Math.round(batchMemoryUsage.heapTotal / 1024 / 1024)}MB`);
+          
+          // メモリ解放を促進
+          if (global.gc) {
+            global.gc();
+          }
+        }
       }
       
       // 一時ディレクトリを削除
-      fs.rmdirSync(tempDir, { recursive: true });
+      try {
+        fs.rmdirSync(tempDir, { recursive: true });
+      } catch (rmdirError) {
+        console.error('一時ディレクトリの削除に失敗しました:', rmdirError);
+      }
       
       // すべてのチャンクの文字起こし結果を結合
-      const fullTranscription = transcriptions.join('\n\n');
+      const fullTranscription = transcriptionResults.join('\n\n');
       console.log('すべてのチャンクの文字起こしが完了しました');
+      
+      // メモリ使用量をログ記録
+      const finalMemoryUsage = process.memoryUsage();
+      console.log(`メモリ使用量（処理完了時）: RSS=${Math.round(finalMemoryUsage.rss / 1024 / 1024)}MB, Heap=${Math.round(finalMemoryUsage.heapUsed / 1024 / 1024)}/${Math.round(finalMemoryUsage.heapTotal / 1024 / 1024)}MB`);
       
       return fullTranscription;
     } catch (error) {
       console.error('大きな音声ファイルの分割処理中にエラーが発生しました:', error);
       throw error;
+    } finally {
+      // 明示的にガベージコレクションを促す
+      if (global.gc) {
+        global.gc();
+      }
     }
   }
 }
