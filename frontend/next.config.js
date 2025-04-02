@@ -32,13 +32,6 @@ const nextConfig = {
         process: false,
       };
     }
-    
-    // Tailwind CSSの依存関係を解決するための設定
-    config.resolve.alias = {
-      ...config.resolve.alias,
-      tailwindcss: require.resolve('postcss'),
-    };
-    
     return config;
   },
   // バージョンを強制的に更新するためのランダム値
