@@ -114,7 +114,7 @@ export default function UploadPage() {
 
       // 処理開始リクエスト
       setUploadStage("処理を開始中...");
-      const processResponse = await fetch(`/api/transcribe`, {
+      const processResponse = await fetch(`/api/process`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",

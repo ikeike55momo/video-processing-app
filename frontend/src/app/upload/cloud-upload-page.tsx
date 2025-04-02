@@ -69,11 +69,13 @@ export default function CloudUploadPage() {
       setUploadStage("準備中...");
 
       // 署名付きURLの取得（ファイルサイズを含める）
-      const response = await fetch("/api/upload-url", {
+      const apiUrl = "https://video-processing-app.onrender.com"; 
+      const response = await fetch(`${apiUrl}/api/upload-url`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
+        credentials: 'include', // 認証情報を含める
         body: JSON.stringify({
           fileName: file.name,
           contentType: file.type,
@@ -105,19 +107,27 @@ export default function CloudUploadPage() {
       } else {
         // 通常のアップロード
         setUploadStage("アップロード中...");
-        await uploadFileWithProgress(file, result.url);
-        fileUrl = result.fileUrl;
+        
+        // uploadUrlが存在するか確認
+        if (!result.uploadUrl) {
+          console.error("アップロードURLが取得できませんでした", result);
+          throw new Error("アップロードURLが取得できませんでした");
+        }
+        
+        await uploadFileWithProgress(file, result.uploadUrl);
+        fileUrl = result.fileUrl || result.uploadUrl;
       }
 
       // 処理開始リクエスト
       setUploadStage("処理を開始中...");
-      const processResponse = await fetch("/api/process", {
+      const processResponse = await fetch(`${apiUrl}/api/process`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
+        credentials: 'include', // 認証情報を含める
         body: JSON.stringify({
-          fileUrl: fileUrl,
+          fileUrl,
         }),
       });
 
@@ -140,9 +150,16 @@ export default function CloudUploadPage() {
     }
   };
 
-  // 進捗表示付きアップロード（小さなファイル用）
+  // 進捗表示付きアップロード
   const uploadFileWithProgress = (file: File, signedUrl: string) => {
     return new Promise<void>((resolve, reject) => {
+      // signedUrlがundefinedの場合はエラーを返す
+      if (!signedUrl) {
+        console.error("署名付きURLが取得できませんでした");
+        reject(new Error("署名付きURLが取得できませんでした"));
+        return;
+      }
+
       const xhr = new XMLHttpRequest();
 
       // タイムアウトを設定（4時間 = 14400000ミリ秒）
@@ -197,7 +214,7 @@ export default function CloudUploadPage() {
       };
 
       // ファイル送信
-      console.log("アップロード開始:", file.name, file.size, "URL:", signedUrl.substring(0, 100) + "...");
+      console.log("アップロード開始:", file.name, file.size, "URL:", signedUrl && signedUrl.length > 0 ? (signedUrl.substring(0, 100) + "...") : "URL not available");
       xhr.send(file);
     });
   };

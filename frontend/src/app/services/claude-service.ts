@@ -23,7 +23,7 @@ export class ClaudeService {
   async generateArticle(summary: string): Promise<string> {
     try {
       // デバッグ情報
-      const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://vpa.ririaru-stg.cloud';
+      const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://video-processing-frontend.onrender.com';
       
       console.log('OpenRouter API リクエスト準備:', {
         apiUrl: this.apiUrl,

@@ -1,11 +1,12 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { getServerSession } from 'next-auth';
+import { NextResponse } from 'next/server';
+import { getServerSession } from 'next-auth/next';
+import { authOptions } from '@/lib/auth';
 import prisma from '@/lib/prisma';
 
-export async function POST(req: NextRequest) {
+export async function POST(request: Request) {
   try {
     // セッションチェック
-    const session = await getServerSession();
+    const session = await getServerSession(authOptions);
     if (!session) {
       return NextResponse.json(
         { error: '認証が必要です' },
@@ -13,70 +14,70 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // リクエストボディの解析
-    const { fileUrl, fileName } = await req.json();
-    
+    // リクエストボディを解析
+    const body = await request.json();
+    const { fileUrl } = body;
+
     if (!fileUrl) {
       return NextResponse.json(
-        { error: 'ファイルURLが必要です' },
+        { error: 'fileUrlは必須です' },
         { status: 400 }
       );
     }
 
-    // APIサーバーのURL
-    const apiUrl = process.env.API_URL || 'https://video-processing-api.onrender.com';
-    console.log('文字起こし処理開始リクエスト:', { fileUrl, apiUrl });
-
-    // 新しいレコードを作成
-    const newRecord = await prisma.record.create({
+    // レコードを作成
+    const record = await prisma.record.create({
       data: {
-        file_url: fileUrl,
-        status: 'PROCESSING',
+        status: 'PROCESSING', // 処理中に設定
+        file_url: fileUrl
       },
     });
-    
-    console.log('新しいレコードを作成しました:', newRecord);
 
-    // バックエンドAPIに処理を依頼
-    const response = await fetch(`${apiUrl}/api/transcribe`, {
+    console.log('新しいレコードを作成しました:', record);
+
+    // バックエンドAPIに処理開始リクエストを送信
+    const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'https://video-processing-api.onrender.com';
+    console.log(`バックエンドAPIに処理リクエストを送信: ${apiUrl}/api/process`);
+    
+    const processResponse = await fetch(`${apiUrl}/api/process`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        fileUrl,
-        recordId: newRecord.id
+        recordId: record.id,
+        fileUrl: fileUrl,
       }),
     });
 
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error(`API呼び出しエラー: ${response.status} ${errorText}`);
+    if (!processResponse.ok) {
+      const errorText = await processResponse.text();
+      console.error('バックエンドAPI処理エラー:', errorText);
       
-      // エラー時にレコードを更新
+      // エラー情報をデータベースに保存
       await prisma.record.update({
-        where: { id: newRecord.id },
+        where: { id: record.id },
         data: { 
           status: 'ERROR',
-          error: `API呼び出しエラー: ${response.status}`,
+          error: `処理の開始に失敗しました: ${errorText}`
         },
       });
       
-      return NextResponse.json(
-        { error: '処理の開始に失敗しました', details: errorText },
-        { status: 500 }
-      );
+      throw new Error(`処理の開始に失敗しました: ${errorText}`);
     }
 
-    return NextResponse.json({ 
-      success: true, 
-      message: '文字起こし処理を開始しました', 
-      recordId: newRecord.id 
+    const processResult = await processResponse.json();
+    console.log('バックエンドAPI処理結果:', processResult);
+
+    return NextResponse.json({
+      message: '処理を開始しました',
+      recordId: record.id,
+      jobId: processResult.jobId || null,
     });
   } catch (error) {
-    console.error('文字起こし開始エラー:', error);
+    console.error('文字起こし処理開始エラー:', error);
     return NextResponse.json(
-      { error: '処理の開始に失敗しました', details: String(error) },
+      { error: error instanceof Error ? error.message : '不明なエラーが発生しました' },
       { status: 500 }
     );
   }

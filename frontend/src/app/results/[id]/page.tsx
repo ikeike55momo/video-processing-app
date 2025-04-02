@@ -45,14 +45,19 @@ export default function RecordDetailPage() {
     const fetchRecord = async () => {
       try {
         setLoading(true);
-        const response = await fetch(`/api/records/${recordId}`);
+        const response = await fetch(`/api/records/${recordId}/status`);
         
         if (!response.ok) {
           throw new Error("レコード情報の取得に失敗しました");
         }
         
         const data = await response.json();
-        setRecord(data.record);
+        setRecord(data);
+        
+        // バックエンドの状態も確認
+        if (data.backend_status) {
+          console.log("バックエンドの状態:", data.backend_status);
+        }
       } catch (err) {
         console.error("データ取得エラー:", err);
         setError(
@@ -67,8 +72,23 @@ export default function RecordDetailPage() {
     
     if (recordId) {
       fetchRecord();
+      
+      // ポーリング処理を設定
+      const pollingInterval = setInterval(() => {
+        if (recordId) {
+          // 処理中の場合のみポーリングを続ける
+          if (record && record.status === "PROCESSING") {
+            fetchRecord();
+          }
+        }
+      }, 5000); // 5秒ごとに更新
+      
+      // クリーンアップ関数
+      return () => {
+        clearInterval(pollingInterval);
+      };
     }
-  }, [recordId]);
+  }, [recordId, record?.status]);
 
   // 処理ステップの計算
   const calculateStep = (record: any) => {

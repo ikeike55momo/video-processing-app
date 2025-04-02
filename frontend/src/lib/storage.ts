@@ -1,11 +1,12 @@
 import { S3Client, PutObjectCommand, GetObjectCommand, CreateMultipartUploadCommand, UploadPartCommand, CompleteMultipartUploadCommand, AbortMultipartUploadCommand } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 
-const R2_ENDPOINT = process.env.R2_ENDPOINT || '';
-const R2_ACCESS_KEY_ID = process.env.R2_ACCESS_KEY_ID || '';
-const R2_SECRET_ACCESS_KEY = process.env.R2_SECRET_ACCESS_KEY || '';
-const R2_BUCKET_NAME = process.env.R2_BUCKET_NAME || '';
-const R2_PUBLIC_URL = process.env.R2_PUBLIC_URL || 'https://pub-70c06e6cdf134c4ea4d0adf14d3a6b16.r2.dev';
+// クライアントサイドでも使用できる環境変数
+const R2_ENDPOINT = process.env.NEXT_PUBLIC_R2_ENDPOINT || '';
+const R2_ACCESS_KEY_ID = process.env.NEXT_PUBLIC_R2_ACCESS_KEY_ID || '';
+const R2_SECRET_ACCESS_KEY = process.env.R2_SECRET_ACCESS_KEY || ''; // これはサーバーサイドでのみ使用
+const R2_BUCKET_NAME = process.env.NEXT_PUBLIC_R2_BUCKET_NAME || '';
+const R2_PUBLIC_URL = process.env.NEXT_PUBLIC_R2_PUBLIC_URL || 'https://pub-70c06e6cdf134c4ea4d0adf14d3a6b16.r2.dev';
 
 // 環境変数のチェック（サーバーサイドでのみ実行）
 if (typeof window === 'undefined' && (!R2_ENDPOINT || !R2_ACCESS_KEY_ID || !R2_SECRET_ACCESS_KEY || !R2_BUCKET_NAME)) {
@@ -20,7 +21,7 @@ console.log('環境変数チェック:', {
   hasBucket: !!R2_BUCKET_NAME,
   hasPublicUrl: !!R2_PUBLIC_URL,
   accessKeyLength: R2_ACCESS_KEY_ID.length,
-  secretKeyLength: R2_SECRET_ACCESS_KEY.length,
+  secretKeyLength: R2_SECRET_ACCESS_KEY ? R2_SECRET_ACCESS_KEY.length : 0,
   endpoint: R2_ENDPOINT,
   bucket: R2_BUCKET_NAME,
   publicUrl: R2_PUBLIC_URL
@@ -49,15 +50,22 @@ console.log('R2設定:', {
 });
 
 /**
- * ファイル名を安全なキーに変換する関数
+ * ファイル名から安全なキーを生成する関数
  * @param fileName オリジナルのファイル名
  * @returns 安全なキー名
  */
-function createSafeKey(fileName: string) {
-  // 日本語などの文字を含むファイル名をエンコード
+function createSafeKey(fileName: string): string {
+  // ファイル名から拡張子を取得
+  const extension = fileName.split('.').pop();
+  
+  // 現在のタイムスタンプをミリ秒単位で取得
   const timestamp = Date.now();
-  const safeName = encodeURIComponent(fileName).replace(/%/g, '');
-  return `uploads/${timestamp}-${safeName}`;
+  
+  // ランダムな文字列を生成
+  const randomString = Math.random().toString(36).substring(2, 15);
+  
+  // 安全なキーを生成（タイムスタンプ_ランダム文字列.拡張子）
+  return `${timestamp}_${randomString}.${extension}`;
 }
 
 /**
