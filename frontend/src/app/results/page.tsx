@@ -7,11 +7,12 @@ import ProgressIndicator from "../components/ProgressIndicator";
 import ContentModal from "../components/ContentModal";
 import TimestampList from "../components/TimestampList";
 import VideoPlayer from "../components/VideoPlayer";
+import { Record } from "@/types/record";
 
 export default function ResultsPage() {
   const { data: session, status } = useSession();
   const router = useRouter();
-  const [records, setRecords] = useState<any[]>([]);
+  const [records, setRecords] = useState<Record[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   // モーダル表示用の状態
@@ -201,8 +202,8 @@ export default function ResultsPage() {
   };
 
   // 処理ステップの計算
-  const calculateStep = (record: any) => {
-    if (record.status === "ERROR") return record.lastCompletedStep || 1;
+  const calculateStep = (record: Record) => {
+    if (record.status === "ERROR") return 1;
     if (record.status === "DONE") return 5;
     if (record.article_text) return 4;
     if (record.summary_text) return 3;
@@ -271,7 +272,7 @@ export default function ResultsPage() {
                 className="rounded-lg bg-white p-6 shadow-md"
               >
                 <h2 className="mb-2 text-xl font-semibold text-slate-800">
-                  {record.file_url.split("/").pop()}
+                  {record.file_url?.split("/").pop() || "ファイル名なし"}
                 </h2>
                 <p className="mb-4 text-sm text-slate-500">
                   アップロード日時: {new Date(record.created_at).toLocaleString()}
@@ -326,7 +327,7 @@ export default function ResultsPage() {
                         {record.timestamps_json ? (
                           <TimestampList 
                             timestamps={JSON.parse(record.timestamps_json)} 
-                            videoUrl={record.file_url}
+                            videoUrl={record.file_url || ""}
                           />
                         ) : (
                           <div className="text-sm text-slate-500 italic">
@@ -374,15 +375,17 @@ export default function ResultsPage() {
                       )}
                     </div>
 
-                    <div className="mt-6">
-                      <h3 className="text-md font-medium text-slate-700 mb-2">
-                        動画プレーヤー
-                      </h3>
-                      <VideoPlayer 
-                        src={record.file_url} 
-                        timestamps={record.timestamps_json ? JSON.parse(record.timestamps_json) : []}
-                      />
-                    </div>
+                    {record.file_url && (
+                      <div className="mt-6">
+                        <h3 className="text-md font-medium text-slate-700 mb-2">
+                          動画プレーヤー
+                        </h3>
+                        <VideoPlayer 
+                          src={record.file_url} 
+                          timestamps={record.timestamps_json ? JSON.parse(record.timestamps_json) : []}
+                        />
+                      </div>
+                    )}
 
                     <button
                       onClick={() => router.push(`/results/${record.id}`)}

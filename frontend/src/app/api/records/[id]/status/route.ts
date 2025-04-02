@@ -56,7 +56,8 @@ export async function GET(
               timestamps_json: backendStatus.timestamps_json || record.timestamps_json,
               summary_text: backendStatus.summary_text || record.summary_text,
               article_text: backendStatus.article_text || record.article_text,
-              error: backendStatus.error || record.error
+              error: backendStatus.error || record.error,
+              processing_progress: backendStatus.processing_progress
             },
           });
           
@@ -75,6 +76,7 @@ export async function GET(
               summary_text: updatedRecord.summary_text,
               article_text: updatedRecord.article_text,
               created_at: updatedRecord.created_at,
+              processing_progress: updatedRecord.processing_progress,
               backend_status: backendStatus
             });
           }
@@ -96,6 +98,7 @@ export async function GET(
       summary_text: record.summary_text,
       article_text: record.article_text,
       created_at: record.created_at,
+      processing_progress: record.processing_progress,
       backend_status: backendStatus
     });
   } catch (error) {
