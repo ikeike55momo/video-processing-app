@@ -7,49 +7,55 @@ import { uploadMultipart } from "@/lib/storage";
 import JobProgressMonitor from "../components/JobProgressMonitor";
 
 export default function UploadPage() {
-  const { data: session } = useSession({
-    required: true,
-    onUnauthenticated() {
-      // リダイレクトはサーバーサイドで処理されるため、ここでは何もしない
-    },
-  });
-
+  const { data: session, status } = useSession();
   const router = useRouter();
   const [file, setFile] = useState<File | null>(null);
-  const [error, setError] = useState<string>("");
-  const [uploading, setUploading] = useState<boolean>(false);
-  const [uploadProgress, setUploadProgress] = useState<number>(0);
+  const [uploading, setUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0);
+  const [error, setError] = useState("");
   const [uploadStage, setUploadStage] = useState<string>("");
-  const [isProcessing, setIsProcessing] = useState<boolean>(false);
-  const [statusMessage, setStatusMessage] = useState<string>("");
-  const [jobId, setJobId] = useState<string>("");
+  const [jobId, setJobId] = useState<string | null>(null);
+  const [recordId, setRecordId] = useState<string | null>(null);
+
+  // セッションチェック
+  if (status === "loading") {
+    return (
+      <div className="flex min-h-screen items-center justify-center">
+        <div className="text-center">
+          <h2 className="text-xl font-semibold">読み込み中...</h2>
+          <p>ユーザー情報を確認しています</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (status === "unauthenticated") {
+    router.push("/login");
+    return null;
+  }
 
   // ファイル選択ハンドラー
-  const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const selectedFile = event.target.files?.[0];
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const selectedFile = e.target.files?.[0];
+    setError("");
+
     if (!selectedFile) {
       return;
     }
 
-    // ファイルサイズチェック（15GBまで）
-    const MAX_SIZE = 15 * 1024 * 1024 * 1024; // 15GB
-    if (selectedFile.size > MAX_SIZE) {
-      setError(
-        `ファイルサイズが大きすぎます。15GB以下のファイルを選択してください。（現在: ${(
-          selectedFile.size /
-          (1024 * 1024 * 1024)
-        ).toFixed(2)}GB）`
-      );
-      return;
-    }
-
-    // ファイル形式チェック（MP4のみ）
+    // ファイルタイプチェック
     if (selectedFile.type !== "video/mp4") {
-      setError("MP4形式の動画ファイルのみアップロード可能です。");
+      setError("MP4形式の動画ファイルのみアップロード可能です");
       return;
     }
 
-    setError("");
+    // ファイルサイズチェック (最大サイズを拡大: 15GB = 15 * 1024 * 1024 * 1024 bytes)
+    const maxSize = 15 * 1024 * 1024 * 1024;
+    if (selectedFile.size > maxSize) {
+      setError("ファイルサイズは15GB以下にしてください");
+      return;
+    }
+
     setFile(selectedFile);
   };
 
@@ -79,18 +85,10 @@ export default function UploadPage() {
       });
 
       if (!response.ok) {
-        throw new Error(`署名付きURLの取得に失敗しました: ${response.status} ${response.statusText}`);
+        throw new Error("署名付きURLの取得に失敗しました");
       }
 
       const result = await response.json();
-      
-      // レスポンスの検証
-      if (!result) {
-        throw new Error("APIレスポンスが空です");
-      }
-      
-      console.log("アップロードURL取得結果:", result);
-      
       let fileUrl: string;
 
       // アップロード方法の選択
@@ -98,10 +96,6 @@ export default function UploadPage() {
         // マルチパートアップロードの場合
         setUploadStage("マルチパートアップロード準備中...");
         console.log("マルチパートアップロードを開始します", result);
-        
-        if (!result.partUrls || !result.key || !result.uploadId) {
-          throw new Error("マルチパートアップロードに必要な情報が不足しています");
-        }
         
         // マルチパートアップロードの実行
         const uploadResult = await uploadMultipart(file, result, (progress) => {
@@ -114,55 +108,31 @@ export default function UploadPage() {
       } else {
         // 通常のアップロード
         setUploadStage("アップロード中...");
-        
-        // uploadUrlが存在するか確認
-        if (!result.uploadUrl) {
-          console.error("アップロードURLが取得できませんでした", result);
-          throw new Error("アップロードURLが取得できませんでした");
-        }
-        
-        await uploadFileWithProgress(file, result.uploadUrl);
-        
-        if (!result.fileUrl && !result.fileKey) {
-          throw new Error("ファイルURLまたはファイルキーが取得できませんでした");
-        }
-        
+        await uploadFileWithProgress(file, result.url);
         fileUrl = result.fileUrl;
       }
 
       // 処理開始リクエスト
       setUploadStage("処理を開始中...");
-      
-      if (!result.fileKey) {
-        throw new Error("ファイルキーが取得できませんでした");
-      }
-      
-      const processResponse = await fetch("/api/transcribe", {
+      const processResponse = await fetch(`/api/process`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
-        credentials: "include", // 認証情報を含める
         body: JSON.stringify({
-          fileKey: result.fileKey,
-          fileName: file.name,
+          fileUrl: fileUrl,
         }),
       });
 
       if (!processResponse.ok) {
-        throw new Error(`処理の開始に失敗しました: ${processResponse.status} ${processResponse.statusText}`);
+        throw new Error("処理の開始に失敗しました");
       }
 
-      const processResult = await processResponse.json();
-      
-      if (!processResult || !processResult.jobId) {
-        throw new Error("処理の開始に失敗しました: 無効なレスポンス");
-      }
-      
-      const { recordId, jobId } = processResult;
+      const { recordId, jobId } = await processResponse.json();
       
       // ジョブIDを設定
       setJobId(jobId);
+      setRecordId(recordId);
       setUploadStage("処理中...");
       
       // 結果ページへのリダイレクトは行わず、このページで進捗を表示する
@@ -181,13 +151,6 @@ export default function UploadPage() {
   // 進捗表示付きアップロード（小さなファイル用）
   const uploadFileWithProgress = (file: File, signedUrl: string) => {
     return new Promise<void>((resolve, reject) => {
-      // signedUrlがundefinedまたは空の場合はエラーを返す
-      if (!signedUrl) {
-        console.error("署名付きURLが取得できませんでした");
-        reject(new Error("署名付きURLが取得できませんでした"));
-        return;
-      }
-
       const xhr = new XMLHttpRequest();
 
       // タイムアウトを設定（4時間 = 14400000ミリ秒）
@@ -224,7 +187,7 @@ export default function UploadPage() {
       // エラーハンドラー
       xhr.onerror = (e) => {
         console.error("アップロードエラー:", e);
-        console.error("署名付きURL:", signedUrl && signedUrl.substring(0, 100) + "...");
+        console.error("署名付きURL:", signedUrl);
         console.error("ファイル情報:", { name: file.name, type: file.type, size: file.size });
         reject(new Error("アップロード中にネットワークエラーが発生しました"));
       };
@@ -242,7 +205,7 @@ export default function UploadPage() {
       };
 
       // ファイル送信
-      console.log("アップロード開始:", file.name, file.size, "URL:", signedUrl && signedUrl.substring(0, 100) + "...");
+      console.log("アップロード開始:", file.name, file.size, "URL:", signedUrl.substring(0, 100) + "...");
       xhr.send(file);
     });
   };
@@ -257,100 +220,111 @@ export default function UploadPage() {
               MP4形式の動画ファイル（最大15GB）をアップロードしてください
             </p>
           </div>
-          <button
-            onClick={() => router.push("/dashboard")}
-            className="px-4 py-2 bg-slate-200 rounded-lg text-slate-700 hover:bg-slate-300 transition"
-          >
-            ダッシュボードへ戻る
-          </button>
+          <div className="flex space-x-4">
+            <button
+              onClick={() => router.push("/results")}
+              className="rounded-md bg-blue-600 px-4 py-2 text-white hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
+            >
+              処理済み動画を表示
+            </button>
+          </div>
         </header>
 
-        <div className="bg-white rounded-xl shadow-sm p-6 mb-8">
-          <div className="space-y-6">
-            <div>
-              <label
-                htmlFor="file-upload"
-                className="block text-sm font-medium text-slate-700 mb-2"
-              >
-                動画ファイル
-              </label>
-              <div className="flex items-center space-x-4">
-                <label
-                  htmlFor="file-upload"
-                  className={`flex-1 px-6 py-10 border-2 border-dashed rounded-lg text-center cursor-pointer transition ${
-                    file
-                      ? "border-green-300 bg-green-50"
-                      : "border-slate-300 hover:border-blue-400"
-                  }`}
-                >
-                  <div className="space-y-2">
-                    <div className="text-slate-600">
-                      {file ? (
-                        <span className="text-green-600 font-medium">
-                          {file.name} ({(file.size / (1024 * 1024)).toFixed(2)}MB)
-                        </span>
-                      ) : (
-                        <>
-                          <span className="font-medium text-blue-600">
-                            クリックしてファイルを選択
-                          </span>{" "}
-                          またはドラッグ＆ドロップ
-                        </>
-                      )}
-                    </div>
-                    <p className="text-xs text-slate-500">MP4形式のみ・最大15GB</p>
-                  </div>
-                  <input
-                    id="file-upload"
-                    name="file-upload"
-                    type="file"
-                    accept="video/mp4"
-                    className="sr-only"
-                    onChange={handleFileChange}
-                    disabled={uploading}
-                  />
-                </label>
-                <button
-                  onClick={handleUpload}
-                  disabled={!file || uploading}
-                  className={`px-6 py-3 rounded-lg font-medium ${
-                    !file || uploading
-                      ? "bg-slate-300 text-slate-500 cursor-not-allowed"
-                      : "bg-blue-600 text-white hover:bg-blue-700"
-                  } transition`}
-                >
-                  {uploading ? "アップロード中..." : "アップロード"}
-                </button>
-              </div>
-              {error && (
-                <p className="mt-2 text-sm text-red-600">{error}</p>
-              )}
+        <div className="rounded-lg bg-white p-8 shadow-md">
+          {error && (
+            <div className="mb-6 rounded-md bg-red-50 p-4 text-sm text-red-700">
+              {error}
             </div>
+          )}
 
-            {uploading && (
-              <div className="space-y-3">
-                <div className="flex justify-between text-sm">
-                  <span className="font-medium">{uploadStage}</span>
-                  <span>{uploadProgress}%</span>
-                </div>
-                <div className="w-full bg-slate-200 rounded-full h-2.5">
-                  <div
-                    className="bg-blue-600 h-2.5 rounded-full transition-all duration-300"
-                    style={{ width: `${uploadProgress}%` }}
-                  ></div>
-                </div>
+          <div className="mb-6">
+            <div className="flex justify-between items-center mb-4">
+              <h2 className="text-xl font-semibold text-slate-800">Vercel処理</h2>
+              <div className="bg-yellow-100 text-yellow-800 text-xs font-medium px-2.5 py-0.5 rounded">
+                タイムアウト: 4時間
               </div>
-            )}
-
-            {jobId && (
-              <div className="mt-8 p-4 bg-blue-50 border border-blue-200 rounded-lg">
-                <h3 className="text-lg font-medium text-blue-800 mb-2">
-                  処理状況
-                </h3>
-                <JobProgressMonitor jobId={jobId} />
-              </div>
-            )}
+            </div>
+            <p className="text-slate-600 mb-4">
+              Vercelのサーバーレス関数を使用して処理を行います。処理時間が4時間を超えるとタイムアウトします。
+            </p>
           </div>
+
+          <div className="mb-6">
+            <label
+              htmlFor="video-upload"
+              className="block text-sm font-medium text-slate-700"
+            >
+              動画ファイル
+            </label>
+            <input
+              id="video-upload"
+              type="file"
+              accept="video/mp4"
+              onChange={handleFileChange}
+              disabled={uploading}
+              className="mt-1 block w-full rounded-md border border-slate-300 px-3 py-2 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-blue-500"
+            />
+            <p className="mt-2 text-sm text-slate-500">
+              MP4形式の動画ファイルを選択してください（最大15GB）
+            </p>
+          </div>
+
+          {file && (
+            <div className="mb-6">
+              <h3 className="text-md font-medium text-slate-700">
+                選択されたファイル
+              </h3>
+              <p className="text-slate-600">{file.name}</p>
+              <p className="text-slate-500">
+                {(file.size / (1024 * 1024)).toFixed(2)} MB
+              </p>
+            </div>
+          )}
+
+          {uploading && !jobId && (
+            <div className="mb-6">
+              <h3 className="mb-2 text-md font-medium text-slate-700">
+                {uploadStage} - 進捗: {uploadProgress}%
+              </h3>
+              <div className="h-2 w-full rounded-full bg-slate-200">
+                <div
+                  className="h-2 rounded-full bg-blue-600"
+                  style={{ width: `${uploadProgress}%` }}
+                ></div>
+              </div>
+            </div>
+          )}
+
+          {jobId && (
+            <div className="mb-6">
+              <JobProgressMonitor 
+                jobId={jobId} 
+                onComplete={(result) => {
+                  // 処理完了時に結果ページへリダイレクト
+                  router.push(`/results?recordId=${result.recordId}`);
+                }}
+                onError={(error) => {
+                  setError(`処理中にエラーが発生しました: ${error}`);
+                  setUploading(false);
+                  setJobId(null);
+                }}
+              />
+              
+              <div className="text-center mt-4">
+                <p className="text-sm text-gray-600">
+                  処理が完了すると自動的に結果ページに移動します
+                </p>
+              </div>
+            </div>
+          )}
+
+          <button
+            onClick={handleUpload}
+            disabled={!file || uploading}
+            className="w-full rounded-md bg-blue-600 px-4 py-2 text-white hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:bg-blue-300"
+          >
+            {uploading ? "アップロード中..." : "アップロードして処理を開始"}
+          </button>
         </div>
       </div>
     </div>

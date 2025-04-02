@@ -120,7 +120,7 @@ export default function CloudUploadPage() {
 
       // 処理開始リクエスト
       setUploadStage("処理を開始中...");
-      const processResponse = await fetch(`${apiUrl}/api/process-cloud`, {
+      const processResponse = await fetch(`${apiUrl}/api/process`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
