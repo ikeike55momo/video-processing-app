@@ -149,7 +149,7 @@ async function processJob() {
         where: { id: job.recordId },
         data: {
             article_text: article,
-            status: 'COMPLETED',
+            status: 'DONE', // ステータスをDONEに変更
             processing_step: null
         }
     });
