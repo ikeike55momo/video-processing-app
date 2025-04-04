@@ -45,26 +45,17 @@ Object.defineProperty(exports, "__esModule", { value: true });
 const dotenv = __importStar(require("dotenv"));
 const client_1 = require("@prisma/client");
 const queue_1 = require("../lib/queue");
+const axios = require('axios');
+
 // 環境変数の読み込み
 dotenv.config();
+
 // Prismaクライアントの初期化
 const prisma = new client_1.PrismaClient();
-// Redisクライアントの初期化
-(async () => {
-  try {
-    const client = await (0, queue_1.initRedisClient)();
-    if (client) {
-      console.log('Redis client initialized successfully');
-    } else {
-      console.warn('Redis client initialization returned null, will retry when needed');
-    }
-  } catch (error) {
-    console.error('Failed to initialize Redis client:', error);
-    // エラーをログに出力するだけで、プロセスは終了しない
-  }
-})();
+
 // キュー名の定義
 const QUEUE_NAME = 'article-queue';
+
 /**
  * 記事生成を行う
  * @param transcript 文字起こしテキスト
@@ -73,173 +64,218 @@ const QUEUE_NAME = 'article-queue';
  */
 function generateArticle(transcript, summary) {
     return __awaiter(this, void 0, void 0, function* () {
-        // ここではOpenRouter（Claude）APIを使用する簡易的な実装
-        // 実際の実装では適切なAPIクライアントを使用
+        // OpenRouter（Claude）APIを使用した実装
         const apiKey = process.env.OPENROUTER_API_KEY;
         if (!apiKey) {
             throw new Error('OPENROUTER_API_KEY is missing');
         }
-        // TODO: 実際のOpenRouter API呼び出し実装
-        // この例では単純なモックを返しています
-        console.log(`[MOCK] Generating article from transcript(${transcript.length} chars) and summary(${summary.length} chars)`);
-        // モック応答（実際はAPIを使用）
-        return `# 記事タイトル
 
-## はじめに
+        console.log(`記事生成を開始: 文字起こし長=${transcript.length}文字, 要約長=${summary.length}文字`);
+        
+        try {
+            // OpenRouter APIリクエスト
+            const response = yield axios.post(
+                'https://openrouter.ai/api/v1/chat/completions',
+                {
+                    model: 'anthropic/claude-3-opus:beta',  // Claude 3 Opusを使用
+                    messages: [
+                        {
+                            role: 'system',
+                            content: '文字起こしと要約から記事を生成する専門家です。'
+                        },
+                        {
+                            role: 'user',
+                            content: `以下の文字起こしと要約から、読みやすく構造化された記事を生成してください。
 
+## 文字起こし:
+${transcript}
+
+## 要約:
 ${summary}
 
-## 内容
+## 指示:
+- 記事には適切な見出しをつけてください
+- 内容を論理的に整理し、セクションに分けてください
+- 要約の内容を中心に、文字起こしから重要な詳細を追加してください
+- 読者が理解しやすいように、専門用語があれば簡潔に説明してください
+- 記事の最後に簡潔なまとめを追加してください
+- マークダウン形式で出力してください`
+                        }
+                    ],
+                    temperature: 0.7,
+                    max_tokens: 4000
+                },
+                {
+                    headers: {
+                        'Authorization': `Bearer ${apiKey}`,
+                        'Content-Type': 'application/json'
+                    }
+                }
+            );
 
-これはデモの記事です。実際にはClaudeなどのAIを使用して文字起こしと要約から記事を生成します。
-
-## まとめ
-
-これはOpenRouterを使用した文章生成のデモです。`;
+            // レスポンスから記事テキストを抽出
+            const article = response.data.choices[0].message.content;
+            console.log(`記事生成が完了しました: 記事長=${article.length}文字`);
+            return article;
+        } catch (error) {
+            console.error('OpenRouter API呼び出しエラー:', error);
+            if (error.response) {
+                console.error('OpenRouter APIレスポンス:', error.response.data);
+            }
+            throw new Error(`記事生成に失敗しました: ${error.message}`);
+        }
     });
 }
+
 /**
  * ジョブを処理する関数
  */
-async function processJob() {
-  try {
-    // ジョブの取得
-    const job = await (0, queue_1.getJob)(QUEUE_NAME);
-    if (!job) {
-      console.log('No jobs in queue. Waiting...');
-      return;
-    }
-    
-    console.log(`Processing article job ${job.id} for record ${job.recordId}`);
-    
-    // 処理状態の更新
-    try {
-      await prisma.record.update({
-        where: { id: job.recordId },
-        data: { 
-          status: 'PROCESSING',
-          processing_step: 'ARTICLE'
-        }
-      });
-    } catch (error) {
-      if (error.code === 'P2025') {
-        console.warn(`Record ${job.recordId} not found in database. Removing job from queue.`);
-        await (0, queue_1.completeJob)(QUEUE_NAME, job.id);
-        return;
-      }
-      throw error;
-    }
-    
-    // 文字起こしと要約結果を取得
-    const record = await prisma.record.findUnique({
-        where: { id: job.recordId },
-        select: { transcript_text: true, summary_text: true }
-    });
-    
-    if (!record || !record.transcript_text || !record.summary_text) {
-        throw new Error('Transcript or summary text not found');
-    }
-    
-    // 記事生成処理
-    console.log(`Starting article generation for record: ${job.recordId}`);
-    const article = await generateArticle(record.transcript_text, record.summary_text);
-    
-    // 結果をデータベースに保存
-    await prisma.record.update({
-        where: { id: job.recordId },
-        data: {
-            article_text: article,
-            status: 'DONE', // ステータスをDONEに変更
-            processing_step: null
-        }
-    });
-    
-    // ジョブを完了としてマーク
-    await (0, queue_1.completeJob)(QUEUE_NAME, job.id);
-    console.log(`Article job ${job.id} completed successfully`);
-  }
-  catch (error) {
-    console.error('Error processing article job:', error);
-    // ジョブIDがある場合のみリトライを実行
-    if (job?.id) {
-        await (0, queue_1.failJob)(QUEUE_NAME, job.id);
-        // エラーステータスを記録
+function processJob() {
+    return __awaiter(this, void 0, void 0, function* () {
+        let job = null;
         try {
-            await prisma.record.update({
+            // ジョブの取得
+            job = yield (0, queue_1.getJob)(QUEUE_NAME);
+            if (!job) {
+                console.log('No jobs in queue. Waiting...');
+                return;
+            }
+            
+            console.log(`Processing article job ${job.id} for record ${job.recordId}`);
+            
+            // 処理状態の更新
+            try {
+                yield prisma.record.update({
+                    where: { id: job.recordId },
+                    data: { 
+                        status: 'PROCESSING',
+                        processing_step: 'ARTICLE'
+                    }
+                });
+            } catch (error) {
+                if (error.code === 'P2025') {
+                    console.warn(`Record ${job.recordId} not found in database. Removing job from queue.`);
+                    yield (0, queue_1.completeJob)(QUEUE_NAME, job.id);
+                    return;
+                }
+                throw error;
+            }
+            
+            // 文字起こしと要約結果を取得
+            const record = yield prisma.record.findUnique({
+                where: { id: job.recordId },
+                select: { transcript_text: true, summary_text: true }
+            });
+            
+            if (!record || !record.transcript_text || !record.summary_text) {
+                throw new Error('Transcript or summary text not found');
+            }
+            
+            // 記事生成処理
+            console.log(`Starting article generation for record: ${job.recordId}`);
+            const article = yield generateArticle(record.transcript_text, record.summary_text);
+            
+            // 結果をデータベースに保存
+            yield prisma.record.update({
                 where: { id: job.recordId },
                 data: {
-                    status: 'ERROR',
-                    error: error instanceof Error ? error.message : String(error),
+                    article_text: article,
+                    status: 'DONE', // ステータスをDONEに変更
                     processing_step: null
                 }
             });
+            
+            // ジョブを完了としてマーク
+            yield (0, queue_1.completeJob)(QUEUE_NAME, job.id);
+            console.log(`Article job ${job.id} completed successfully`);
         }
-        catch (dbError) {
-            if (dbError.code === 'P2025') {
-                console.warn(`Record ${job.recordId} not found in database when updating error status.`);
-            } else {
-                console.error('Failed to update record status:', dbError);
+        catch (error) {
+            console.error('Error processing article job:', error);
+            // ジョブIDがある場合のみリトライを実行
+            if (job && job.id) {
+                yield (0, queue_1.failJob)(QUEUE_NAME, job.id);
+                // エラーステータスを記録
+                try {
+                    yield prisma.record.update({
+                        where: { id: job.recordId },
+                        data: {
+                            status: 'ERROR',
+                            error: error instanceof Error ? error.message : String(error),
+                            processing_step: null
+                        }
+                    });
+                }
+                catch (dbError) {
+                    if (dbError.code === 'P2025') {
+                        console.warn(`Record ${job.recordId} not found in database when updating error status.`);
+                    } else {
+                        console.error('Failed to update record status:', dbError);
+                    }
+                }
             }
         }
-    }
-  }
+    });
 }
+
 /**
  * メインワーカー処理
  */
-async function startWorker() {
-    try {
-        console.log('========================================');
-        console.log(`記事生成ワーカー起動: ${new Date().toISOString()}`);
-        console.log(`Node環境: ${process.env.NODE_ENV}`);
-        console.log(`ワーカータイプ: ${process.env.WORKER_TYPE || 'article'}`);
-        
-        // 環境変数の確認（機密情報は隠す）
-        const redisUrl = process.env.REDIS_URL || '';
-        console.log(`Redis URL設定: ${redisUrl.replace(/:[^:]*@/, ':***@')}`);
-        
-        // Redisクライアントの初期化
-        console.log('Redisクライアントを初期化中...');
-        const client = await (0, queue_1.initRedisClient)();
-        if (!client) {
-            throw new Error('Redisクライアントの初期化に失敗しました');
-        }
-        console.log('Redisクライアント初期化完了');
-        
-        // プリズマクライアントの確認
-        console.log('データベース接続を確認中...');
-        await prisma.$connect();
-        console.log('データベース接続確認完了');
-        
-        console.log('記事生成ワーカーが正常に起動しました');
-        console.log('========================================');
-        
-        // 継続的にジョブを処理
-        while (true) {
-            try {
-                await processJob();
-            } catch (jobError) {
-                console.error('ジョブ処理中にエラーが発生しました:', jobError);
-                // ジョブエラーでは終了せず、次のジョブを処理
+function startWorker() {
+    return __awaiter(this, void 0, void 0, function* () {
+        try {
+            console.log('========================================');
+            console.log(`記事生成ワーカー起動: ${new Date().toISOString()}`);
+            console.log(`Node環境: ${process.env.NODE_ENV}`);
+            console.log(`ワーカータイプ: ${process.env.WORKER_TYPE || 'article'}`);
+            
+            // 環境変数の確認（機密情報は隠す）
+            const redisUrl = process.env.REDIS_URL || '';
+            console.log(`Redis URL設定: ${redisUrl.replace(/:[^:]*@/, ':***@')}`);
+            
+            // Redisクライアントの初期化
+            console.log('Redisクライアントを初期化中...');
+            const client = yield (0, queue_1.initRedisClient)();
+            if (!client) {
+                throw new Error('Redisクライアントの初期化に失敗しました');
             }
-            // 少し待機してからポーリング
-            await new Promise(resolve => setTimeout(resolve, 1000));
+            console.log('Redisクライアント初期化完了');
+            
+            // プリズマクライアントの確認
+            console.log('データベース接続を確認中...');
+            yield prisma.$connect();
+            console.log('データベース接続確認完了');
+            
+            console.log('記事生成ワーカーが正常に起動しました');
+            console.log('========================================');
+            
+            // 継続的にジョブを処理
+            while (true) {
+                try {
+                    yield processJob();
+                } catch (jobError) {
+                    console.error('ジョブ処理中にエラーが発生しました:', jobError);
+                    // ジョブエラーでは終了せず、次のジョブを処理
+                }
+                // 少し待機してからポーリング
+                yield new Promise(resolve => setTimeout(resolve, 1000));
+            }
         }
-    }
-    catch (error) {
-        console.error('ワーカーで致命的なエラーが発生しました:', error);
-        if (error.code) {
-            console.error(`エラーコード: ${error.code}`);
+        catch (error) {
+            console.error('ワーカーで致命的なエラーが発生しました:', error);
+            if (error.code) {
+                console.error(`エラーコード: ${error.code}`);
+            }
+            if (error.message) {
+                console.error(`エラーメッセージ: ${error.message}`);
+            }
+            if (error.stack) {
+                console.error(`スタックトレース: ${error.stack}`);
+            }
+            process.exit(1);
         }
-        if (error.message) {
-            console.error(`エラーメッセージ: ${error.message}`);
-        }
-        if (error.stack) {
-            console.error(`スタックトレース: ${error.stack}`);
-        }
-        process.exit(1);
-    }
+    });
 }
+
 // ワーカー開始
 startWorker().catch(error => {
     console.error('Failed to start worker:', error);
