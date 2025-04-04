@@ -122,11 +122,13 @@ app.post('/api/upload-url', async (req: Request, res: Response) => {
 // 処理開始エンドポイント
 app.post('/api/process', async (req: Request, res: Response) => {
   try {
-    const { recordId } = req.body;
+    const { recordId, fileUrl, fileKey } = req.body;
     
     if (!recordId) {
       return res.status(400).json({ error: 'recordId is required' });
     }
+
+    console.log(`処理リクエスト受信: recordId=${recordId}, fileUrl=${fileUrl ? 'あり' : 'なし'}, fileKey=${fileKey ? 'あり' : 'なし'}`);
 
     // レコードの存在確認
     const record = await prisma.record.findUnique({
@@ -137,18 +139,46 @@ app.post('/api/process', async (req: Request, res: Response) => {
       return res.status(404).json({ error: 'Record not found' });
     }
 
-    if (record.status !== 'UPLOADED') {
+    // ステータスチェックを緩和（UPLOADED以外も許可）
+    if (record.status === 'DONE' || record.status === 'TRANSCRIBED' || record.status === 'SUMMARIZED') {
       return res.status(400).json({ 
         error: 'Record is already being processed or completed',
         status: record.status
       });
     }
 
+    // fileKeyが提供されていれば更新
+    if (fileKey && !record.file_key) {
+      await prisma.record.update({
+        where: { id: recordId },
+        data: { file_key: fileKey }
+      });
+      console.log(`レコード ${recordId} のfile_keyを更新しました: ${fileKey}`);
+    }
+
+    // fileUrlが提供されていれば更新
+    if (fileUrl && record.file_url !== fileUrl) {
+      await prisma.record.update({
+        where: { id: recordId },
+        data: { file_url: fileUrl }
+      });
+      console.log(`レコード ${recordId} のfile_urlを更新しました: ${fileUrl}`);
+    }
+
+    // 最新のレコード情報を取得
+    const updatedRecord = await prisma.record.findUnique({
+      where: { id: recordId }
+    });
+
+    if (!updatedRecord) {
+      return res.status(404).json({ error: 'Updated record not found' });
+    }
+
     // 文字起こしキューにジョブを追加
     await addJob('transcription', {
       type: 'transcription',
       recordId: recordId,
-      fileKey: record.file_key || '' // nullの場合に空文字列を使用
+      fileKey: updatedRecord.file_key || updatedRecord.file_url || '' // file_keyがなければfile_urlを使用
     });
 
     // ステータスを更新

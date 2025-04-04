@@ -64,6 +64,11 @@ export async function POST(request: Request) {
     // バックエンドAPIに処理開始リクエストを送信
     const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'https://video-processing-api.onrender.com';
     console.log(`バックエンドAPIに処理リクエストを送信: ${apiUrl}/api/process`);
+    console.log(`処理リクエスト: ${JSON.stringify({
+      recordId: record.id,
+      fileUrl: fileUrl,
+      fileKey: record.file_key
+    })}`);
     
     const processResponse = await fetch(`${apiUrl}/api/process`, {
       method: 'POST',
@@ -73,6 +78,7 @@ export async function POST(request: Request) {
       body: JSON.stringify({
         recordId: record.id,
         fileUrl: fileUrl,
+        fileKey: record.file_key
       }),
     });
 

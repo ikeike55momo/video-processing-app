@@ -304,51 +304,95 @@ async function processJob() {
     let fileData;
     let tempFilePath;
     
+    // 一時ディレクトリを作成
+    const tempDir = path.join(TMP_DIR, `transcription-${crypto.randomBytes(6).toString('hex')}`);
+    fs.mkdirSync(tempDir, { recursive: true });
+    
     try {
-      // R2からファイルを取得
-      fileData = await getFileContents(job.fileKey);
-      
-      // 一時ファイルに保存
-      tempFilePath = path.join(TMP_DIR, `${Date.now()}-${job.id}.mp4`);
-      fs.writeFileSync(tempFilePath, fileData);
-      console.log(`ファイルをダウンロードしました: ${tempFilePath}`);
-    } catch (downloadError) {
-      console.error(`R2からのダウンロードに失敗しました。公開URLを試みます: ${downloadError}`);
-      
-      // レコード情報を取得して公開URLを確認
+      // レコード情報を取得
       const record = await prisma.record.findUnique({
         where: { id: job.recordId }
       });
       
-      if (record && record.file_url && record.file_url.includes('r2.dev')) {
+      if (!record) {
+        throw new Error(`レコードが見つかりません: ${job.recordId}`);
+      }
+      
+      console.log(`レコード情報: file_key=${record.file_key || 'なし'}, file_url=${record.file_url || 'なし'}`);
+      
+      // ファイルキーまたはURLを決定
+      const fileKey = job.fileKey || record.file_key;
+      const fileUrl = record.file_url;
+      
+      if (!fileKey && !fileUrl) {
+        throw new Error('ファイルキーとURLの両方が見つかりません');
+      }
+      
+      // まずR2からファイルの取得を試みる
+      if (fileKey) {
         try {
-          // 一時ディレクトリを作成
-          const tempDir = path.join(TMP_DIR, `transcription-${crypto.randomBytes(6).toString('hex')}`);
-          fs.mkdirSync(tempDir, { recursive: true });
+          console.log(`R2からファイルを取得します: ${fileKey}`);
+          fileData = await getFileContents(fileKey);
           
+          // ファイル名を決定
+          let fileName = fileKey.split('/').pop() || `${Date.now()}.mp4`;
+          
+          // 一時ファイルに保存
+          tempFilePath = path.join(tempDir, fileName);
+          fs.writeFileSync(tempFilePath, fileData);
+          console.log(`R2からファイルをダウンロードしました: ${tempFilePath}`);
+        } catch (r2Error) {
+          console.error(`R2からのダウンロードに失敗しました: ${r2Error}`);
+          // エラーを記録するが、次の方法を試みる
+        }
+      }
+      
+      // R2からの取得に失敗した場合、公開URLを試みる
+      if (!tempFilePath && fileUrl) {
+        try {
           // URLからファイル名を抽出
-          const urlParts = new URL(record.file_url);
+          const urlParts = new URL(fileUrl);
           const pathParts = urlParts.pathname.split('/');
-          const fileName = pathParts[pathParts.length - 1];
+          const fileName = pathParts[pathParts.length - 1] || `${Date.now()}.mp4`;
           
-          console.log(`抽出したファイルキー: ${fileName}`);
+          console.log(`抽出したファイル名: ${fileName}`);
           
           // 公開URLを使用してファイルにアクセス
-          console.log(`公開URLを使用してファイルにアクセスします: ${record.file_url}`);
-          const response = await axios.get(record.file_url, { responseType: 'arraybuffer' });
+          console.log(`公開URLを使用してファイルにアクセスします: ${fileUrl}`);
+          const response = await axios.get(fileUrl, { 
+            responseType: 'arraybuffer',
+            timeout: 60000 // 60秒タイムアウト
+          });
           
           // 一時ファイルに保存
           tempFilePath = path.join(tempDir, fileName);
           fs.writeFileSync(tempFilePath, Buffer.from(response.data));
           console.log(`公開URLからのダウンロード完了: ${tempFilePath}`);
-        } catch (publicUrlError: any) {
-          console.error(`公開URLからのダウンロードにも失敗しました: ${publicUrlError}`);
-          throw new Error(`ファイルのダウンロードに失敗しました: ${publicUrlError.message}`);
+          
+          // ファイルサイズを確認
+          const fileStats = fs.statSync(tempFilePath);
+          console.log(`ファイル情報: 存在=${fs.existsSync(tempFilePath)}, サイズ=${fileStats.size} バイト (${Math.round(fileStats.size / (1024 * 1024))} MB)`);
+        } catch (urlError: any) {
+          console.error(`公開URLからのダウンロードに失敗しました: ${urlError}`);
+          throw new Error(`ファイルのダウンロードに失敗しました: ${urlError.message}`);
         }
-      } else {
-        const errorMessage = downloadError instanceof Error ? downloadError.message : String(downloadError);
-        throw new Error(`ファイルのダウンロードに失敗し、公開URLも利用できません: ${errorMessage}`);
       }
+      
+      // ファイルが取得できなかった場合
+      if (!tempFilePath) {
+        throw new Error('すべてのダウンロード方法が失敗しました');
+      }
+    } catch (downloadError) {
+      console.error(`ファイルダウンロードエラー: ${downloadError}`);
+      
+      // 一時ディレクトリを削除
+      try {
+        fs.rmSync(tempDir, { recursive: true, force: true });
+      } catch (cleanupError) {
+        console.error('一時ディレクトリの削除に失敗:', cleanupError);
+      }
+      
+      throw new Error(`ファイルのダウンロードに失敗しました: ${downloadError instanceof Error ? downloadError.message : String(downloadError)}`);
     }
     
     // 処理進捗状況を更新
