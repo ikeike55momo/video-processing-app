@@ -135,30 +135,33 @@ export default function CloudUploadPage() {
         console.warn("recordIdが取得できませんでした。fileUrlを使用します。", result);
       }
       
-      // fileKeyの確認
-      let fileKey = result.fileKey;
-      
-      // 通常アップロードの場合、抽出したファイルキーを使用
-      if (!result.isMultipart && !fileKey) {
-        // この時点では既にuploadResultは使用済みで、result.fileKeyに値が設定されている
-        console.log("アップロードから抽出したファイルキーを使用:", result.fileKey);
+      // fileKeyとrecordIdを確定
+      const finalRecordId = result.recordId;
+      const finalFileKey = result.fileKey; // uploadFileWithProgress内でresult.fileKeyに設定済みのはず
+
+      if (!finalRecordId) {
+          throw new Error("レコードIDが取得できませんでした。処理を開始できません。");
       }
-      
+       if (!finalFileKey) {
+          console.warn("ファイルキーが取得できませんでした。処理に問題が発生する可能性があります。", result);
+          // 必要であればエラー処理を追加
+      }
+
       console.log("処理開始リクエスト:", {
-        recordId: uploadRecordId || "なし",
-        fileKey: fileKey || "なし",
-        fileUrl: fileUrl || "なし"
+        recordId: finalRecordId,
+        fileKey: finalFileKey || "未取得", // fileKeyがない場合もログに残す
+        fileUrl: fileUrl || "なし" // fileUrlもログに残す
       });
-      
+
       const processResponse = await fetch(`/api/process`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          recordId: uploadRecordId,
-          fileKey: fileKey,
-          fileUrl: fileUrl,
+          recordId: finalRecordId, // 確定したrecordIdを使用
+          fileKey: finalFileKey,   // 確定したfileKeyを使用
+          // fileUrlはバックエンドでrecordIdから取得するため不要
         }),
       });
 
