@@ -1,8 +1,9 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as dotenv from 'dotenv';
+import * as crypto from 'crypto';
 import { PrismaClient } from '@prisma/client';
-import { getJob, completeJob, failJob, addJob } from '../lib/queue';
+import { getJob, completeJob, failJob, addJob, JobData } from '../lib/queue';
 import { getFileContents, getDownloadUrl } from '../lib/storage';
 import { execSync } from 'child_process';
 import axios from 'axios';
@@ -221,6 +222,14 @@ async function processAudioInChunks(audioPath: string): Promise<string> {
  * @returns 処理結果の配列
  */
 async function processLargeFile(filePath: string): Promise<string[]> {
+  // 処理開始時のメモリ使用量をログ出力
+  console.log('ファイル処理開始時のメモリ使用量:');
+  logMemoryUsage();
+  
+  // ファイル情報を取得
+  const fileStats = fs.statSync(filePath);
+  console.log(`ファイル情報: 存在=${fs.existsSync(filePath)}, サイズ=${fileStats.size} バイト`);
+  
   // 一時ディレクトリの作成
   const workDir = path.join(TMP_DIR, `transcription-${Date.now()}`);
   fs.mkdirSync(workDir, { recursive: true });
@@ -233,8 +242,16 @@ async function processLargeFile(filePath: string): Promise<string[]> {
     // FFmpegを使用して音声抽出
     execSync(`ffmpeg -i "${filePath}" -q:a 0 -map a "${audioPath}" -y`, { stdio: 'inherit' });
     
+    // 音声抽出後のメモリ使用量をログ出力
+    console.log('音声抽出後のメモリ使用量:');
+    logMemoryUsage();
+    
     // 音声ファイルを文字起こし（最適化と必要に応じたチャンク処理を含む）
     const transcription = await transcribeAudio(audioPath);
+    
+    // 文字起こし後のメモリ使用量をログ出力
+    console.log('文字起こし完了後のメモリ使用量:');
+    logMemoryUsage();
     
     // 一時ファイルの削除
     fs.unlinkSync(audioPath);
@@ -250,6 +267,10 @@ async function processLargeFile(filePath: string): Promise<string[]> {
     } catch (cleanupError) {
       console.error('一時ディレクトリの削除に失敗:', cleanupError);
     }
+    
+    // 処理完了時のメモリ使用量をログ出力
+    console.log('メモリ使用量（処理完了時）:');
+    logMemoryUsage();
   }
 }
 
@@ -280,15 +301,76 @@ async function processJob() {
 
     // R2からファイルを取得
     console.log(`ファイルをダウンロード中（キー: ${job.fileKey}）`);
-    const fileData = await getFileContents(job.fileKey);
+    let fileData;
+    let tempFilePath;
     
-    // 一時ファイルに保存
-    const tempFilePath = path.join(TMP_DIR, `${Date.now()}-${job.id}.mp4`);
-    fs.writeFileSync(tempFilePath, fileData);
+    try {
+      // R2からファイルを取得
+      fileData = await getFileContents(job.fileKey);
+      
+      // 一時ファイルに保存
+      tempFilePath = path.join(TMP_DIR, `${Date.now()}-${job.id}.mp4`);
+      fs.writeFileSync(tempFilePath, fileData);
+      console.log(`ファイルをダウンロードしました: ${tempFilePath}`);
+    } catch (downloadError) {
+      console.error(`R2からのダウンロードに失敗しました。公開URLを試みます: ${downloadError}`);
+      
+      // レコード情報を取得して公開URLを確認
+      const record = await prisma.record.findUnique({
+        where: { id: job.recordId }
+      });
+      
+      if (record && record.file_url && record.file_url.includes('r2.dev')) {
+        try {
+          // 一時ディレクトリを作成
+          const tempDir = path.join(TMP_DIR, `transcription-${crypto.randomBytes(6).toString('hex')}`);
+          fs.mkdirSync(tempDir, { recursive: true });
+          
+          // URLからファイル名を抽出
+          const urlParts = new URL(record.file_url);
+          const pathParts = urlParts.pathname.split('/');
+          const fileName = pathParts[pathParts.length - 1];
+          
+          console.log(`抽出したファイルキー: ${fileName}`);
+          
+          // 公開URLを使用してファイルにアクセス
+          console.log(`公開URLを使用してファイルにアクセスします: ${record.file_url}`);
+          const response = await axios.get(record.file_url, { responseType: 'arraybuffer' });
+          
+          // 一時ファイルに保存
+          tempFilePath = path.join(tempDir, fileName);
+          fs.writeFileSync(tempFilePath, Buffer.from(response.data));
+          console.log(`公開URLからのダウンロード完了: ${tempFilePath}`);
+        } catch (publicUrlError: any) {
+          console.error(`公開URLからのダウンロードにも失敗しました: ${publicUrlError}`);
+          throw new Error(`ファイルのダウンロードに失敗しました: ${publicUrlError.message}`);
+        }
+      } else {
+        const errorMessage = downloadError instanceof Error ? downloadError.message : String(downloadError);
+        throw new Error(`ファイルのダウンロードに失敗し、公開URLも利用できません: ${errorMessage}`);
+      }
+    }
+    
+    // 処理進捗状況を更新
+    await prisma.record.update({
+      where: { id: job.recordId },
+      data: { 
+        processing_step: 'TRANSCRIPTION',
+        processing_progress: 10
+      }
+    });
     
     // ファイル処理（音声抽出、最適化、チャンク処理を含む）
     console.log(`文字起こし処理を開始: ${tempFilePath}`);
     const transcriptParts = await processLargeFile(tempFilePath);
+    
+    // 処理進捗状況を更新
+    await prisma.record.update({
+      where: { id: job.recordId },
+      data: { 
+        processing_progress: 80
+      }
+    });
     
     // 結果をデータベースに保存
     const fullTranscript = transcriptParts.join('\n\n');
@@ -298,7 +380,8 @@ async function processJob() {
         where: { id: job.recordId },
         data: { 
           transcript_text: fullTranscript,
-          status: 'DONE' as any,
+          status: 'TRANSCRIBED' as any,
+          processing_progress: 100
         } as any
       });
       
@@ -346,15 +429,49 @@ async function processJob() {
 }
 
 /**
+ * メモリ使用量をログ出力する関数
+ */
+function logMemoryUsage() {
+  const memoryUsage = process.memoryUsage();
+  const rss = Math.round(memoryUsage.rss / 1024 / 1024);
+  const heapTotal = Math.round(memoryUsage.heapTotal / 1024 / 1024);
+  const heapUsed = Math.round(memoryUsage.heapUsed / 1024 / 1024);
+  
+  console.log(`メモリ使用量: RSS=${rss}MB Heap=${heapUsed}/${heapTotal}MB`);
+  
+  // メモリ使用量が高い場合は警告を出す
+  if (rss > 3500) {
+    console.warn(`⚠️ メモリ使用量が高くなっています: RSS=${rss}MB`);
+    
+    // ガベージコレクションを実行（--expose-gcフラグが必要）
+    if (global.gc) {
+      console.log('ガベージコレクションを実行します');
+      global.gc();
+      
+      // GC後のメモリ使用量を再度ログ出力
+      const afterGC = process.memoryUsage();
+      console.log(`GC後のメモリ使用量: RSS=${Math.round(afterGC.rss / 1024 / 1024)}MB Heap=${Math.round(afterGC.heapUsed / 1024 / 1024)}/${Math.round(afterGC.heapTotal / 1024 / 1024)}MB`);
+    }
+  }
+  
+  return rss;
+}
+
+/**
  * メインワーカー処理
  */
 async function startWorker() {
   console.log('文字起こしワーカーを開始しました');
+  logMemoryUsage();
   
   try {
     // 継続的にジョブを処理
     while (true) {
       await processJob();
+      
+      // 定期的にメモリ使用量をログ出力
+      logMemoryUsage();
+      
       // 少し待機してからポーリング
       await new Promise(resolve => setTimeout(resolve, 1000));
     }

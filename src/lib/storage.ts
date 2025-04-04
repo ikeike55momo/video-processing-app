@@ -38,19 +38,19 @@ const s3Client = new S3Client({
     accessKeyId: R2_ACCESS_KEY_ID || '',
     secretAccessKey: R2_SECRET_ACCESS_KEY || '',
   },
-  // forcePathStyleをfalseに設定（CloudflareのR2ではこちらが推奨）
-  forcePathStyle: false,
+  // forcePathStyleをtrueに設定（CloudflareのR2では両方の設定が使われることがある）
+  forcePathStyle: true,
 });
 
 // 初期化時にR2設定情報をログ出力
-console.log('R2クライアント設定:', {
+console.log('R2設定:', {
   endpoint: R2_ENDPOINT ? '設定あり' : '未設定',
   accessKeyId: R2_ACCESS_KEY_ID ? '設定あり' : '未設定',
   secretAccessKey: R2_SECRET_ACCESS_KEY ? '設定あり（長さ: ' + (R2_SECRET_ACCESS_KEY?.length || 0) + '）' : '未設定',
   bucketName: R2_BUCKET_NAME || '',
   publicUrl: R2_PUBLIC_URL || '',
   region: 'auto',
-  forcePathStyle: false,
+  forcePathStyle: true,
 });
 
 /**
@@ -112,18 +112,59 @@ export async function getDownloadUrl(key: string) {
  * @returns ファイルの内容（Buffer）
  */
 export async function getFileContents(key: string): Promise<Buffer> {
-  const command = new GetObjectCommand({
-    Bucket: R2_BUCKET_NAME,
-    Key: key,
-  });
-  
-  const response = await s3Client.send(command);
-  if (!response.Body) {
-    throw new Error("File not found or empty");
+  // キーが完全なURLの場合は、パスだけを抽出
+  let fileKey = key;
+  if (key.startsWith('http')) {
+    try {
+      const url = new URL(key);
+      // パスの先頭の/を削除
+      fileKey = url.pathname.startsWith('/') ? url.pathname.substring(1) : url.pathname;
+      console.log(`URLからファイルキーを抽出しました: ${fileKey}`);
+    } catch (error) {
+      console.warn(`URLの解析に失敗しました: ${key}`, error);
+    }
   }
   
-  // StreamをBufferに変換
-  return await streamToBuffer(response.Body);
+  console.log(`getFileContents関数を呼び出します。fileKey: ${fileKey}`);
+  
+  const command = new GetObjectCommand({
+    Bucket: R2_BUCKET_NAME,
+    Key: fileKey,
+  });
+  
+  try {
+    const response = await s3Client.send(command);
+    if (!response.Body) {
+      throw new Error("File not found or empty");
+    }
+    
+    // StreamをBufferに変換
+    return await streamToBuffer(response.Body);
+  } catch (error) {
+    console.error(`getFileContents関数でエラーが発生しました: ${error}`);
+    
+    // 公開URLからのダウンロードを試みる
+    if (R2_PUBLIC_URL) {
+      console.log(`R2からのダウンロードに失敗しました。公開URLを試みます: ${error}`);
+      const publicUrl = `${R2_PUBLIC_URL}/${fileKey}`;
+      console.log(`公開URLを使用してファイルにアクセスします: ${publicUrl}`);
+      
+      try {
+        const response = await fetch(publicUrl);
+        if (!response.ok) {
+          throw new Error(`公開URLからのダウンロードに失敗しました: ${response.status} ${response.statusText}`);
+        }
+        
+        const arrayBuffer = await response.arrayBuffer();
+        return Buffer.from(arrayBuffer);
+      } catch (fetchError) {
+        console.error(`公開URLからのダウンロードにも失敗しました: ${fetchError}`);
+        throw fetchError;
+      }
+    }
+    
+    throw error;
+  }
 }
 
 /**
