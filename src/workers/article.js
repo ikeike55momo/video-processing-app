@@ -64,7 +64,7 @@ const prisma = new client_1.PrismaClient();
   }
 })();
 // キュー名の定義
-const QUEUE_NAME = 'article';
+const QUEUE_NAME = 'article-queue';
 /**
  * 記事生成を行う
  * @param transcript 文字起こしテキスト
