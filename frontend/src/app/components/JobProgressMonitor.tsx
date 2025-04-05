@@ -41,7 +41,21 @@ const JobProgressMonitor: React.FC<JobProgressMonitorProps> = ({
   useEffect(() => {
     const fetchInitialStatus = async () => {
       try {
+        // 404エラーが発生する場合があるため、エラーハンドリングを強化
         const response = await fetch(`${API_URL}/api/job-status/${jobId}`);
+        
+        // 404の場合は処理中として扱う（ジョブがまだキューに登録されていない可能性）
+        if (response.status === 404) {
+          console.log(`ジョブID ${jobId} はまだ処理が開始されていません。処理中として扱います。`);
+          setProgress({
+            progress: 0,
+            status: 'waiting',
+            message: '処理の開始を待っています...',
+            timestamp: Date.now()
+          });
+          return;
+        }
+        
         if (!response.ok) {
           throw new Error(`ジョブ状態の取得に失敗しました: ${response.statusText}`);
         }
@@ -62,7 +76,13 @@ const JobProgressMonitor: React.FC<JobProgressMonitorProps> = ({
         }
       } catch (err) {
         console.error('初期状態の取得エラー:', err);
-        setError(`初期状態の取得に失敗しました: ${err instanceof Error ? err.message : '不明なエラー'}`);
+        // エラーが発生しても処理を継続（WebSocketで状態を取得できる可能性がある）
+        setProgress({
+          progress: 0,
+          status: 'waiting',
+          message: '状態取得中にエラーが発生しましたが、処理は継続しています...',
+          timestamp: Date.now()
+        });
       }
     };
 
