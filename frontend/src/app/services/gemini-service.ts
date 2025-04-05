@@ -691,9 +691,10 @@ ${text}
   /**
    * タイムスタンプ抽出処理
    * @param prompt タイムスタンプ抽出用のプロンプト
+   * @param recordId レコードID（データベースに保存する場合）
    * @returns タイムスタンプ抽出結果（JSON文字列）
    */
-  async extractTimestamps(prompt: string): Promise<string> {
+  async extractTimestamps(prompt: string, recordId?: string): Promise<string> {
     try {
       console.log('タイムスタンプ抽出処理を開始');
       
@@ -711,7 +712,58 @@ ${text}
       const timestampsResponse = response.text();
       
       console.log('タイムスタンプ抽出処理が完了しました');
-      return timestampsResponse;
+      
+      // JSONを抽出
+      let jsonContent = '';
+      const jsonMatch = timestampsResponse.match(/```json\s*([\s\S]*?)\s*```/);
+      if (jsonMatch && jsonMatch[1]) {
+        // JSONブロックが見つかった場合
+        jsonContent = jsonMatch[1];
+      } else {
+        // JSONブロックがない場合は、テキスト全体をJSONとして解析を試みる
+        jsonContent = timestampsResponse.trim();
+      }
+      
+      try {
+        const timestampsData = JSON.parse(jsonContent);
+        console.log(`抽出されたタイムスタンプ: ${timestampsData.timestamps.length}個`);
+        
+        // レコードIDが指定されている場合はデータベースに保存
+        if (recordId) {
+          console.log(`レコードID ${recordId} のタイムスタンプをデータベースに保存します`);
+          
+          try {
+            // APIエンドポイントを呼び出してデータベースに保存
+            const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'https://video-processing-api.onrender.com';
+            const response = await fetch(`${apiUrl}/api/records/${recordId}/timestamps`, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify({
+                timestamps_json: JSON.stringify(timestampsData)
+              }),
+            });
+            
+            if (!response.ok) {
+              const errorText = await response.text();
+              console.error('タイムスタンプの保存に失敗しました:', errorText);
+              throw new Error(`タイムスタンプの保存に失敗しました: ${errorText}`);
+            }
+            
+            console.log('タイムスタンプをデータベースに保存しました');
+          } catch (saveError) {
+            console.error('タイムスタンプの保存中にエラーが発生しました:', saveError);
+            // 保存エラーは無視して処理を続行
+          }
+        }
+        
+        return JSON.stringify(timestampsData);
+      } catch (parseError) {
+        console.error('タイムスタンプJSONの解析に失敗しました:', parseError);
+        console.log('生のレスポンス:', timestampsResponse);
+        throw new Error('タイムスタンプの解析に失敗しました');
+      }
     } catch (error) {
       console.error('タイムスタンプ抽出処理エラー:', error);
       throw new Error('タイムスタンプ抽出処理中にエラーが発生しました: ' + (error instanceof Error ? error.message : '不明なエラー'));
