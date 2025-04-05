@@ -66,20 +66,14 @@ export default function ResultsPage() {
           const data = await response.json();
           
           // データの構造を確認
-          if (!data.record && data.id) {
+          console.log('レコードデータ:', data);
+          
+          if (data && typeof data === 'object') {
             // レコードが直接返される場合
             setRecords([data]);
             
             // 処理が完了していない場合は定期的に更新
-            if (data.status === 'PROCESSING' || data.status === 'UPLOADED') {
-              setTimeout(checkRecordStatus, 5000); // 5秒ごとに更新
-            }
-          } else if (data.record) {
-            // recordプロパティ内にデータがある場合
-            setRecords([data.record]);
-            
-            // 処理が完了していない場合は定期的に更新
-            if (data.record.status === 'PROCESSING' || data.record.status === 'UPLOADED') {
+            if (data.status === 'PROCESSING' || data.status === 'UPLOADED' || data.status === 'TRANSCRIBED' || data.status === 'SUMMARIZED') {
               setTimeout(checkRecordStatus, 5000); // 5秒ごとに更新
             }
           } else {
@@ -132,12 +126,11 @@ export default function ResultsPage() {
   // 処理のリトライ
   const handleRetry = async (recordId: string) => {
     try {
-      const response = await fetch(`/api/retry`, {
+      const response = await fetch(`/api/records/${recordId}/retry`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ recordId }),
       });
 
       if (!response.ok) {

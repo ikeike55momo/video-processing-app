@@ -125,7 +125,8 @@ const JobProgressMonitor: React.FC<JobProgressMonitorProps> = ({
         
         if (data.state === 'completed') {
           setCompleted(true);
-          onComplete?.(data.result);
+          // data.resultではなくdata.dataを使用する
+          onComplete?.(data.data || data);
         } else if (data.state === 'failed') {
           setError(`ジョブが失敗しました: ${data.failedReason || '不明なエラー'}`);
           onError?.(data.failedReason);
@@ -216,7 +217,8 @@ const JobProgressMonitor: React.FC<JobProgressMonitorProps> = ({
             
             if (data.state === 'completed') {
               setCompleted(true);
-              onComplete?.(data.result);
+              // data.resultではなくdata.dataを使用する
+              onComplete?.(data.data || data);
               clearInterval(pollInterval);
             } else if (data.state === 'failed') {
               setError(`ジョブが失敗しました: ${data.failedReason || '不明なエラー'}`);
@@ -262,11 +264,12 @@ const JobProgressMonitor: React.FC<JobProgressMonitorProps> = ({
     });
 
     // 完了イベント
-    socketIo.on('jobCompleted', (data: { jobId: string; result: any }) => {
+    socketIo.on('jobCompleted', (data: { jobId: string; result: any; data?: any }) => {
       if (data.jobId === jobId) {
-        console.log('ジョブ完了:', data.result);
+        console.log('ジョブ完了:', data.result || data.data);
         setCompleted(true);
-        onComplete?.(data.result);
+        // data.resultではなくdata.dataを優先して使用する
+        onComplete?.(data.data || data.result || data);
       }
     });
 

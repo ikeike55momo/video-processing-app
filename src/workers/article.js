@@ -185,7 +185,7 @@ function processJob() {
                 where: { id: job.recordId },
                 data: {
                     article_text: article,
-                    status: 'DONE', // 文字列リテラルを使用
+                    status: client_1.Status.DONE, // 列挙型を使用
                     processing_step: null
                 }
             });
@@ -211,7 +211,7 @@ function processJob() {
                         yield prisma.record.update({
                             where: { id: job.recordId },
                             data: {
-                                status: 'ERROR', // 文字列リテラルを使用
+                                status: client_1.Status.ERROR, // 列挙型を使用
                                 error: error instanceof Error ? error.message : String(error),
                                 processing_step: null
                             }
