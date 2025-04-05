@@ -73,8 +73,8 @@ function generateArticle(transcript, summary) {
         console.log(`記事生成を開始: 文字起こし長=${transcript.length}文字, 要約長=${summary.length}文字`);
         
         try {
-            // OpenRouter APIリクエスト
-            const response = yield axios.post(
+            // OpenRouter APIリクエスト - Promiseチェーンを使用
+            return axios.post(
                 'https://openrouter.ai/api/v1/chat/completions',
                 {
                     model: 'anthropic/claude-3-opus:beta',  // Claude 3 Opusを使用
@@ -111,17 +111,22 @@ ${summary}
                         'Content-Type': 'application/json'
                     }
                 }
-            );
-
-            // レスポンスから記事テキストを抽出
-            const article = response.data.choices[0].message.content;
-            console.log(`記事生成が完了しました: 記事長=${article.length}文字`);
-            return article;
+            )
+            .then(response => {
+                // レスポンスから記事テキストを抽出
+                const article = response.data.choices[0].message.content;
+                console.log(`記事生成が完了しました: 記事長=${article.length}文字`);
+                return article;
+            })
+            .catch(error => {
+                console.error('OpenRouter API呼び出しエラー:', error);
+                if (error.response) {
+                    console.error('OpenRouter APIレスポンス:', error.response.data);
+                }
+                throw new Error(`記事生成に失敗しました: ${error.message}`);
+            });
         } catch (error) {
-            console.error('OpenRouter API呼び出しエラー:', error);
-            if (error.response) {
-                console.error('OpenRouter APIレスポンス:', error.response.data);
-            }
+            console.error('OpenRouter API呼び出しエラー (try-catch):', error);
             throw new Error(`記事生成に失敗しました: ${error.message}`);
         }
     });

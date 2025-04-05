@@ -100,14 +100,20 @@ ${text}
         
         // 要約の生成
         try {
-            const result = await model.generateContent(prompt);
-            const response = result.response;
-            const summary = response.text();
-            
-            console.log(`要約処理が完了しました: 要約長=${summary.length}文字`);
-            return summary;
+            // awaitを使わずにPromiseチェーンを使用
+            return model.generateContent(prompt)
+                .then(result => {
+                    const response = result.response;
+                    const summary = response.text();
+                    console.log(`要約処理が完了しました: 要約長=${summary.length}文字`);
+                    return summary;
+                })
+                .catch(error => {
+                    console.error('要約生成エラー:', error);
+                    throw new Error(`要約生成に失敗しました: ${error.message}`);
+                });
         } catch (error) {
-            console.error('要約生成エラー:', error);
+            console.error('要約生成エラー (try-catch):', error);
             throw new Error(`要約生成に失敗しました: ${error.message}`);
         }
     });

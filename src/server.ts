@@ -351,37 +351,71 @@ app.post('/api/records/:id/retry', async (req: Request<{ id: string }>, res: Res
 });
 
 // WebSocketの進捗状況を取得するエンドポイント
-app.get('/api/job-status/:jobId', async (req: Request<{ jobId: string }>, res: Response) => {
+app.get('/api/job-status/:jobId', async (req: Request, res: Response) => {
   try {
-    const { jobId } = req.params;
+    console.log(`Job status request received for jobId: ${req.params.jobId}`);
+    const jobId = req.params.jobId;
+    
+    if (!jobId) {
+      console.error('Job status request missing jobId parameter');
+      return res.status(400).json({ error: 'Missing jobId parameter' });
+    }
     
     // 各キューからジョブを検索
     let job = null;
+    let foundInQueue = null;
+    
+    console.log(`Searching for job ${jobId} in queues: ${Object.values(QUEUE_NAMES).join(', ')}`);
+    
     for (const queueName of Object.values(QUEUE_NAMES)) {
       const queue = queueManager.getQueue(queueName);
       if (queue) {
-        job = await queue.getJob(jobId);
-        if (job) break;
+        try {
+          job = await queue.getJob(jobId);
+          if (job) {
+            foundInQueue = queueName;
+            console.log(`Found job ${jobId} in queue ${queueName}`);
+            break;
+          }
+        } catch (queueError) {
+          console.error(`Error getting job from queue ${queueName}:`, queueError);
+        }
+      } else {
+        console.warn(`Queue ${queueName} not initialized`);
       }
     }
     
     if (!job) {
+      console.warn(`Job ${jobId} not found in any queue`);
       return res.status(404).json({ error: 'Job not found' });
     }
     
-    const state = await job.getState();
-    const progress = job.progress || 0;
-    
-    res.status(200).json({
-      jobId,
-      state,
-      progress,
-      data: job.data,
-      timestamp: Date.now()
-    });
+    try {
+      const state = await job.getState();
+      const progress = job.progress || 0;
+      
+      const response = {
+        jobId,
+        state,
+        progress,
+        queue: foundInQueue,
+        data: job.data,
+        timestamp: Date.now()
+      };
+      
+      console.log(`Returning job status for ${jobId}:`, response);
+      
+      return res.status(200).json(response);
+    } catch (jobError) {
+      console.error(`Error getting job state for ${jobId}:`, jobError);
+      return res.status(500).json({
+        error: 'Error getting job state',
+        details: jobError instanceof Error ? jobError.message : 'Unknown error'
+      });
+    }
   } catch (error) {
-    console.error('Error getting job status:', error);
-    res.status(500).json({
+    console.error('Error in job status endpoint:', error);
+    return res.status(500).json({
       error: 'Error getting job status',
       details: error instanceof Error ? error.message : 'Unknown error'
     });
