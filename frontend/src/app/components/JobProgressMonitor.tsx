@@ -47,6 +47,13 @@ const JobProgressMonitor: React.FC<JobProgressMonitorProps> = ({
   useEffect(() => {
     const fetchInitialStatus = async () => {
       try {
+        // jobIdが空または'undefined'の場合は処理しない
+        if (!jobId || jobId === 'undefined') {
+          console.error('Invalid jobId:', jobId);
+          setError('無効なジョブIDです。処理を開始できません。');
+          return;
+        }
+
         // まず/api/job-status/:jobIdエンドポイントを試す
         console.log(`ジョブ状態を取得: ${API_URL}/api/job-status/${jobId}`);
         const response = await fetch(`${API_URL}/api/job-status/${jobId}`);

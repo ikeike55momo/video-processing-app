@@ -55,6 +55,8 @@ const fs = __importStar(require("fs"));
 const os = __importStar(require("os"));
 const path = __importStar(require("path"));
 const crypto = __importStar(require("crypto"));
+const http = require("http");
+const { Server } = require("socket.io");
 // TranscriptionServiceを先頭でインポート
 let transcriptionService;
 // 環境変数の読み込み
@@ -62,6 +64,42 @@ dotenv.config();
 // Expressアプリケーションの初期化
 const app = (0, express_1.default)();
 const PORT = process.env.PORT || 3000;
+
+// HTTPサーバーの作成
+const server = http.createServer(app);
+
+// Socket.IOサーバーの初期化
+const io = new Server(server, {
+  cors: {
+    origin: '*',
+    methods: ['GET', 'POST'],
+    credentials: true
+  },
+  transports: ['websocket', 'polling'],
+  path: '/socket.io'
+});
+
+// クライアント接続イベントを処理
+io.on('connection', (socket) => {
+  console.log(`Client connected: ${socket.id}`);
+
+  // 特定のジョブの進捗状況を監視するルーム
+  socket.on('joinJobRoom', (jobId) => {
+    socket.join(`job-${jobId}`);
+    console.log(`Client ${socket.id} joined room for job ${jobId}`);
+  });
+
+  // ルームから退出
+  socket.on('leaveJobRoom', (jobId) => {
+    socket.leave(`job-${jobId}`);
+    console.log(`Client ${socket.id} left room for job ${jobId}`);
+  });
+
+  // 切断イベント
+  socket.on('disconnect', () => {
+    console.log(`Client disconnected: ${socket.id}`);
+  });
+});
 // Prismaクライアントの初期化
 // 注: Prismaクライアントの初期化を確実にするための修正
 let prisma;
@@ -914,8 +952,86 @@ app.post('/api/process-cloud', async (req, res) => {
     });
   }
 });
+// WebSocketの進捗状況を取得するエンドポイント
+app.get('/api/job-status/:jobId', async (req, res) => {
+  try {
+    console.log(`Job status request received for jobId: ${req.params.jobId}`);
+    const jobId = req.params.jobId;
+    
+    if (!jobId) {
+      console.error('Job status request missing jobId parameter');
+      return res.status(400).json({ error: 'Missing jobId parameter' });
+    }
+    
+    // レコードIDとしてジョブIDを使用
+    const record = await prisma.record.findUnique({
+      where: { id: jobId }
+    });
+    
+    if (!record) {
+      console.warn(`Record ${jobId} not found`);
+      return res.status(404).json({ error: 'Record not found' });
+    }
+    
+    // レコードの状態に基づいて進捗状況を計算
+    let progress = 0;
+    let state = 'waiting';
+    
+    switch (record.status) {
+      case 'UPLOADED':
+        progress = 0;
+        state = 'waiting';
+        break;
+      case 'PROCESSING':
+        progress = 25;
+        state = 'active';
+        break;
+      case 'TRANSCRIBED':
+        progress = 50;
+        state = 'active';
+        break;
+      case 'SUMMARIZED':
+        progress = 75;
+        state = 'active';
+        break;
+      case 'DONE':
+        progress = 100;
+        state = 'completed';
+        break;
+      case 'ERROR':
+        progress = 0;
+        state = 'failed';
+        break;
+      default:
+        progress = 0;
+        state = 'waiting';
+    }
+    
+    const response = {
+      jobId,
+      state,
+      progress,
+      data: {
+        recordId: record.id,
+        status: record.status
+      },
+      timestamp: Date.now()
+    };
+    
+    console.log(`Returning job status for ${jobId}:`, response);
+    
+    return res.status(200).json(response);
+  } catch (error) {
+    console.error('Error in job status endpoint:', error);
+    return res.status(500).json({
+      error: 'Error getting job status',
+      details: error instanceof Error ? error.message : 'Unknown error'
+    });
+  }
+});
+
 // サーバーを起動
-app.listen(PORT, async () => {
+server.listen(PORT, async () => {
   console.log(`サーバーが起動しました。ポート: ${PORT}`);
   try {
     // TranscriptionServiceのダイナミックインポート

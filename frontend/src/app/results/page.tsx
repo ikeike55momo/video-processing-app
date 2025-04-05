@@ -46,6 +46,14 @@ export default function ResultsPage() {
     if (recordId) {
       console.log(`指定されたレコードID: ${recordId}`);
       
+      // レコードIDが有効かどうかを確認
+      if (recordId === 'undefined' || recordId === 'null') {
+        console.error('無効なレコードID:', recordId);
+        setError('無効なレコードIDが指定されました。');
+        setLoading(false);
+        return;
+      }
+      
       const checkRecordStatus = async () => {
         try {
           setLoading(true);
@@ -56,11 +64,26 @@ export default function ResultsPage() {
           }
           
           const data = await response.json();
-          setRecords([data.record]);
           
-          // 処理が完了していない場合は定期的に更新
-          if (data.record.status === 'PROCESSING' || data.record.status === 'UPLOADED') {
-            setTimeout(checkRecordStatus, 5000); // 5秒ごとに更新
+          // データの構造を確認
+          if (!data.record && data.id) {
+            // レコードが直接返される場合
+            setRecords([data]);
+            
+            // 処理が完了していない場合は定期的に更新
+            if (data.status === 'PROCESSING' || data.status === 'UPLOADED') {
+              setTimeout(checkRecordStatus, 5000); // 5秒ごとに更新
+            }
+          } else if (data.record) {
+            // recordプロパティ内にデータがある場合
+            setRecords([data.record]);
+            
+            // 処理が完了していない場合は定期的に更新
+            if (data.record.status === 'PROCESSING' || data.record.status === 'UPLOADED') {
+              setTimeout(checkRecordStatus, 5000); // 5秒ごとに更新
+            }
+          } else {
+            throw new Error("レコードデータの形式が不正です");
           }
         } catch (err) {
           console.error("データ取得エラー:", err);
