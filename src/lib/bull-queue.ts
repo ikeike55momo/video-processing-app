@@ -16,9 +16,9 @@ export const jobEvents = new EventEmitter();
 
 // キュー名の定義
 export const QUEUE_NAMES = {
-  TRANSCRIPTION: 'transcription-queue',
-  SUMMARY: 'summary-queue',
-  ARTICLE: 'article-queue'
+  TRANSCRIPTION: 'transcription',
+  SUMMARY: 'summary',
+  ARTICLE: 'article'
 };
 
 // ジョブデータのインターフェース

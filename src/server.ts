@@ -175,7 +175,7 @@ app.post('/api/process', async (req: Request, res: Response) => {
     }
 
     // 文字起こしキューにジョブを追加
-    await addJob('transcription', {
+    await addJob(QUEUE_NAMES.TRANSCRIPTION, {
       type: 'transcription',
       recordId: recordId,
       fileKey: updatedRecord.file_key || updatedRecord.file_url || '' // file_keyがなければfile_urlを使用
@@ -305,16 +305,16 @@ app.post('/api/records/:id/retry', async (req: Request<{ id: string }>, res: Res
     
     switch (record.processing_step) {
       case 'SUMMARY':
-        queueName = 'summary';
+        queueName = QUEUE_NAMES.SUMMARY;
         jobType = 'summary';
         break;
       case 'ARTICLE':
-        queueName = 'article';
+        queueName = QUEUE_NAMES.ARTICLE;
         jobType = 'article';
         break;
       default:
         // デフォルトは文字起こしから開始
-        queueName = 'transcription';
+        queueName = QUEUE_NAMES.TRANSCRIPTION;
         jobType = 'transcription';
     }
 
