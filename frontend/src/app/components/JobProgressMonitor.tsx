@@ -230,7 +230,7 @@ const JobProgressMonitor: React.FC<JobProgressMonitorProps> = ({
       } catch (err) {
         console.error('ポーリング中のエラー:', err);
       }
-    }, 5000); // 5秒ごとにポーリング
+    }, 2000); // 2秒ごとにポーリング（5秒から短縮）
     
     return () => clearInterval(pollInterval);
   }, [usePolling, completed, recordId, jobId, onComplete, onError, API_URL]);
