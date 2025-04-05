@@ -18,11 +18,25 @@ export class SocketManager {
 
     this.io = new SocketIOServer(server, {
       cors: {
-        origin: process.env.ALLOWED_ORIGINS?.split(',') || '*',
+        origin: '*', // 開発中は全てのオリジンを許可
         methods: ['GET', 'POST'],
         credentials: true
       },
-      transports: ['websocket', 'polling']
+      transports: ['websocket', 'polling'],
+      path: '/socket.io',
+      connectTimeout: 45000, // 接続タイムアウトを45秒に設定
+      pingTimeout: 30000, // pingタイムアウトを30秒に設定
+      pingInterval: 25000 // ping間隔を25秒に設定
+    });
+
+    console.log('Socket.IO server initialized with options:', {
+      cors: {
+        origin: '*',
+        methods: ['GET', 'POST'],
+        credentials: true
+      },
+      transports: ['websocket', 'polling'],
+      path: '/socket.io'
     });
 
     console.log('Socket.IO server initialized');
