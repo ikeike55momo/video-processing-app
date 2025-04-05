@@ -196,32 +196,37 @@ function processJob() {
         }
         catch (error) {
             console.error('Error processing article job:', error);
-            // ジョブIDがある場合のみリトライを実行
-            if (job && job.id) {
-                try {
-                    yield (0, queue_1.failJob)(QUEUE_NAME, job.id);
-                } catch (queueError) {
-                    console.error('Failed to mark job as failed:', queueError);
-                }
-                
-                // エラーステータスを記録
-                try {
-                    yield prisma.record.update({
-                        where: { id: job.recordId },
-                        data: {
-                            status: 'ERROR', // 文字列リテラルを使用
-                            error: error instanceof Error ? error.message : String(error),
-                            processing_step: null
+            
+            try {
+                // ジョブIDがある場合のみリトライを実行
+                if (job && job.id) {
+                    try {
+                        yield (0, queue_1.failJob)(QUEUE_NAME, job.id);
+                    } catch (queueError) {
+                        console.error('Failed to mark job as failed:', queueError);
+                    }
+                    
+                    // エラーステータスを記録
+                    try {
+                        yield prisma.record.update({
+                            where: { id: job.recordId },
+                            data: {
+                                status: 'ERROR', // 文字列リテラルを使用
+                                error: error instanceof Error ? error.message : String(error),
+                                processing_step: null
+                            }
+                        });
+                    }
+                    catch (dbError) {
+                        if (dbError.code === 'P2025') {
+                            console.warn(`Record ${job.recordId} not found in database when updating error status.`);
+                        } else {
+                            console.error('Failed to update record status:', dbError);
                         }
-                    });
-                }
-                catch (dbError) {
-                    if (dbError.code === 'P2025') {
-                        console.warn(`Record ${job.recordId} not found in database when updating error status.`);
-                    } else {
-                        console.error('Failed to update record status:', dbError);
                     }
                 }
+            } catch (handlingError) {
+                console.error('ジョブ処理中にエラーが発生しました:', handlingError);
             }
         }
     });
