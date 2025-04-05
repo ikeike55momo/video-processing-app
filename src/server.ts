@@ -386,7 +386,67 @@ app.get('/api/job-status/:jobId', async (req: Request, res: Response) => {
     }
     
     if (!job) {
-      console.warn(`Job ${jobId} not found in any queue`);
+      console.warn(`Job ${jobId} not found in any queue, trying to find record with id ${jobId}`);
+      
+      // ジョブIDをレコードIDとして使用してデータベースからレコードを取得
+      try {
+        const record = await prisma.record.findUnique({
+          where: { id: jobId }
+        });
+        
+        if (record) {
+          console.log(`Found record with id ${jobId}`);
+          
+          // 処理状態に基づいて進捗を計算
+          let progress = 0;
+          let state = 'waiting';
+          
+          switch (record.status) {
+            case 'UPLOADED':
+              progress = 0;
+              state = 'waiting';
+              break;
+            case 'PROCESSING':
+              progress = 25;
+              state = 'active';
+              break;
+            case 'TRANSCRIBED':
+              progress = 50;
+              state = 'active';
+              break;
+            case 'SUMMARIZED':
+              progress = 75;
+              state = 'active';
+              break;
+            case 'DONE':
+              progress = 100;
+              state = 'completed';
+              break;
+            case 'ERROR':
+              progress = 0;
+              state = 'failed';
+              break;
+          }
+          
+          const response = {
+            jobId,
+            state,
+            progress,
+            data: {
+              recordId: record.id,
+              status: record.status
+            },
+            timestamp: Date.now()
+          };
+          
+          console.log(`Returning record status for ${jobId}:`, response);
+          
+          return res.status(200).json(response);
+        }
+      } catch (dbError) {
+        console.error(`Error getting record with id ${jobId}:`, dbError);
+      }
+      
       return res.status(404).json({ error: 'Job not found' });
     }
     

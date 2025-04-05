@@ -295,7 +295,7 @@ async function processJob() {
     await prisma.record.update({
       where: { id: job.recordId },
       data: { 
-        status: 'PROCESSING',
+        status: 'PROCESSING' as any,
       }
     });
 
@@ -424,7 +424,7 @@ async function processJob() {
         where: { id: job.recordId },
         data: { 
           transcript_text: fullTranscript,
-          status: 'TRANSCRIBED' as any,
+          status: 'TRANSCRIBED' as any, // TODO: Status.TRANSCRIBEDを使用するように修正
           processing_progress: 100
         } as any
       });
@@ -461,8 +461,8 @@ async function processJob() {
         await prisma.record.update({
           where: { id: job.recordId },
           data: { 
-            status: 'ERROR',
-            errorMessage: error instanceof Error ? error.message : String(error),
+            status: 'ERROR' as any, // TODO: Status.ERRORを使用するように修正
+            error: error instanceof Error ? error.message : String(error),
           } as any
         });
       } catch (dbError: any) {
