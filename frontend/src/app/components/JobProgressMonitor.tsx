@@ -25,7 +25,9 @@ interface JobProgressMonitorProps {
 
 // API URLの設定
 const API_URL = process.env.NEXT_PUBLIC_API_URL || '';
-const SOCKET_URL = API_URL ? API_URL.replace(/^https?:\/\//, '') : 'video-processing-api.onrender.com';
+// WebSocketのURLを設定（wss://プロトコルを使用）
+const SOCKET_URL = API_URL ? `wss://${API_URL.replace(/^https?:\/\//, '')}` : 'wss://video-processing-api.onrender.com';
+console.log('WebSocket URL:', SOCKET_URL);
 
 const JobProgressMonitor: React.FC<JobProgressMonitorProps> = ({
   jobId,
@@ -95,8 +97,11 @@ const JobProgressMonitor: React.FC<JobProgressMonitorProps> = ({
 
     // Socket.IOクライアントを初期化
     const socketIo = io(SOCKET_URL, {
-      transports: ['websocket'],
-      path: '/socket.io'
+      transports: ['websocket', 'polling'], // WebSocketとポーリングの両方をサポート
+      path: '/socket.io',
+      reconnectionAttempts: 5, // 再接続の試行回数
+      reconnectionDelay: 1000, // 再接続の遅延（ミリ秒）
+      timeout: 20000 // 接続タイムアウト（ミリ秒）
     });
 
     // 接続イベント
