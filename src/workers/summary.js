@@ -53,8 +53,8 @@ dotenv.config();
 const prisma = new client_1.PrismaClient();
 
 // キュー名の定義
-const QUEUE_NAME = 'summary-queue';
-const ARTICLE_QUEUE = 'article-queue';
+const QUEUE_NAME = 'summary';
+const ARTICLE_QUEUE = 'article';
 
 /**
  * テキストの要約を行う
