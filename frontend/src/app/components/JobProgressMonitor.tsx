@@ -39,22 +39,67 @@ const JobProgressMonitor: React.FC<JobProgressMonitorProps> = ({
   const [error, setError] = useState<string | null>(null);
   const [completed, setCompleted] = useState(false);
 
+  // 定期的にポーリングするための状態
+  const [usePolling, setUsePolling] = useState(false);
+  const [recordId, setRecordId] = useState<string | null>(null);
+
   // 初期状態を取得
   useEffect(() => {
     const fetchInitialStatus = async () => {
       try {
-        // 404エラーが発生する場合があるため、エラーハンドリングを強化
+        // まず/api/job-status/:jobIdエンドポイントを試す
+        console.log(`ジョブ状態を取得: ${API_URL}/api/job-status/${jobId}`);
         const response = await fetch(`${API_URL}/api/job-status/${jobId}`);
         
-        // 404の場合は処理中として扱う（ジョブがまだキューに登録されていない可能性）
+        // 404の場合は/api/records/:idエンドポイントを試す
         if (response.status === 404) {
-          console.log(`ジョブID ${jobId} はまだ処理が開始されていません。処理中として扱います。`);
+          console.log(`ジョブID ${jobId} が見つかりません。レコードIDとして扱い、/api/records/${jobId}を試みます。`);
+          
+          try {
+            const recordResponse = await fetch(`${API_URL}/api/records/${jobId}`);
+            
+            if (recordResponse.ok) {
+              const recordData = await recordResponse.json();
+              setRecordId(jobId); // jobIdはrecordIdとして扱う
+              
+              // 処理状態に基づいて進捗を設定
+              const progressValue = getProgressFromStatus(recordData.status);
+              setProgress({
+                progress: progressValue,
+                status: recordData.status,
+                message: `処理状態: ${recordData.status}`,
+                timestamp: Date.now()
+              });
+              
+              // 完了または失敗の場合
+              if (recordData.status === 'DONE') {
+                setCompleted(true);
+                onComplete?.(recordData);
+              } else if (recordData.status === 'ERROR') {
+                setError(`処理が失敗しました: ${recordData.error || '不明なエラー'}`);
+                onError?.(recordData.error);
+              } else {
+                // ポーリングを有効化
+                setUsePolling(true);
+              }
+              
+              return;
+            }
+          } catch (recordErr) {
+            console.error('レコード取得エラー:', recordErr);
+          }
+          
+          // レコードも見つからない場合は処理中として扱う
+          console.log(`レコードID ${jobId} も見つかりません。処理中として扱います。`);
           setProgress({
             progress: 0,
             status: 'waiting',
             message: '処理の開始を待っています...',
             timestamp: Date.now()
           });
+          
+          // ポーリングを有効化
+          setUsePolling(true);
           return;
         }
         
@@ -63,8 +108,10 @@ const JobProgressMonitor: React.FC<JobProgressMonitorProps> = ({
         }
         
         const data = await response.json();
+        console.log('ジョブ状態取得成功:', data);
+        
         setProgress({
-          progress: data.progress?.progress || 0,
+          progress: data.progress || 0,
           status: data.state || 'waiting',
           timestamp: Date.now()
         });
@@ -85,11 +132,99 @@ const JobProgressMonitor: React.FC<JobProgressMonitorProps> = ({
           message: '状態取得中にエラーが発生しましたが、処理は継続しています...',
           timestamp: Date.now()
         });
+        
+        // ポーリングを有効化
+        setUsePolling(true);
       }
     };
 
     fetchInitialStatus();
-  }, [jobId, onComplete, onError]);
+  }, [jobId, onComplete, onError, API_URL]);
+  
+  // ステータスから進捗値を取得する関数
+  const getProgressFromStatus = (status: string): number => {
+    switch (status) {
+      case 'UPLOADED':
+        return 0;
+      case 'PROCESSING':
+        return 25;
+      case 'TRANSCRIBED':
+        return 50;
+      case 'SUMMARIZED':
+        return 75;
+      case 'DONE':
+        return 100;
+      case 'ERROR':
+        return 0;
+      default:
+        return 0;
+    }
+  };
+  
+  // ポーリングによる状態取得
+  useEffect(() => {
+    if (!usePolling || completed) return;
+    
+    const pollInterval = setInterval(async () => {
+      try {
+        // recordIdが設定されている場合は/api/records/:idエンドポイントを使用
+        if (recordId) {
+          const response = await fetch(`${API_URL}/api/records/${recordId}`);
+          
+          if (response.ok) {
+            const data = await response.json();
+            
+            // 処理状態に基づいて進捗を設定
+            const progressValue = getProgressFromStatus(data.status);
+            setProgress({
+              progress: progressValue,
+              status: data.status,
+              message: `処理状態: ${data.status}`,
+              timestamp: Date.now()
+            });
+            
+            // 完了または失敗の場合
+            if (data.status === 'DONE') {
+              setCompleted(true);
+              onComplete?.(data);
+              clearInterval(pollInterval);
+            } else if (data.status === 'ERROR') {
+              setError(`処理が失敗しました: ${data.error || '不明なエラー'}`);
+              onError?.(data.error);
+              clearInterval(pollInterval);
+            }
+          }
+        } else {
+          // jobIdを使用して/api/job-status/:jobIdエンドポイントを試す
+          const response = await fetch(`${API_URL}/api/job-status/${jobId}`);
+          
+          if (response.ok) {
+            const data = await response.json();
+            
+            setProgress({
+              progress: data.progress || 0,
+              status: data.state || 'waiting',
+              timestamp: Date.now()
+            });
+            
+            if (data.state === 'completed') {
+              setCompleted(true);
+              onComplete?.(data.result);
+              clearInterval(pollInterval);
+            } else if (data.state === 'failed') {
+              setError(`ジョブが失敗しました: ${data.failedReason || '不明なエラー'}`);
+              onError?.(data.failedReason);
+              clearInterval(pollInterval);
+            }
+          }
+        }
+      } catch (err) {
+        console.error('ポーリング中のエラー:', err);
+      }
+    }, 5000); // 5秒ごとにポーリング
+    
+    return () => clearInterval(pollInterval);
+  }, [usePolling, completed, recordId, jobId, onComplete, onError, API_URL]);
 
   // WebSocket接続を確立
   useEffect(() => {
