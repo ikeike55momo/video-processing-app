@@ -54,7 +54,7 @@ dotenv.config();
 const prisma = new client_1.PrismaClient();
 
 // キュー名の定義
-const QUEUE_NAME = 'article-queue';
+const QUEUE_NAME = 'article';
 
 /**
  * 記事生成を行う
@@ -180,7 +180,7 @@ function processJob() {
                 where: { id: job.recordId },
                 data: {
                     article_text: article,
-                    status: 'DONE', // ステータスをDONEに変更
+                    status: 'DONE', // ステータスをDONEに変更（enumの値を使用）
                     processing_step: null
                 }
             });
