@@ -140,7 +140,7 @@ function processJob() {
                 yield prisma.record.update({
                     where: { id: job.recordId },
                     data: { 
-                        status: client_1.Status.PROCESSING,
+                        status: 'PROCESSING',
                         processing_step: 'SUMMARY'
                     }
                 });
@@ -172,33 +172,49 @@ function processJob() {
                 where: { id: job.recordId },
                 data: {
                     summary_text: summary,
-                    status: client_1.Status.SUMMARIZED,
+                    status: 'SUMMARIZED',
                     processing_step: null
                 }
             });
             
             // 記事生成キューにジョブを追加
-            yield (0, queue_1.addJob)(ARTICLE_QUEUE, {
-                type: 'article',
-                recordId: job.recordId,
-                fileKey: job.fileKey
-            });
+            try {
+                yield (0, queue_1.addJob)(ARTICLE_QUEUE, {
+                    type: 'article',
+                    recordId: job.recordId,
+                    fileKey: job.fileKey
+                });
+                console.log(`記事生成ジョブをキューに追加しました: ${job.recordId}`);
+            } catch (queueError) {
+                console.error('記事生成ジョブのキューへの追加に失敗しました:', queueError);
+                // キューエラーは無視して処理を続行
+            }
             
             // ジョブを完了としてマーク
-            yield (0, queue_1.completeJob)(QUEUE_NAME, job.id);
-            console.log(`Summary job ${job.id} completed successfully`);
+            try {
+                yield (0, queue_1.completeJob)(QUEUE_NAME, job.id);
+                console.log(`Summary job ${job.id} completed successfully`);
+            } catch (completeError) {
+                console.error('ジョブの完了マークに失敗しました:', completeError);
+                // 完了マークエラーは無視して処理を続行
+            }
         }
         catch (error) {
             console.error('Error processing summary job:', error);
             // ジョブIDがある場合のみリトライを実行
             if (job && job.id) {
-                yield (0, queue_1.failJob)(QUEUE_NAME, job.id);
+                try {
+                    yield (0, queue_1.failJob)(QUEUE_NAME, job.id);
+                } catch (failError) {
+                    console.error('ジョブの失敗マークに失敗しました:', failError);
+                }
+                
                 // エラーステータスを記録
                 try {
                     yield prisma.record.update({
                         where: { id: job.recordId },
                         data: {
-                            status: client_1.Status.ERROR,
+                            status: 'ERROR',
                             error: error instanceof Error ? error.message : String(error),
                             processing_step: null
                         }
