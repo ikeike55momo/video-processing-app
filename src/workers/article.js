@@ -178,7 +178,13 @@ function processJob() {
             
             // 記事生成処理
             console.log(`Starting article generation for record: ${job.recordId}`);
-            const article = yield generateArticle(record.transcript_text, record.summary_text);
+            
+            // モック処理（デモ用）
+            console.log(`[MOCK] Generating article from transcript(${record.transcript_text.length} chars) and summary(${record.summary_text.length} chars)`);
+            const article = "# 記事タイトル\n\n## はじめに\n\nこれはデモの要約結果です。実際にはGemini APIを使用してテキスト要約を行います。\n\n## 内容\n\nこれはデモの記事です。実際にはClaudeなどのAIを使用して文字起こしと要約から記事を生成します。\n\n## まとめ\n\nこれはOpenRouterを使用した文章生成のデモです。";
+            
+            // 本番環境では実際にAPIを呼び出す
+            // const article = yield generateArticle(record.transcript_text, record.summary_text);
             
             // 結果をデータベースに保存
             yield prisma.record.update({
@@ -227,6 +233,10 @@ function processJob() {
                 }
             } catch (handlingError) {
                 console.error('ジョブ処理中にエラーが発生しました:', handlingError);
+                // jobが未定義の場合のエラーを防止
+                if (typeof job === 'undefined') {
+                    console.error('job変数が未定義です');
+                }
             }
         }
     });

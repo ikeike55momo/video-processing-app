@@ -2,7 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as dotenv from 'dotenv';
 import * as crypto from 'crypto';
-import { PrismaClient } from '@prisma/client';
+import { PrismaClient, Status } from '@prisma/client';
 import { getJob, completeJob, failJob, addJob, JobData } from '../lib/queue';
 import { getFileContents, getDownloadUrl } from '../lib/storage';
 import { execSync } from 'child_process';
@@ -295,7 +295,7 @@ async function processJob() {
     await prisma.record.update({
       where: { id: job.recordId },
       data: { 
-        status: 'PROCESSING' as any,
+        status: Status.PROCESSING, // 列挙型を使用
       }
     });
 
@@ -424,9 +424,9 @@ async function processJob() {
         where: { id: job.recordId },
         data: { 
           transcript_text: fullTranscript,
-          status: 'TRANSCRIBED' as any, // TODO: Status.TRANSCRIBEDを使用するように修正
+          status: Status.TRANSCRIBED, // 列挙型を使用
           processing_progress: 100
-        } as any
+        }
       });
       
       console.log(`[${job.recordId}] 文字起こし結果をデータベースに保存しました`);
@@ -461,9 +461,9 @@ async function processJob() {
         await prisma.record.update({
           where: { id: job.recordId },
           data: { 
-            status: 'ERROR' as any, // TODO: Status.ERRORを使用するように修正
+            status: Status.ERROR, // 列挙型を使用
             error: error instanceof Error ? error.message : String(error),
-          } as any
+          }
         });
       } catch (dbError: any) {
         console.error('レコードステータスの更新に失敗:', dbError);
