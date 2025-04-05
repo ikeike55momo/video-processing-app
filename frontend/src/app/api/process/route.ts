@@ -160,6 +160,12 @@ export async function POST(req: NextRequest) {
         } else {
           processResult = responseData;
           console.log('バックエンドAPI処理結果:', processResult);
+          // jobIdが含まれているか確認
+          if (responseData.jobId) {
+            console.log('ジョブID取得:', responseData.jobId);
+          } else {
+            console.warn('バックエンドAPIからジョブIDが返されませんでした');
+          }
         }
       } catch (jsonError) {
         console.error('JSONパースエラー:', jsonError);
