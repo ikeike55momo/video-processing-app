@@ -185,7 +185,7 @@ function processJob() {
                 where: { id: job.recordId },
                 data: {
                     article_text: article,
-                    status: client_1.Status.DONE, // enumの値を使用
+                    status: 'DONE', // 文字列リテラルを使用
                     processing_step: null
                 }
             });
@@ -198,13 +198,18 @@ function processJob() {
             console.error('Error processing article job:', error);
             // ジョブIDがある場合のみリトライを実行
             if (job && job.id) {
-                yield (0, queue_1.failJob)(QUEUE_NAME, job.id);
+                try {
+                    yield (0, queue_1.failJob)(QUEUE_NAME, job.id);
+                } catch (queueError) {
+                    console.error('Failed to mark job as failed:', queueError);
+                }
+                
                 // エラーステータスを記録
                 try {
                     yield prisma.record.update({
                         where: { id: job.recordId },
                         data: {
-                            status: client_1.Status.ERROR,
+                            status: 'ERROR', // 文字列リテラルを使用
                             error: error instanceof Error ? error.message : String(error),
                             processing_step: null
                         }

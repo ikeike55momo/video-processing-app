@@ -653,6 +653,47 @@ async function downloadFile(fileUrl, tempDir) {
   }
 }
 
+// タイムスタンプ保存エンドポイント
+app.post('/api/records/:id/timestamps', (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    try {
+        const recordId = req.params.id;
+        const { timestamps_json } = req.body;
+        
+        if (!timestamps_json) {
+            return res.status(400).json({ error: 'timestamps_json is required' });
+        }
+        
+        // レコードの存在確認
+        const record = yield prisma.record.findUnique({
+            where: { id: recordId }
+        });
+        
+        if (!record) {
+            return res.status(404).json({ error: 'Record not found' });
+        }
+        
+        // タイムスタンプを保存
+        const updatedRecord = yield prisma.record.update({
+            where: { id: recordId },
+            data: {
+                timestamps_json: timestamps_json
+            }
+        });
+        
+        res.status(200).json({
+            message: 'Timestamps saved successfully',
+            record: updatedRecord
+        });
+    }
+    catch (error) {
+        console.error('Error saving timestamps:', error);
+        res.status(500).json({
+            error: 'Error saving timestamps',
+            details: error instanceof Error ? error.message : 'Unknown error'
+        });
+    }
+}));
+
 // レコード情報取得エンドポイント
 app.get('/api/records/:id', (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
