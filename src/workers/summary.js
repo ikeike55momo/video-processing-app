@@ -134,7 +134,7 @@ function processJob() {
                 yield prisma.record.update({
                     where: { id: job.recordId },
                     data: { 
-                        status: 'PROCESSING',
+                        status: client_1.Status.PROCESSING,
                         processing_step: 'SUMMARY'
                     }
                 });
@@ -166,7 +166,7 @@ function processJob() {
                 where: { id: job.recordId },
                 data: {
                     summary_text: summary,
-                    status: 'SUMMARIZED',
+                    status: client_1.Status.SUMMARIZED,
                     processing_step: null
                 }
             });
@@ -192,7 +192,7 @@ function processJob() {
                     yield prisma.record.update({
                         where: { id: job.recordId },
                         data: {
-                            status: 'ERROR',
+                            status: client_1.Status.ERROR,
                             error: error instanceof Error ? error.message : String(error),
                             processing_step: null
                         }
