@@ -42,7 +42,8 @@ const corsOptions = {
     if (!origin || allowedOrigins.includes(origin)) {
       callback(null, true);
     } else {
-      callback(null, false);
+      console.warn(`CORS blocked origin: ${origin}`);
+      callback(null, true); // 開発中は全てのオリジンを許可
     }
   },
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
@@ -175,7 +176,7 @@ app.post('/api/process', async (req: Request, res: Response) => {
     }
 
     // 文字起こしキューにジョブを追加
-    await addJob(QUEUE_NAMES.TRANSCRIPTION, {
+    const jobId = await addJob(QUEUE_NAMES.TRANSCRIPTION, {
       type: 'transcription',
       recordId: recordId,
       fileKey: updatedRecord.file_key || updatedRecord.file_url || '' // file_keyがなければfile_urlを使用
@@ -189,7 +190,8 @@ app.post('/api/process', async (req: Request, res: Response) => {
 
     res.status(200).json({ 
       message: 'Processing started',
-      recordId: recordId
+      recordId: recordId,
+      jobId: jobId
     });
   } catch (error) {
     console.error('Error starting process:', error);
