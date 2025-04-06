@@ -1,10 +1,11 @@
 "use client";
 
-import { useState, useEffect } from "react"; // useEffect をインポート
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useSession } from "next-auth/react";
-import { uploadMultipart } from "@/lib/storage";
+import { uploadMultipart } from "@/lib/storage"; // Assuming this handles multipart correctly
 import JobProgressMonitor from "../components/JobProgressMonitor";
+import { Box, Button, CircularProgress, Container, Paper, TextField, Typography, Alert, LinearProgress } from '@mui/material'; // Import MUI components and LinearProgress
 
 export default function UploadPage() {
   const { data: session, status } = useSession();
@@ -14,47 +15,51 @@ export default function UploadPage() {
   const [uploadProgress, setUploadProgress] = useState(0);
   const [error, setError] = useState("");
   const [uploadStage, setUploadStage] = useState<string>("");
-  const [jobId, setJobId] = useState<string | null>(null);
-  const [recordId, setRecordId] = useState<string | null>(null);
-  const [isJobComplete, setIsJobComplete] = useState(false); // 完了状態を管理するステート
+  const [jobId, setJobId] = useState<string | null>(null); // Can be BullMQ jobId or recordId
+  const [recordId, setRecordId] = useState<string | null>(null); // Store the actual recordId
+  const [isJobComplete, setIsJobComplete] = useState(false); // State to track completion
 
-  // セッションチェック
+  // Session check effect
+  useEffect(() => {
+    if (status === "unauthenticated") {
+      router.push("/login");
+    }
+  }, [status, router]);
+
   if (status === "loading") {
     return (
       <div className="flex min-h-screen items-center justify-center">
         <div className="text-center">
-          <h2 className="text-xl font-semibold">読み込み中...</h2>
+          <CircularProgress />
+          <h2 className="text-xl font-semibold mt-4">読み込み中...</h2>
           <p>ユーザー情報を確認しています</p>
         </div>
       </div>
     );
   }
 
-  if (status === "unauthenticated") {
-    router.push("/login");
-    return null;
-  }
-
-  // セッション情報をコンソールに出力（デバッグ用）
-  console.log("セッション情報:", session);
-
-  // ファイル選択ハンドラー
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const selectedFile = e.target.files?.[0];
     setError("");
+    setFile(null);
+    setJobId(null);
+    setRecordId(null);
+    setUploading(false);
+    setUploadProgress(0);
+    setUploadStage("");
+    setIsJobComplete(false);
+
 
     if (!selectedFile) {
       return;
     }
 
-    // ファイルタイプチェック
     if (selectedFile.type !== "video/mp4") {
       setError("MP4形式の動画ファイルのみアップロード可能です");
       return;
     }
 
-    // ファイルサイズチェック (最大サイズを拡大: 15GB = 15 * 1024 * 1024 * 1024 bytes)
-    const maxSize = 15 * 1024 * 1024 * 1024;
+    const maxSize = 15 * 1024 * 1024 * 1024; // 15GB
     if (selectedFile.size > maxSize) {
       setError("ファイルサイズは15GB以下にしてください");
       return;
@@ -63,340 +68,215 @@ export default function UploadPage() {
     setFile(selectedFile);
   };
 
-  // アップロードハンドラー
   const handleUpload = async () => {
     if (!file) {
       setError("ファイルを選択してください");
       return;
     }
 
-    try {
-      setUploading(true);
-      setUploadProgress(0);
-      setUploadStage("準備中...");
+    setUploading(true);
+    setUploadProgress(0);
+    setUploadStage("署名付きURL取得中...");
+    setError("");
+    setJobId(null);
+    setRecordId(null);
+    setIsJobComplete(false);
 
-      // 署名付きURLの取得（ファイルサイズを含める）
-      const response = await fetch("/api/upload-url", {
+
+    try {
+      // 1. Get Upload URL and Record ID
+      const uploadUrlResponse = await fetch("/api/upload-url", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           fileName: file.name,
           contentType: file.type,
-          fileSize: file.size, // ファイルサイズを送信
+          fileSize: file.size,
         }),
       });
 
-      if (!response.ok) {
-        throw new Error("署名付きURLの取得に失敗しました");
+      if (!uploadUrlResponse.ok) {
+        throw new Error(`署名付きURLの取得に失敗しました: ${uploadUrlResponse.statusText}`);
       }
 
-      const uploadUrlResult = await response.json(); // 変数名を変更
-      const initialRecordId = uploadUrlResult.recordId; // upload-urlで生成されたrecordIdを保持
-      const initialFileKey = uploadUrlResult.fileKey;   // upload-urlで生成されたfileKeyを保持
-      let fileUrl: string;
+      const uploadUrlResult = await uploadUrlResponse.json();
+      const { uploadUrl, recordId: generatedRecordId, fileKey, fileUrl: publicFileUrl } = uploadUrlResult;
 
-      // アップロード方法の選択
-      if (uploadUrlResult.isMultipart) {
-        // マルチパートアップロードの場合
-        setUploadStage("マルチパートアップロード準備中...");
-        console.log("マルチパートアップロードを開始します", uploadUrlResult);
-
-        // マルチパートアップロードの実行
-        const uploadResult = await uploadMultipart(file, uploadUrlResult, (progress) => {
-          setUploadProgress(progress);
-          console.log(`マルチパートアップロード進捗: ${progress}%`);
-        });
-
-        fileUrl = uploadResult.fileUrl;
-        console.log("マルチパートアップロード完了:", fileUrl);
-      } else {
-        // 通常のアップロード
-        setUploadStage("アップロード中...");
-
-        // uploadUrlが存在するか確認
-        if (!uploadUrlResult.uploadUrl) {
-          console.error("アップロードURLが取得できませんでした", uploadUrlResult);
-          throw new Error("アップロードURLが取得できませんでした");
-        }
-
-        await uploadFileWithProgress(file, uploadUrlResult.uploadUrl);
-        // fileUrlはR2からの直接URLを使うのが確実な場合がある
-        fileUrl = uploadUrlResult.fileUrl || uploadUrlResult.uploadUrl;
-        console.log("通常アップロード完了:", fileUrl);
+      if (!uploadUrl || !generatedRecordId || !fileKey) {
+         throw new Error("サーバーから必要なアップロード情報が返されませんでした。");
       }
 
-      // 処理開始リクエスト
-      console.log(`処理開始リクエスト送信: recordId=${initialRecordId}, fileKey=${initialFileKey}, fileUrl=${fileUrl}`);
+      setRecordId(generatedRecordId); // Store the generated record ID
+
+      // 2. Upload File
+      setUploadStage("アップロード中...");
+      await uploadFileWithProgress(file, uploadUrl); // Use standard PUT upload
+      console.log("アップロード成功");
+
+      // 3. Start Processing
       setUploadStage("処理を開始中...");
       const processResponse = await fetch(`/api/process`, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          recordId: initialRecordId, // upload-urlで取得したrecordIdを使用
-          fileKey: initialFileKey,   // upload-urlで取得したfileKeyを使用
-          fileUrl: fileUrl,          // アップロード完了後のURL
+          recordId: generatedRecordId,
+          fileKey: fileKey,
+          fileUrl: publicFileUrl,
         }),
       });
 
-      // ★★★ /api/process が失敗した場合のフォールバック処理を削除 ★★★
-      // if (!processResponse.ok) {
-      //    const errorData = await processResponse.json();
-      //    console.error("処理開始APIエラー:", errorData);
-      //   // エラーメッセージに詳細を含める
-      //   // フォールバックとして /api/transcribe を試す (本来は不要になるはず)
-      //   console.warn("Fallback: Calling /api/transcribe due to /api/process failure.");
-      //   const transcribeResponse = await fetch(`/api/transcribe`, {
-      //       method: "POST",
-      //       headers: { "Content-Type": "application/json" },
-      //       body: JSON.stringify({ recordId: initialRecordId, fileKey: initialFileKey }),
-      //   });
-      //   if (!transcribeResponse.ok) {
-      //       const transcribeErrorData = await transcribeResponse.json();
-      //       console.error("/api/transcribe fallback error:", transcribeErrorData);
-      //       throw new Error(`処理の開始に失敗しました (fallback failed): ${transcribeErrorData.error || transcribeResponse.statusText}`);
-      //   }
-      //   processResult = await transcribeResponse.json(); // transcribeの結果を使用
-      // } else {
-      //    processResult = await processResponse.json(); // processの結果を使用
-      // }
       if (!processResponse.ok) {
-         const errorData = await processResponse.json();
-         console.error("処理開始APIエラー:", errorData);
-        // エラーメッセージに詳細を含める
+        const errorData = await processResponse.json();
+        console.error("処理開始APIエラー:", errorData);
         throw new Error(`処理の開始に失敗しました: ${errorData.error || processResponse.statusText}`);
       }
 
-      // process APIはjobIdを返す想定 (recordIdは既に持っている)
       const processResult = await processResponse.json();
-      const returnedJobId = processResult.jobId; // APIから返されたjobId
+      const returnedJobId = processResult.jobId;
 
-      console.log(`処理開始API成功: jobId=${returnedJobId}`);
+      if (!returnedJobId) {
+          console.warn("バックエンドAPIからジョブIDが返されませんでした。レコードIDで監視します。");
+          setJobId(generatedRecordId);
+      } else {
+          console.log(`処理開始API成功: jobId=${returnedJobId}`);
+          setJobId(returnedJobId);
+      }
 
-      // ジョブIDと、最初に取得したレコードIDを設定
-      setJobId(returnedJobId);
-      setRecordId(initialRecordId); // 最初に生成されたrecordIdを使用
       setUploadStage("処理中...");
 
-      // 結果ページへのリダイレクトは行わず、このページで進捗を表示する
-      // router.push(`/results?recordId=${recordId}`);
     } catch (err) {
-      console.error("アップロードエラー:", err);
-      setError(
-        err instanceof Error
-          ? err.message
-          : "アップロード中にエラーが発生しました"
-      );
+      console.error("アップロードまたは処理開始エラー:", err);
+      setError(err instanceof Error ? err.message : "アップロードまたは処理開始中にエラーが発生しました");
       setUploading(false);
+      setJobId(null);
+      setRecordId(null);
     }
   };
 
-  // isJobComplete ステートが true になったらリダイレクトを実行する useEffect
-  useEffect(() => {
-    if (isJobComplete && recordId) {
-      console.log(`Job completed for record ${recordId}, redirecting...`);
-      // 短い遅延を入れてからリダイレクトを試みる
-      const redirectTimeout = setTimeout(() => {
-        router.push(`/results/${recordId}`);
-      }, 500); // 0.5秒の遅延
-
-      // クリーンアップ
-      return () => clearTimeout(redirectTimeout);
-    }
-  }, [isJobComplete, recordId, router]);
-
-  // 進捗表示付きアップロード（小さなファイル用）
   const uploadFileWithProgress = (file: File, signedUrl: string) => {
     return new Promise<void>((resolve, reject) => {
       const xhr = new XMLHttpRequest();
-
-      // タイムアウトを設定（4時間 = 14400000ミリ秒）
-      xhr.timeout = 14400000;
-
       xhr.open("PUT", signedUrl, true);
-      
-      // Content-Typeヘッダーを設定
       xhr.setRequestHeader("Content-Type", file.type);
-      
-      // CORSを有効にする
-      xhr.withCredentials = false;
 
-      // 進捗イベントのリスナー
       xhr.upload.onprogress = (event) => {
         if (event.lengthComputable) {
           const progress = Math.round((event.loaded / event.total) * 100);
           setUploadProgress(progress);
-          console.log(`アップロード進捗: ${progress}%`);
         }
       };
 
-      // 成功時のハンドラー
       xhr.onload = () => {
         if (xhr.status >= 200 && xhr.status < 300) {
-          console.log("アップロード成功:", xhr.status);
           resolve();
         } else {
-          console.error("アップロード失敗:", xhr.status, xhr.statusText, xhr.responseText);
           reject(new Error(`アップロード失敗: ${xhr.status} ${xhr.statusText}`));
         }
       };
-
-      // エラーハンドラー
-      xhr.onerror = (e) => {
-        console.error("アップロードエラー:", e);
-        console.error("署名付きURL:", signedUrl);
-        console.error("ファイル情報:", { name: file.name, type: file.type, size: file.size });
-        reject(new Error("アップロード中にネットワークエラーが発生しました"));
-      };
-
-      // タイムアウトハンドラー
-      xhr.ontimeout = () => {
-        console.error("アップロードがタイムアウトしました");
-        reject(new Error("アップロードがタイムアウトしました"));
-      };
-
-      // アップロード中断ハンドラー
-      xhr.onabort = () => {
-        console.error("アップロードが中断されました");
-        reject(new Error("アップロードが中断されました"));
-      };
-
-      // ファイル送信
-      try {
-        console.log("アップロード開始:", file.name, file.size);
-        console.log("署名付きURL有効性:", signedUrl ? "有効" : "無効");
-        if (signedUrl) {
-          console.log("URL長さ:", signedUrl.length);
-          console.log("URL先頭部分:", signedUrl.substring(0, 50) + "...");
-        }
-        xhr.send(file);
-      } catch (error) {
-        console.error("ファイル送信エラー:", error);
-        reject(new Error(`ファイル送信エラー: ${error instanceof Error ? error.message : String(error)}`));
-      }
+      xhr.onerror = () => reject(new Error("アップロード中にネットワークエラーが発生しました"));
+      xhr.onabort = () => reject(new Error("アップロードが中断されました"));
+      xhr.ontimeout = () => reject(new Error("アップロードがタイムアウトしました"));
+      xhr.timeout = 14400000; // 4 hours
+      xhr.send(file);
     });
   };
 
+  const handleProcessingComplete = (result: any) => {
+    console.log("Processing complete callback triggered", result);
+    // setIsJobComplete(true); // Let JobProgressMonitor handle redirect
+  };
+
+  const handleProcessingError = (error: any) => {
+    console.error("Processing error callback triggered", error);
+    setError(`処理中にエラーが発生しました: ${error}`);
+    setUploading(false);
+  };
+
+
   return (
-    <div className="min-h-screen bg-slate-50 p-8">
-      <div className="mx-auto max-w-4xl">
-        <header className="mb-8 flex justify-between items-center">
-          <div>
-            <h1 className="text-3xl font-bold text-slate-800">動画アップロード</h1>
-            <p className="text-slate-600">
-              MP4形式の動画ファイル（最大15GB）をアップロードしてください
-            </p>
-          </div>
-          <div className="flex space-x-4">
-            <button
-              onClick={() => router.push("/results")}
-              className="rounded-md bg-blue-600 px-4 py-2 text-white hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
-            >
-              処理済み動画を表示
-            </button>
-          </div>
-        </header>
+    <Container maxWidth="md" sx={{ py: 4 }}>
+      <Paper elevation={3} sx={{ p: 4 }}>
+        <Typography variant="h4" component="h1" gutterBottom align="center">
+          動画アップロード
+        </Typography>
+        <Typography variant="body1" color="text.secondary" align="center" gutterBottom>
+          MP4形式の動画ファイル（最大15GB）をアップロードしてください
+        </Typography>
 
-        <div className="rounded-lg bg-white p-8 shadow-md">
-          {error && (
-            <div className="mb-6 rounded-md bg-red-50 p-4 text-sm text-red-700">
-              {error}
-            </div>
-          )}
+        {error && (
+          <Alert severity="error" sx={{ mb: 3 }}>
+            {error}
+          </Alert>
+        )}
 
-          <div className="mb-6">
-            <div className="flex justify-between items-center mb-4">
-              <h2 className="text-xl font-semibold text-slate-800">Vercel処理</h2>
-              <div className="bg-yellow-100 text-yellow-800 text-xs font-medium px-2.5 py-0.5 rounded">
-                タイムアウト: 4時間
-              </div>
-            </div>
-            <p className="text-slate-600 mb-4">
-              Vercelのサーバーレス関数を使用して処理を行います。処理時間が4時間を超えるとタイムアウトします。
-            </p>
-          </div>
-
-          <div className="mb-6">
-            <label
-              htmlFor="video-upload"
-              className="block text-sm font-medium text-slate-700"
-            >
-              動画ファイル
-            </label>
+        <Box sx={{ mb: 3 }}>
+          <Button
+            variant="contained"
+            component="label"
+            disabled={uploading}
+            fullWidth
+          >
+            ファイルを選択
             <input
-              id="video-upload"
               type="file"
+              hidden
               accept="video/mp4"
               onChange={handleFileChange}
               disabled={uploading}
-              className="mt-1 block w-full rounded-md border border-slate-300 px-3 py-2 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-blue-500"
             />
-            <p className="mt-2 text-sm text-slate-500">
-              MP4形式の動画ファイルを選択してください（最大15GB）
-            </p>
-          </div>
-
+          </Button>
           {file && (
-            <div className="mb-6">
-              <h3 className="text-md font-medium text-slate-700">
-                選択されたファイル
-              </h3>
-              <p className="text-slate-600">{file.name}</p>
-              <p className="text-slate-500">
-                {(file.size / (1024 * 1024)).toFixed(2)} MB
-              </p>
-            </div>
+            <Typography variant="body2" sx={{ mt: 1 }}>
+              選択中: {file.name} ({(file.size / (1024 * 1024)).toFixed(2)} MB)
+            </Typography>
           )}
+        </Box>
 
-          {uploading && !jobId && (
-            <div className="mb-6">
-              <h3 className="mb-2 text-md font-medium text-slate-700">
-                {uploadStage} - 進捗: {uploadProgress}%
-              </h3>
-              <div className="h-2 w-full rounded-full bg-slate-200">
-                <div
-                  className="h-2 rounded-full bg-blue-600"
-                  style={{ width: `${uploadProgress}%` }}
-                ></div>
-              </div>
-            </div>
-          )}
+        {uploading && !jobId && (
+          <Box sx={{ mb: 3 }}>
+            <Typography variant="body1" gutterBottom>{uploadStage}</Typography>
+            <Box sx={{ display: 'flex', alignItems: 'center' }}>
+              <Box sx={{ width: '100%', mr: 1 }}>
+                <LinearProgress variant="determinate" value={uploadProgress} />
+              </Box>
+              <Box sx={{ minWidth: 35 }}>
+                <Typography variant="body2" color="text.secondary">{`${Math.round(uploadProgress)}%`}</Typography>
+              </Box>
+            </Box>
+          </Box>
+        )}
 
-          {jobId && (
-            <div className="mb-6">
-              <JobProgressMonitor 
-                jobId={jobId}
-                onComplete={(result) => {
-                  console.log('JobProgressMonitor: onComplete triggered', { result, recordId });
-                  setIsJobComplete(true); // 完了状態をセット
-                }}
-                onError={(error) => {
-                  setError(`処理中にエラーが発生しました: ${error}`);
-                  setUploading(false);
-                  setJobId(null);
-                }}
-              />
-              
-              <div className="text-center mt-4">
-                <p className="text-sm text-gray-600">
-                  処理が完了すると自動的に結果ページに移動します
-                </p>
-              </div>
-            </div>
-          )}
+        {/* Render JobProgressMonitor only when jobId and recordId are set */}
+        {jobId && recordId && (
+           <JobProgressMonitor
+              jobId={jobId}
+              recordIdProp={recordId} // ★★★ Pass recordId to recordIdProp ★★★
+              onComplete={handleProcessingComplete}
+              onError={handleProcessingError}
+            />
+        )}
 
-          <button
-            onClick={handleUpload}
-            disabled={!file || uploading}
-            className="w-full rounded-md bg-blue-600 px-4 py-2 text-white hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:bg-blue-300"
+        <Button
+          variant="contained"
+          color="primary"
+          onClick={handleUpload}
+          disabled={!file || uploading}
+          fullWidth
+          sx={{ mt: 2 }}
+        >
+          {uploading ? "処理中..." : "アップロードして処理を開始"}
+        </Button>
+
+         <Button
+            variant="outlined"
+            onClick={() => router.push("/results")}
+            fullWidth
+            sx={{ mt: 2 }}
           >
-            {uploading ? "アップロード中..." : "アップロードして処理を開始"}
-          </button>
-        </div>
-      </div>
-    </div>
+            処理済み動画を表示
+          </Button>
+
+      </Paper>
+    </Container>
   );
 }
