@@ -356,10 +356,15 @@ export default function UploadPage() {
                 jobId={jobId} 
                 onComplete={(result) => {
                   // 処理完了時に結果ページへリダイレクト
-                  // resultにrecordIdがない場合はjobIdを使用する
-                  const recordIdToUse = result.recordId || (result.data && result.data.recordId) || jobId;
-                  console.log('処理完了、結果ページへリダイレクト:', { result, recordIdToUse });
-                  router.push(`/results?recordId=${recordIdToUse}`);
+                  // 処理完了時に結果詳細ページへリダイレクト
+                  // recordId ステートを使用 (upload-url で取得したもの)
+                  console.log('処理完了、結果詳細ページへリダイレクト:', { result, recordId });
+                  if (recordId) { // recordId が null でないことを確認
+                    router.push(`/results/${recordId}`);
+                  } else {
+                    console.error("リダイレクトできません: recordId が見つかりません");
+                    setError("処理は完了しましたが、結果ページへのリダイレクトに失敗しました。一覧画面から確認してください。");
+                  }
                 }}
                 onError={(error) => {
                   setError(`処理中にエラーが発生しました: ${error}`);
