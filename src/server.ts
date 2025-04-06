@@ -530,31 +530,27 @@ app.get('/api/job-status/:jobId', async (req: Request<{ jobId: string }>, res: R
           let progress = 0;
           let state = 'waiting'; // BullMQのステートに合わせる
 
-          // ★★★ 修正: DBステータスに基づいた進捗計算 ★★★
+          // ★★★ 修正: DBステータスと進捗に基づいた計算 ★★★
           switch (record.status) {
             case 'UPLOADED':
               progress = 0;
               state = 'waiting';
               break;
             case 'PROCESSING':
-              // PROCESSING中はDBの値を優先、なければステップに応じて推定
-              progress = record.processing_progress ?? 25; // デフォルト25%
-              // より詳細な推定（オプション）
-              // if (record.processing_step === 'DOWNLOAD') progress = 5;
-              // else if (record.processing_step === 'TRANSCRIPTION_AUDIO_EXTRACTION') progress = 10;
-              // else if (record.processing_step?.startsWith('TRANSCRIPTION')) progress = record.processing_progress ?? 30; // 文字起こし中はDB値優先、なければ30
-              // else if (record.processing_step?.startsWith('SUMMARY')) progress = record.processing_progress ?? 60; // 要約中はDB値優先、なければ60
-              // else if (record.processing_step?.startsWith('ARTICLE')) progress = record.processing_progress ?? 85; // 記事生成中はDB値優先、なければ85
+              // PROCESSING中はDBの値を最優先
+              progress = record.processing_progress ?? 25; // DB値がなければ25%をデフォルトに
               state = 'active';
               break;
             case 'TRANSCRIBED':
               // 文字起こし完了 -> 要約処理中/待機中
-              progress = 50; // 要約フェーズ開始点
+              // DBに進捗があればそれを使い、なければ50%とする
+              progress = record.processing_progress ?? 50; 
               state = 'active'; // 全体プロセスとしてはまだアクティブ
               break;
             case 'SUMMARIZED':
               // 要約完了 -> 記事生成中/待機中
-              progress = 75; // 記事生成フェーズ開始点
+              // DBに進捗があればそれを使い、なければ75%とする
+              progress = record.processing_progress ?? 75; 
               state = 'active'; // 全体プロセスとしてはまだアクティブ
               break;
             case 'DONE':
@@ -562,7 +558,8 @@ app.get('/api/job-status/:jobId', async (req: Request<{ jobId: string }>, res: R
               state = 'completed';
               break;
             case 'ERROR':
-              progress = record.processing_progress ?? 0; // エラー発生時の進捗を保持、なければ0
+              // エラー発生時の進捗を保持、なければ0
+              progress = record.processing_progress ?? 0; 
               state = 'failed';
               break;
             default:

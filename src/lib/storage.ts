@@ -127,13 +127,10 @@ export async function getFileContents(key: string): Promise<Buffer> {
   
   console.log(`getFileContents関数を呼び出します。fileKey: ${fileKey}`);
   
-  // ★★★ 修正: GetObjectCommandに渡す前にキーをデコードする ★★★
-  const decodedFileKey = decodeURIComponent(fileKey);
-  console.log(`デコードされたファイルキー: ${decodedFileKey}`);
-
+  // ★★★ 修正: デコード処理を削除し、元のキーを使用 ★★★
   const command = new GetObjectCommand({
     Bucket: R2_BUCKET_NAME,
-    Key: decodedFileKey, // ★★★ 修正: デコードされたキーを使用 ★★★
+    Key: fileKey, // ★★★ 修正: 元のエンコードされたキーを使用 ★★★
   });
   
   try {
@@ -150,8 +147,8 @@ export async function getFileContents(key: string): Promise<Buffer> {
     // 公開URLからのダウンロードを試みる
     if (R2_PUBLIC_URL) {
       console.log(`R2からのダウンロードに失敗しました。公開URLを試みます: ${error}`);
-      // ★★★ 修正: 公開URLの構築にもデコードされたキーを使用する（念のため）★★★
-      const publicUrl = `${R2_PUBLIC_URL}/${decodedFileKey}`; 
+      // ★★★ 修正: 公開URLの構築には元のエンコードされたキーを使用 ★★★
+      const publicUrl = `${R2_PUBLIC_URL}/${fileKey}`; 
       console.log(`公開URLを使用してファイルにアクセスします: ${publicUrl}`);
       
       try {
