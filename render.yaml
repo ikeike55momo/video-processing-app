@@ -5,8 +5,10 @@ WebサービスとしてのAPIサービス
     env: node
     nodeVersion: 18
     plan: pro
-    buildCommand: npm install && npx prisma generate --schema=./prisma/schema.prisma && npx prisma db push --schema=./prisma/schema.prisma --accept-data-loss
-    startCommand: node --max-old-space-size=4096 src/server.js
+    # buildCommandに npm run build を追加
+    buildCommand: npm install && npm run build && npx prisma generate --schema=./prisma/schema.prisma && npx prisma db push --schema=./prisma/schema.prisma --accept-data-loss
+    # startCommandをコンパイル後のパスに修正
+    startCommand: node --max-old-space-size=4096 dist/server.js
     rootDir: .
     autoDeploy: true
     envVars:
@@ -91,7 +93,8 @@ WebサービスとしてのAPIサービス
     env: node
     nodeVersion: 18.x
     plan: pro
-    buildCommand: npm install && npx prisma generate --schema=./prisma/schema.prisma && npx prisma db push --schema=./prisma/schema.prisma --accept-data-loss
+    # buildCommandに npm run build を追加
+    buildCommand: npm install && npm run build && npx prisma generate --schema=./prisma/schema.prisma && npx prisma db push --schema=./prisma/schema.prisma --accept-data-loss
     startCommand: npm run start:transcription
     rootDir: .
     autoDeploy: true
@@ -126,7 +129,8 @@ WebサービスとしてのAPIサービス
     env: node
     nodeVersion: 18.x
     plan: standard
-    buildCommand: npm install && npx prisma generate --schema=./prisma/schema.prisma && npx prisma db push --schema=./prisma/schema.prisma --accept-data-loss
+    # buildCommandに npm run build を追加
+    buildCommand: npm install && npm run build && npx prisma generate --schema=./prisma/schema.prisma && npx prisma db push --schema=./prisma/schema.prisma --accept-data-loss
     startCommand: npm run start:summary
     rootDir: .
     autoDeploy: true
@@ -153,7 +157,8 @@ WebサービスとしてのAPIサービス
     env: node
     nodeVersion: 18.x
     plan: standard
-    buildCommand: npm install && npx prisma generate --schema=./prisma/schema.prisma && npx prisma db push --schema=./prisma/schema.prisma --accept-data-loss
+    # buildCommandに npm run build を追加
+    buildCommand: npm install && npm run build && npx prisma generate --schema=./prisma/schema.prisma && npx prisma db push --schema=./prisma/schema.prisma --accept-data-loss
     startCommand: npm run start:article
     rootDir: .
     autoDeploy: true
