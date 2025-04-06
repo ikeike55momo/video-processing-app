@@ -324,25 +324,25 @@ ${transcriptText}
 ---
 `;
 
-    console.log('Gemini APIにタイムスタンプ抽出リクエストを送信します...');
-    const response = await axios.post(
-      // ★★★ モデル名を gemini-1.5-flash-latest に変更 (再々試行) ★★★
-      'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent',
-      {
-        contents: [{ role: 'user', parts: [{ text: prompt }] }],
-        // generation_config might need adjustment for text generation
-        generation_config: {
-          temperature: 0.1, // Lower temperature for more deterministic output
-          // max_output_tokens: ... // Adjust if needed
-        }
-      },
-      {
-        headers: {
-          'Content-Type': 'application/json',
-          'x-goog-api-key': apiKey
-        }
-      }
-    );
+console.log('Gemini APIにタイムスタンプ抽出リクエストを送信します...');
+const response = await axios.post(
+  // ★★★ モデル名は gemini-2.0-flash になっています ★★★
+  'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent',
+  {
+    contents: [{ role: 'user', parts: [{ text: prompt }] }],
+    // generation_config might need adjustment for text generation
+    generation_config: {
+      temperature: 0.1, // Lower temperature for more deterministic output
+      // max_output_tokens: ... // Adjust if needed
+    }
+  },
+  {
+    headers: {
+      'Content-Type': 'application/json',
+      'x-goog-api-key': apiKey
+    }
+  }
+);
 
     const generatedText = response.data.candidates[0].content.parts[0].text;
     console.log('Geminiからのタイムスタンプ抽出レスポンス:', generatedText);
@@ -363,36 +363,31 @@ ${transcriptText}
     if (arrayMatch && arrayMatch[0]) {
       jsonString = arrayMatch[0]; // マッチした配列部分のみを使用
       try {
-        // JSON.parseを試行
+        // JSON.parseを試行  <--- この try ブロック内
         const timestamps = JSON.parse(jsonString);
         if (Array.isArray(timestamps)) {
           console.log(`タイムスタンプ抽出完了: ${timestamps.length}個`);
-          return timestamps;
+          return timestamps; // 成功: 配列を返す
         } else {
           console.error('抽出されたタイムスタンプが配列形式ではありません:', timestamps);
-          return null;
+          // パースは成功したが配列ではない場合
         }
-      } catch (parseError) {
+      } catch (parseError) { // <--- パース失敗時の処理
         console.error('タイムスタンプJSONのパースに失敗しました:', parseError);
-        console.error('抽出試行文字列:', jsonString); // パース試行文字列もログ出力
+        console.error('抽出試行文字列:', jsonString);
         console.error('Gemini Raw Response:', generatedText);
-        return null; // パース失敗時はnullを返す
+        // パース失敗の場合
       }
-    } else {
+    } else { // <--- そもそもJSON配列形式が見つからない場合の処理
       console.error('応答からJSON配列形式の部分を抽出できませんでした。');
       console.error('Gemini Raw Response:', generatedText);
-        return timestamps;
-      } else {
-        console.error('抽出されたタイムスタンプが配列形式ではありません:', timestamps);
-        return null;
-      }
-    } catch (parseError) {
-      console.error('タイムスタンプJSONのパースに失敗しました:', parseError);
-      console.error('Gemini Raw Response:', generatedText); // パース失敗時に生の応答をログ出力
-      return null; // パース失敗時はnullを返す
+      // 配列形式が見つからない場合
     }
 
-  } catch (error: any) {
+    // パース失敗、非配列、または配列形式が見つからない場合はnullを返す
+    return null;
+    
+  } catch (error: any) { // Outer catch for the axios request
     console.error('Gemini APIでのタイムスタンプ抽出中にエラーが発生しました:', error.response?.data || error.message || error);
     return null; // エラー時もnullを返す
   }
