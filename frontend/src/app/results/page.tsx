@@ -23,7 +23,7 @@ export default function ResultsPage() {
   const [modalContent, setModalContent] = useState<string | null>(null);
 
   // セッションチェック
-  if (sessionStatus === "loading") { // 変数名を sessionStatus に修正
+  if (sessionStatus === "loading") {
     return (
       <div className="flex min-h-screen items-center justify-center">
         <div className="text-center">
@@ -34,9 +34,9 @@ export default function ResultsPage() {
     );
   }
 
-  if (sessionStatus === "unauthenticated") { // 変数名を sessionStatus に修正
+  if (sessionStatus === "unauthenticated") {
     router.push("/login");
-    return null; // ここで return する
+    return null;
   }
 
   const pollingIntervalRef = useRef<NodeJS.Timeout | null>(null); // ポーリングのインターバルIDを保持
@@ -324,7 +324,7 @@ export default function ResultsPage() {
                       totalSteps={5}
                       status={record.status}
                       error={record.error}
-                      onRetry={handleRetryError} // エラーからの再試行
+                      onRetry={() => handleRetry(record.id)} // 正しい関数名を渡す
                       // onRetryStep は現在APIがないためコメントアウト
                       // onRetryStep={(step) => handleRetryFromStep(record.id, step)}
                     />
