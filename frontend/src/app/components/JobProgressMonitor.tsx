@@ -388,13 +388,20 @@ const JobProgressMonitor: React.FC<JobProgressMonitorProps> = ({
   // --- Redirect Effect ---
   useEffect(() => {
     if (completed) {
-      console.log(`Completion detected. Redirecting to /results/${recordIdProp}`);
-      const timer = setTimeout(() => {
+      console.log(`[REDIRECT] Completion detected. Redirecting to /results/${recordIdProp}`);
+      try {
+        // 完了状態を表示するための短い遅延
+        const timer = setTimeout(() => {
           if (isMountedRef.current) {
-              router.push(`/results/${recordIdProp}`);
+            console.log(`[REDIRECT] Executing redirect to /results/${recordIdProp}`);
+            // 強制的なリダイレクト - 問題のトラブルシューティング用
+            window.location.href = `/results/${recordIdProp}`;
           }
-      }, 500);
-      return () => clearTimeout(timer);
+        }, 1500); // 遅延を増加
+        return () => clearTimeout(timer);
+      } catch (error) {
+        console.error('[REDIRECT] Error during redirect:', error);
+      }
     }
   }, [completed, recordIdProp, router]);
 
