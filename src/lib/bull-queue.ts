@@ -76,8 +76,13 @@ export class QueueManager {
     const queue = new Queue(queueName, defaultQueueOptions);
     this.queues.set(queueName, queue);
 
-    // キューイベントを作成（進捗通知用）
-    const queueEvents = new QueueEvents(queueName, { connection });
+    // キューイベントを作成（進捗通知用） - 専用の接続オプションを使用
+    const queueEventsConnection = new IORedis(redisUrl, {
+      maxRetriesPerRequest: null, // QueueEventsにはnullが必要
+      enableReadyCheck: false,
+      connectTimeout: 10000
+    });
+    const queueEvents = new QueueEvents(queueName, { connection: queueEventsConnection });
     this.queueEvents.set(queueName, queueEvents);
 
     // イベントリスナーを設定
@@ -247,6 +252,7 @@ export class QueueManager {
 
     for (const [name, queueEvents] of this.queueEvents.entries()) {
       console.log(`Closing queue events for queue ${name}...`);
+      // QueueEventsインスタンスを閉じれば、内部で使用されている接続も閉じられるはず
       await queueEvents.close();
     }
 
