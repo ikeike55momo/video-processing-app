@@ -93,8 +93,8 @@ WebサービスとしてのAPIサービス
     env: node
     nodeVersion: 18.x
     plan: pro
-    # buildCommandに npm run build を追加
-    buildCommand: npm install && npm run build && npx prisma generate --schema=./prisma/schema.prisma && npx prisma db push --schema=./prisma/schema.prisma --accept-data-loss
+    # buildCommandを npm ci に変更
+    buildCommand: npm ci && npm run build && npx prisma generate --schema=./prisma/schema.prisma && npx prisma db push --schema=./prisma/schema.prisma --accept-data-loss
     startCommand: npm run start:transcription
     rootDir: .
     autoDeploy: true
@@ -129,8 +129,8 @@ WebサービスとしてのAPIサービス
     env: node
     nodeVersion: 18.x
     plan: standard
-    # buildCommandに npm run build を追加
-    buildCommand: npm install && npm run build && npx prisma generate --schema=./prisma/schema.prisma && npx prisma db push --schema=./prisma/schema.prisma --accept-data-loss
+    # buildCommandを npm ci に変更
+    buildCommand: npm ci && npm run build && npx prisma generate --schema=./prisma/schema.prisma && npx prisma db push --schema=./prisma/schema.prisma --accept-data-loss
     startCommand: npm run start:summary
     rootDir: .
     autoDeploy: true
@@ -157,8 +157,8 @@ WebサービスとしてのAPIサービス
     env: node
     nodeVersion: 18.x
     plan: standard
-    # buildCommandに npm run build を追加
-    buildCommand: npm install && npm run build && npx prisma generate --schema=./prisma/schema.prisma && npx prisma db push --schema=./prisma/schema.prisma --accept-data-loss
+    # buildCommandを npm ci に変更
+    buildCommand: npm ci && npm run build && npx prisma generate --schema=./prisma/schema.prisma && npx prisma db push --schema=./prisma/schema.prisma --accept-data-loss
     startCommand: npm run start:article
     rootDir: .
     autoDeploy: true
