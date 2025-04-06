@@ -3,28 +3,31 @@
 import { useState, useEffect } from "react";
 import { useRouter, useParams } from "next/navigation";
 import { useSession } from "next-auth/react";
+import { Status, Record } from '@prisma/client'; // Status と Record をインポート
 import ProgressIndicator from "../../components/ProgressIndicator";
 import ContentModal from "../../components/ContentModal";
 import VideoWithTimestamps from "../../components/VideoWithTimestamps";
 
+export const dynamic = 'force-dynamic'; // 動的レンダリングを強制
+
 export default function RecordDetailPage() {
-  const { data: session, status } = useSession();
+  const { data: session, status: sessionStatus } = useSession(); // status 変数名を変更
   const router = useRouter();
   const params = useParams();
   const recordId = params?.id as string;
 
-  const [record, setRecord] = useState<any>(null);
+  const [record, setRecord] = useState<Record | null>(null); // Record 型を使用
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [processingStep, setProcessingStep] = useState<number | null>(null);
-  const [processingMessage, setProcessingMessage] = useState<string>("");
+  const [processingStep, setProcessingStep] = useState<number | null>(null); // UIフィードバック用
+  const [processingMessage, setProcessingMessage] = useState<string>(""); // UIフィードバック用
   // モーダル表示用の状態
   const [modalOpen, setModalOpen] = useState(false);
   const [modalTitle, setModalTitle] = useState("");
   const [modalContent, setModalContent] = useState<string | null>(null);
 
   // セッションチェック
-  if (status === "loading") {
+  if (sessionStatus === "loading") { // 変数名を sessionStatus に修正
     return (
       <div className="flex min-h-screen items-center justify-center">
         <div className="text-center">
@@ -35,29 +38,47 @@ export default function RecordDetailPage() {
     );
   }
 
-  if (status === "unauthenticated") {
+  if (sessionStatus === "unauthenticated") { // 変数名を sessionStatus に修正
     router.push("/login");
-    return null;
+    return null; // ここで return する
   }
 
-  // レコード情報の取得
+  // レコード情報の取得とポーリング
   useEffect(() => {
+    let pollingInterval: NodeJS.Timeout | null = null;
+
     const fetchRecord = async () => {
+      if (!recordId) return; // recordId がなければ何もしない
+
       try {
-        setLoading(true);
-        const response = await fetch(`/api/records/${recordId}/status`);
-        
+        // setLoading(true); // ポーリング中はローディング表示しない
+        const response = await fetch(`/api/records/${recordId}`); // /status なしでレコード全体を取得
+
         if (!response.ok) {
-          throw new Error("レコード情報の取得に失敗しました");
+          if (response.status === 404) {
+            setError("指定されたレコードが見つかりません。");
+          } else {
+            throw new Error(`レコード情報の取得に失敗しました (${response.status})`);
+          }
+          setRecord(null); // エラー時はレコード情報をクリア
+          if (pollingInterval) clearTimeout(pollingInterval); // エラー時はポーリング停止 (setTimeoutなのでclearTimeout)
+          return; // fetchRecord を終了
         }
-        
+
         const data = await response.json();
-        setRecord(data);
-        
-        // バックエンドの状態も確認
-        if (data.backend_status) {
-          console.log("バックエンドの状態:", data.backend_status);
+        setRecord(data); // 取得したレコード情報をセット
+
+        // 処理が完了またはエラーでなければポーリング継続
+        if (data.status !== Status.DONE && data.status !== Status.ERROR) {
+          // 既存のインターバルがあればクリア
+          if (pollingInterval) clearTimeout(pollingInterval); // setTimeoutなのでclearTimeout
+          // 新しいインターバルを設定
+          pollingInterval = setTimeout(fetchRecord, 2000); // 2秒後に再実行
+        } else {
+          // 完了またはエラーならポーリング停止
+          if (pollingInterval) clearTimeout(pollingInterval); // setTimeoutなのでclearTimeout
         }
+
       } catch (err) {
         console.error("データ取得エラー:", err);
         setError(
@@ -65,62 +86,49 @@ export default function RecordDetailPage() {
             ? err.message
             : "データの取得中にエラーが発生しました"
         );
+        if (pollingInterval) clearTimeout(pollingInterval); // エラー時はポーリング停止 (setTimeoutなのでclearTimeout)
       } finally {
-        setLoading(false);
+        setLoading(false); // 初回またはエラー後のローディング完了
       }
     };
-    
-    if (recordId) {
-      fetchRecord();
-      
-      // ポーリング処理を設定
-      const pollingInterval = setInterval(() => {
-        if (recordId) {
-          // 処理中または処理ステータスが変わる可能性がある場合はポーリングを続ける
-          if (!record || record.status === "PROCESSING" || record.status === "UPLOADED" || record.status === "TRANSCRIBED" || record.status === "SUMMARIZED") {
-            fetchRecord();
-          }
-        }
-      }, 2000); // 2秒ごとに更新（5秒から短縮）
-      
-      // クリーンアップ関数
-      return () => {
-        clearInterval(pollingInterval);
-      };
-    }
-  }, [recordId, record?.status]);
 
-  // 処理ステップの計算 (ステータスベースに変更)
-  const calculateStep = (record: any) => {
-    if (!record) return 1; // レコードがない場合はステップ1
+    fetchRecord(); // 初回実行
+
+    // クリーンアップ関数
+    return () => {
+      if (pollingInterval) {
+        clearTimeout(pollingInterval); // setTimeout を使用しているので clearTimeout
+      }
+    };
+  }, [recordId]); // recordId が変更されたら再実行
+
+  // 処理ステップの計算 (ステータスベース、Status enum を使用)
+  const calculateStep = (record: Record | null) => {
+    if (!record) return 1;
 
     switch (record.status) {
-      case 'ERROR':
-        // エラー発生時の表示。どのステップでエラーになったかを示す方が親切かもしれないが、
-        // ここでは ProgressIndicator 側でエラー状態を表示するため、ステップは1に戻すか、
-        // 最後に成功したステップを保持するフィールドがあればそれを使う。
-        // 今回は簡略化のため、エラー発生前の状態に基づいて返す。
-        if (record.article_text) return 4; // 記事生成まで完了していた場合
-        if (record.summary_text) return 3; // 要約まで完了していた場合
-        if (record.transcript_text) return 1; // 文字起こしまで完了していた場合
-        return 1; // それ以外はステップ1扱い
-      case 'DONE':
-        return 5; // 完了
-      case 'SUMMARIZED': // 要約完了 -> ステップ4 (記事生成中)
+      case Status.ERROR:
+        // エラー発生前の状態に基づいて返す
+        if (record.article_text) return 4;
+        if (record.summary_text) return 3;
+        if (record.transcript_text) return 1; // 文字起こしは完了していたと仮定
+        return 1;
+      case Status.DONE:
+        return 5;
+      case Status.SUMMARIZED:
         return 4;
-      case 'TRANSCRIBED': // 文字起こし完了 -> ステップ3 (要約中)
+      case Status.TRANSCRIBED:
         return 3;
-      case 'PROCESSING': // 処理中 -> ステップ2 (文字起こし中) or 1 (アップロード直後)
-        // processing_step を見てより正確に判断することも可能
-        // 例: if (record.processing_step === 'TRANSCRIPTION') return 2;
-        //     if (record.processing_step === 'SUMMARY') return 3; ...
-        // ここでは簡略化し、PROCESSINGならステップ2とする
-        return 2;
-      case 'UPLOADED': // アップロード完了 -> ステップ1
+      case Status.PROCESSING:
+        // processing_progress を見てより正確に判断
+        if (record.processing_progress && record.processing_progress >= 80) return 3; // 保存中以降
+        if (record.processing_progress && record.processing_progress >= 10) return 2; // 音声処理中
+        return 1; // ダウンロード中など
+      case Status.UPLOADED:
         return 1;
       default:
         console.warn("Unknown record status:", record.status);
-        return 1; // 不明なステータスはステップ1扱い
+        return 1;
     }
   };
 
@@ -137,59 +145,77 @@ export default function RecordDetailPage() {
   };
 
   // タイムスタンプの解析
-  const parseTimestamps = (timestampsJson: string | null) => {
-    if (!timestampsJson) return [];
-    
-    try {
-      console.log("タイムスタンプデータ:", timestampsJson);
-      const data = JSON.parse(timestampsJson);
-      console.log("解析後のデータ:", data);
-      return data.timestamps || [];
-    } catch (error) {
-      console.error("タイムスタンプの解析エラー:", error);
-      // エラー時は文字列をそのまま表示して確認
-      console.log("解析に失敗したデータ:", timestampsJson);
-      return [];
+  const parseTimestamps = (record: Record | null): { time: number; text: string }[] => {
+    if (!record) return [];
+
+    // 1. timestamps_json を優先
+    if (record.timestamps_json) {
+      try {
+        const data = JSON.parse(record.timestamps_json);
+        if (Array.isArray(data?.timestamps)) {
+          console.log("Parsed timestamps from timestamps_json");
+          return data.timestamps;
+        }
+      } catch (error) {
+        console.error("Error parsing timestamps_json:", error);
+      }
     }
+
+    // 2. summary_text に含まれるかチェック (フォールバック)
+    if (record.summary_text && record.summary_text.includes('"timestamps"')) {
+      try {
+        // summary_text 全体がJSON形式であると仮定して解析
+        const data = JSON.parse(record.summary_text);
+         if (Array.isArray(data?.timestamps)) {
+           console.warn("Parsed timestamps from summary_text (fallback)");
+           return data.timestamps;
+         }
+         // summary_text 内にJSON文字列が含まれる場合 (例: "Summary text... {\"timestamps\": [...]}")
+         // このような複雑なケースは現状考慮しない、または別途抽出ロジックが必要
+      } catch (error) {
+        console.error("Error parsing summary_text for timestamps:", error);
+      }
+    }
+
+    console.log("No valid timestamps found.");
+    return [];
   };
 
   // 特定のステップから処理を再開する
   const retryFromStep = async (step: number) => {
     if (!recordId) return;
-    
+
     try {
-      setProcessingStep(step);
+      setProcessingStep(step); // UIフィードバック用
       setProcessingMessage(`ステップ${step}から処理を再開しています...`);
-      
-      // ステップ名を取得
+      setError(""); // エラー表示をクリア
+
       const stepNames = ["アップロード", "文字起こし", "タイムスタンプ", "要約", "記事生成"];
       const stepName = stepNames[step - 1] || `ステップ${step}`;
-      
-      // APIを呼び出して処理を再開
-      const response = await fetch(`/api/records/${recordId}/retry`, {
+
+      const response = await fetch(`/api/records/${recordId}/retry`, { // retry APIを使用
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ step }),
+        body: JSON.stringify({ step }), // step番号を渡す
       });
-      
+
       if (!response.ok) {
         const errorData = await response.json();
         throw new Error(errorData.error || `${stepName}の再開に失敗しました`);
       }
-      
-      // 成功したらレコードを再取得
+
       const data = await response.json();
-      setRecord(data.record);
-      setProcessingMessage(`${stepName}の再開が完了しました。処理が開始されました。`);
-      
-      // 3秒後にメッセージをクリア
+      setRecord(data.record); // 更新されたレコード情報でステートを更新
+      setProcessingMessage(`${stepName}の再開リクエストを受け付けました。処理が開始されます。`);
+
+      // メッセージを少し長く表示
       setTimeout(() => {
         setProcessingStep(null);
         setProcessingMessage("");
-      }, 3000);
-      
+      }, 5000);
+
     } catch (err) {
       console.error("再開処理エラー:", err);
       setError(
@@ -201,6 +227,50 @@ export default function RecordDetailPage() {
       setProcessingMessage("");
     }
   };
+
+  // handleRetry 関数 (エラーからの再試行)
+  const handleRetryError = async () => {
+    if (!recordId || !record || record.status !== Status.ERROR) return;
+
+    try {
+      setProcessingStep(0); // リトライ中を示す (ステップ0など)
+      setProcessingMessage(`エラーが発生した処理を再試行しています...`);
+      setError(""); // エラー表示をクリア
+
+      const response = await fetch(`/api/records/${recordId}/retry`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        // ステップ指定なしで呼び出す
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || `処理の再試行に失敗しました`);
+      }
+
+      const data = await response.json();
+      setRecord(data.record);
+      setProcessingMessage(`再試行リクエストを受け付けました。処理が開始されます。`);
+
+      setTimeout(() => {
+        setProcessingStep(null);
+        setProcessingMessage("");
+      }, 5000);
+
+    } catch (err) {
+      console.error("エラー再試行エラー:", err);
+      setError(
+        err instanceof Error
+          ? err.message
+          : "エラーからの再試行中に問題が発生しました"
+      );
+      setProcessingStep(null);
+      setProcessingMessage("");
+    }
+  };
+
 
   return (
     <div className="min-h-screen bg-slate-50 p-8">
@@ -259,16 +329,17 @@ export default function RecordDetailPage() {
         ) : (
           <div className="space-y-8">
             {/* 処理中メッセージ */}
-            {processingStep !== null && (
+            {processingMessage && ( // processingMessage があれば表示
               <div className="rounded-lg bg-blue-50 p-4 text-blue-700 shadow-md">
                 <p>{processingMessage}</p>
               </div>
             )}
-            
+
             {/* 基本情報 */}
             <div className="rounded-lg bg-white p-6 shadow-md">
               <h2 className="mb-2 text-xl font-semibold text-slate-800">
-                {record.file_url.split("/").pop()}
+                {/* ファイル名表示を修正 */}
+                {record.file_name || record.file_url?.split("/").pop() || "ファイル名なし"}
               </h2>
               <p className="mb-4 text-sm text-slate-500">
                 アップロード日時: {new Date(record.created_at).toLocaleString()}
@@ -279,6 +350,7 @@ export default function RecordDetailPage() {
                 totalSteps={5}
                 status={record.status}
                 error={record.error}
+                onRetry={handleRetryError} // エラーからの再試行関数を渡す
                 onRetryStep={retryFromStep}
               />
             </div>
@@ -286,122 +358,94 @@ export default function RecordDetailPage() {
             {/* 動画プレーヤーとタイムスタンプ */}
             <div className="mb-8">
               <h3 className="text-lg font-medium text-slate-800 mb-2">タイムスタンプ</h3>
-              <div className="mb-2 text-xs text-slate-500">
-                <p>timestamps_json: {record.timestamps_json ? "あり" : "なし"}</p>
-                <p>summary_text: {record.summary_text ? (record.summary_text.includes('"timestamps"') ? "タイムスタンプあり" : "タイムスタンプなし") : "なし"}</p>
-                <p>データ内容: {record.summary_text ? record.summary_text.substring(0, 100) + "..." : "なし"}</p>
-              </div>
-              {record.timestamps_json ? (
-                <VideoWithTimestamps
-                  src={record.file_url}
-                  timestamps={parseTimestamps(record.timestamps_json)}
-                />
-              ) : record.summary_text && record.summary_text.includes('"timestamps"') ? (
-                <VideoWithTimestamps
-                  src={record.file_url}
-                  timestamps={parseTimestamps(record.summary_text)}
-                />
-              ) : (
-                <div>
-                  <div className="text-sm text-slate-500 italic mb-4">
-                    タイムスタンプはありません
+              {/* デバッグ用情報を削除 */}
+              {/* <div className="mb-2 text-xs text-slate-500">...</div> */}
+              <VideoWithTimestamps
+                  src={record.file_url || ""} // null チェック追加
+                  timestamps={parseTimestamps(record)} // record オブジェクトを渡す
+              />
+              {/* タイムスタンプがない場合の表示 */}
+              {parseTimestamps(record).length === 0 && record.status !== Status.UPLOADED && record.status !== Status.PROCESSING && (
+                 <div className="text-sm text-slate-500 italic mt-4">
+                    タイムスタンプデータが見つかりませんでした。
                   </div>
-                  {/* 強制的にタイムスタンプを表示するためのフォールバック */}
-                  {record.summary_text && (
-                    <div className="mt-4">
-                      <h4 className="text-md font-medium text-slate-700 mb-2">タイムスタンプ生成を試みる</h4>
-                      <button
-                        onClick={() => {
-                          try {
-                            // サンプルタイムスタンプを生成
-                            const sampleData = {
-                              timestamps: [
-                                { time: 0, text: "動画開始" },
-                                { time: 30, text: "主要ポイント1" },
-                                { time: 60, text: "主要ポイント2" }
-                              ]
-                            };
-                            console.log("サンプルタイムスタンプ:", sampleData);
-                            
-                            // 実際のデータがあれば解析を試みる
-                            if (record.summary_text) {
-                              try {
-                                const parsed = JSON.parse(record.summary_text);
-                                console.log("summary_textから解析:", parsed);
-                                if (parsed.timestamps) {
-                                  console.log("タイムスタンプ発見:", parsed.timestamps);
-                                }
-                              } catch (e) {
-                                console.error("summary_textの解析エラー:", e);
-                              }
-                            }
-                          } catch (error) {
-                            console.error("タイムスタンプ生成エラー:", error);
-                          }
-                        }}
-                        className="px-3 py-1 bg-blue-500 text-white rounded hover:bg-blue-600"
-                      >
-                        タイムスタンプ解析を試みる
-                      </button>
-                    </div>
-                  )}
-                </div>
               )}
             </div>
 
-            {/* 文字起こし */}
-            {record.transcript_text && (
-              <div className="rounded-lg bg-white p-6 shadow-md">
-                <h2 className="mb-4 text-xl font-semibold text-slate-800">
-                  文字起こし
-                </h2>
-                <div className="max-h-60 overflow-y-auto rounded-md bg-slate-50 p-4 text-sm text-slate-700">
-                  {record.transcript_text.substring(0, 500)}...
-                </div>
-                <button
-                  onClick={() => openModal("文字起こし 全文", record.transcript_text)}
-                  className="mt-4 rounded-md bg-blue-600 px-4 py-2 text-white hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
-                >
-                  全文を表示
-                </button>
-              </div>
-            )}
+            {/* 文字起こし (データがあれば常に表示) */}
+            <div className="rounded-lg bg-white p-6 shadow-md">
+              <h2 className="mb-4 text-xl font-semibold text-slate-800">
+                文字起こし
+              </h2>
+              {record.transcript_text ? (
+                <>
+                  <div className="max-h-60 overflow-y-auto rounded-md bg-slate-50 p-4 text-sm text-slate-700">
+                    {record.transcript_text.substring(0, 500)}...
+                  </div>
+                  <button
+                    onClick={() => openModal("文字起こし 全文", record.transcript_text)}
+                    className="mt-4 rounded-md bg-blue-600 px-4 py-2 text-white hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
+                  >
+                    全文を表示
+                  </button>
+                </>
+              ) : (
+                <p className="text-sm text-slate-500 italic">
+                  {record.status === Status.UPLOADED || record.status === Status.PROCESSING ? "文字起こし処理中です..." : "文字起こしデータはありません。"}
+                </p>
+              )}
+            </div>
 
-            {/* 要約 */}
-            {record.summary_text && (
-              <div className="rounded-lg bg-white p-6 shadow-md">
-                <h2 className="mb-4 text-xl font-semibold text-slate-800">
-                  要約
-                </h2>
-                <div className="max-h-60 overflow-y-auto rounded-md bg-slate-50 p-4 text-sm text-slate-700">
-                  {record.summary_text.substring(0, 500)}...
-                </div>
-                <button
-                  onClick={() => openModal("要約 全文", record.summary_text)}
-                  className="mt-4 rounded-md bg-blue-600 px-4 py-2 text-white hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
-                >
-                  全文を表示
-                </button>
-              </div>
-            )}
+            {/* 要約 (データがあれば常に表示) */}
+            <div className="rounded-lg bg-white p-6 shadow-md">
+              <h2 className="mb-4 text-xl font-semibold text-slate-800">
+                要約
+              </h2>
+              {record.summary_text ? (
+                <>
+                  <div className="max-h-60 overflow-y-auto rounded-md bg-slate-50 p-4 text-sm text-slate-700">
+                    {/* タイムスタンプ情報が含まれている場合は表示しないようにする */}
+                    {record.summary_text.includes('"timestamps"')
+                      ? "(タイムスタンプ情報を含むため、要約テキストのみを表示する機能は未実装です)" // 仮表示
+                      : record.summary_text.substring(0, 500) + "..."}
+                  </div>
+                  <button
+                    onClick={() => openModal("要約 全文", record.summary_text)}
+                    className="mt-4 rounded-md bg-blue-600 px-4 py-2 text-white hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
+                  >
+                    全文を表示
+                  </button>
+                </>
+               ) : (
+                 <p className="text-sm text-slate-500 italic">
+                   {record.status === Status.UPLOADED || record.status === Status.PROCESSING || record.status === Status.TRANSCRIBED ? "要約処理中です..." : "要約データはありません。"}
+                 </p>
+               )}
+            </div>
 
-            {/* 記事 */}
-            {record.article_text && (
-              <div className="rounded-lg bg-white p-6 shadow-md">
-                <h2 className="mb-4 text-xl font-semibold text-slate-800">
-                  生成された記事
-                </h2>
-                <div className="max-h-60 overflow-y-auto rounded-md bg-slate-50 p-4 text-sm text-slate-700">
-                  {record.article_text.substring(0, 500)}...
-                </div>
-                <button
-                  onClick={() => openModal("記事 全文", record.article_text)}
-                  className="mt-4 rounded-md bg-blue-600 px-4 py-2 text-white hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
-                >
-                  全文を表示
-                </button>
-              </div>
-            )}
+            {/* 記事 (データがあれば常に表示) */}
+            <div className="rounded-lg bg-white p-6 shadow-md">
+              <h2 className="mb-4 text-xl font-semibold text-slate-800">
+                生成された記事
+              </h2>
+              {record.article_text ? (
+                <>
+                  <div className="max-h-60 overflow-y-auto rounded-md bg-slate-50 p-4 text-sm text-slate-700">
+                    {record.article_text.substring(0, 500)}...
+                  </div>
+                  <button
+                    onClick={() => openModal("記事 全文", record.article_text)}
+                    className="mt-4 rounded-md bg-blue-600 px-4 py-2 text-white hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
+                  >
+                    全文を表示
+                  </button>
+                </>
+              ) : (
+                 <p className="text-sm text-slate-500 italic">
+                   {record.status !== Status.DONE && record.status !== Status.ERROR ? "記事生成処理中です..." : "記事データはありません。"}
+                 </p>
+              )}
+            </div>
           </div>
         )}
       </div>
