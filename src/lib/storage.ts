@@ -38,8 +38,7 @@ const s3Client = new S3Client({
     accessKeyId: R2_ACCESS_KEY_ID || '',
     secretAccessKey: R2_SECRET_ACCESS_KEY || '',
   },
-  // forcePathStyleをtrueに設定（CloudflareのR2では両方の設定が使われることがある）
-  forcePathStyle: true,
+  // ★★★ 修正: forcePathStyle を削除 (Cloudflare R2の推奨設定に合わせる) ★★★
 });
 
 // 初期化時にR2設定情報をログ出力
@@ -50,7 +49,7 @@ console.log('R2設定:', {
   bucketName: R2_BUCKET_NAME || '',
   publicUrl: R2_PUBLIC_URL || '',
   region: 'auto',
-  forcePathStyle: true,
+  // forcePathStyle: true, // 削除済み
 });
 
 /**
