@@ -3,11 +3,11 @@ import * as path from 'path';
 import * as dotenv from 'dotenv';
 import * as crypto from 'crypto';
 import { PrismaClient, Status } from '@prisma/client';
-import { getJob, completeJob, failJob, addJob, JobData } from '../lib/queue';
+import { Job, Worker } from 'bullmq'; // Import Worker from bullmq
+import { queueManager, QUEUE_NAMES, JobData, JobProgress } from '../lib/bull-queue'; // Import from bull-queue
 import { getFileContents, getDownloadUrl } from '../lib/storage';
 import { execSync } from 'child_process';
 import axios from 'axios';
-// import { extractTimestamps } from '../services/timestamp-service'; // 仮のインポート削除
 
 // 環境変数の読み込み
 dotenv.config();
@@ -15,9 +15,9 @@ dotenv.config();
 // Prismaクライアントの初期化
 const prisma = new PrismaClient();
 
-// キュー名の定義
-const QUEUE_NAME = 'transcription';
-const SUMMARY_QUEUE = 'summary';
+// キュー名
+const QUEUE_NAME = QUEUE_NAMES.TRANSCRIPTION; // Use constant from bull-queue
+const SUMMARY_QUEUE = QUEUE_NAMES.SUMMARY; // Use constant from bull-queue
 
 // 一時ファイルディレクトリ
 const TMP_DIR = process.env.TMP_DIR || '/tmp';
@@ -28,6 +28,8 @@ const MAX_DIRECT_PROCESS_SIZE = 4 * 1024 * 1024;
 // チャンクの最大時間（秒）
 const CHUNK_DURATION = 300; // 5分
 
+// --- Helper functions (optimizeAudioForGemini, transcribeAudio, transcribeWithGemini, processAudioInChunks, processLargeFile, extractTimestampsWithGemini, logMemoryUsage) remain the same ---
+// (これらの関数の内容は変更なしのため省略)
 /**
  * 音声ファイルをGemini APIに最適な形式に変換する
  * @param inputPath 入力ファイルパス
@@ -370,297 +372,181 @@ ${transcriptText}
   }
 }
 
-
 /**
- * ジョブを処理する関数
+ * BullMQワーカーのプロセッサ関数
+ * @param job BullMQジョブオブジェクト
  */
-async function processJob() {
-  let job: JobData | null = null; // Explicitly type job
-  let tempDir: string | null = null; // Keep track of tempDir for cleanup
+const transcriptionProcessor = async (job: Job<JobData>) => {
+  // ★★★ ジョブ受信ログ ★★★
+  console.log(`[Transcription Worker] Received job ${job.id}:`, JSON.stringify(job.data, null, 2)); // Use job.data here
+
+  const { recordId, fileKey } = job.data; // Access data from job.data
+  let tempDir: string | null = null;
 
   try {
-    console.log(`[${QUEUE_NAME}] Waiting for job...`);
-    // キューからジョブを取得
-    job = await getJob(QUEUE_NAME);
-    if (!job) {
-      // console.log(`[${QUEUE_NAME}] No job found. Waiting...`); // Reduce log noise
-      return;
-    }
-
-    // ★★★ ジョブ受信ログ (修正: jobオブジェクト全体をログ) ★★★
-    console.log(`[Transcription Worker] Received job ${job.id}:`, JSON.stringify(job, null, 2));
-
-    console.log(`[${QUEUE_NAME}] Processing job ${job.id} for record ${job.recordId}`);
+    console.log(`[${QUEUE_NAME}] Processing job ${job.id} for record ${recordId}`);
 
     // 処理状態の更新 (PROCESSING)
-    try {
-      console.log(`[${job.recordId}] Updating status to PROCESSING`);
-      await prisma.record.update({
-        where: { id: job.recordId },
-        data: {
-          status: Status.PROCESSING, // 列挙型を使用
-          processing_step: 'DOWNLOAD', // Start with download step
-          processing_progress: 5, // Initial progress
-          error: null // Clear previous errors
-        }
-      });
-      console.log(`[${job.recordId}] Status updated to PROCESSING`);
-    } catch (dbError: any) {
-      console.error(`[${job.recordId}] Failed to update status to PROCESSING:`, dbError);
-      // If update fails, we might not be able to proceed or mark as failed later
-      // Consider failing the job immediately if this is critical
-      await failJob(QUEUE_NAME, job.id); // Fail the job if initial update fails
-      return; // Stop processing this job
-    }
-
-    // R2からファイルを取得
-    console.log(`[${job.recordId}] Attempting to download file (fileKey: ${job.fileKey})`);
-    let fileData;
-    let tempFilePath: string | null = null; // Initialize as null
+    await prisma.record.update({
+      where: { id: recordId },
+      data: {
+        status: Status.PROCESSING,
+        processing_step: 'DOWNLOAD',
+        processing_progress: 5,
+        error: null
+      }
+    });
+    console.log(`[${recordId}] Status updated to PROCESSING`);
 
     // 一時ディレクトリを作成
     tempDir = path.join(TMP_DIR, `transcription-${crypto.randomBytes(6).toString('hex')}`);
-    console.log(`[${job.recordId}] Creating temporary directory: ${tempDir}`);
     fs.mkdirSync(tempDir, { recursive: true });
-    console.log(`[${job.recordId}] Temporary directory created: ${tempDir}`);
+    console.log(`[${recordId}] Temporary directory created: ${tempDir}`);
 
+    let tempFilePath: string | null = null;
+
+    // ファイルダウンロードロジック (R2 or URL)
     try {
-      // レコード情報を取得 (再確認)
-      console.log(`[${job.recordId}] Fetching record details from DB`);
-      const record = await prisma.record.findUnique({
-        where: { id: job.recordId }
-      });
+      const record = await prisma.record.findUnique({ where: { id: recordId } });
+      if (!record) throw new Error(`Record not found in DB: ${recordId}`);
 
-      if (!record) {
-        throw new Error(`Record not found in DB: ${job.recordId}`);
-      }
-      console.log(`[${job.recordId}] Record details fetched. file_key=${record.file_key || 'N/A'}, file_url=${record.file_url || 'N/A'}`);
+      const effectiveFileKey = fileKey || record.file_key;
+      const effectiveFileUrl = record.file_url;
 
-      // ファイルキーまたはURLを決定
-      const fileKey = job.fileKey || record.file_key;
-      const fileUrl = record.file_url;
+      if (!effectiveFileKey && !effectiveFileUrl) throw new Error('File key and URL are both missing');
 
-      if (!fileKey && !fileUrl) {
-        throw new Error('File key and URL are both missing');
-      }
-
-      // まずR2からファイルの取得を試みる
-      if (fileKey) {
+      if (effectiveFileKey) {
         try {
-          console.log(`[${job.recordId}] Attempting download from R2: ${fileKey}`);
-          fileData = await getFileContents(fileKey);
-          console.log(`[${job.recordId}] Downloaded ${fileData.length} bytes from R2`);
-
-          // ファイル名を決定
-          let fileName = fileKey.split('/').pop() || `${Date.now()}.mp4`; // Default filename
-          console.log(`[${job.recordId}] Determined filename: ${fileName}`);
-
-          // 一時ファイルに保存
+          console.log(`[${recordId}] Attempting download from R2: ${effectiveFileKey}`);
+          const fileData = await getFileContents(effectiveFileKey);
+          const fileName = effectiveFileKey.split('/').pop() || `${Date.now()}.mp4`;
           tempFilePath = path.join(tempDir, fileName);
-          console.log(`[${job.recordId}] Writing R2 data to temporary file: ${tempFilePath}`);
           fs.writeFileSync(tempFilePath, fileData);
-          console.log(`[${job.recordId}] Successfully wrote R2 data to ${tempFilePath}`);
+          console.log(`[${recordId}] Successfully wrote R2 data to ${tempFilePath}`);
         } catch (r2Error) {
-          console.error(`[${job.recordId}] R2 download failed for key ${fileKey}:`, r2Error);
-          // エラーを記録するが、次の方法を試みる
+          console.error(`[${recordId}] R2 download failed for key ${effectiveFileKey}:`, r2Error);
+          if (!effectiveFileUrl) throw r2Error; // Rethrow if URL fallback is not possible
         }
       }
 
-      // R2からの取得に失敗した場合、公開URLを試みる
-      if (!tempFilePath && fileUrl) {
+      if (!tempFilePath && effectiveFileUrl) {
         try {
-          console.log(`[${job.recordId}] R2 download failed or skipped. Attempting download from URL: ${fileUrl}`);
-          // URLからファイル名を抽出
-          const urlParts = new URL(fileUrl);
+          console.log(`[${recordId}] Attempting download from URL: ${effectiveFileUrl}`);
+          const urlParts = new URL(effectiveFileUrl);
           const pathParts = urlParts.pathname.split('/');
-          const fileName = decodeURIComponent(pathParts[pathParts.length - 1]) || `${Date.now()}.mp4`; // Decode URI component
-          console.log(`[${job.recordId}] Extracted filename from URL: ${fileName}`);
-
-          // 公開URLを使用してファイルにアクセス
-          console.log(`[${job.recordId}] Accessing public URL: ${fileUrl}`);
-          const response = await axios.get(fileUrl, {
-            responseType: 'arraybuffer',
-            timeout: 120000 // 120秒タイムアウトに延長
-          });
-          console.log(`[${job.recordId}] Received response from URL. Status: ${response.status}, Size: ${response.data.length} bytes`);
-
-          // 一時ファイルに保存
+          const fileName = decodeURIComponent(pathParts[pathParts.length - 1]) || `${Date.now()}.mp4`;
+          const response = await axios.get(effectiveFileUrl, { responseType: 'arraybuffer', timeout: 120000 });
           tempFilePath = path.join(tempDir, fileName);
-          console.log(`[${job.recordId}] Writing URL data to temporary file: ${tempFilePath}`);
           fs.writeFileSync(tempFilePath, Buffer.from(response.data));
-          console.log(`[${job.recordId}] Successfully wrote URL data to ${tempFilePath}`);
-
-          // ファイルサイズを確認
-          const fileStats = fs.statSync(tempFilePath);
-          console.log(`[${job.recordId}] Downloaded file info: Exists=${fs.existsSync(tempFilePath)}, Size=${fileStats.size} bytes (${Math.round(fileStats.size / (1024 * 1024))} MB)`);
+          console.log(`[${recordId}] Successfully wrote URL data to ${tempFilePath}`);
         } catch (urlError: any) {
-          console.error(`[${job.recordId}] Public URL download failed:`, urlError);
+          console.error(`[${recordId}] Public URL download failed:`, urlError);
           throw new Error(`Failed to download file from URL: ${urlError.message}`);
         }
       }
 
-      // ファイルが取得できなかった場合
-      if (!tempFilePath) {
-        throw new Error('All download methods failed (R2 and URL)');
-      }
+      if (!tempFilePath) throw new Error('All download methods failed');
+
     } catch (downloadError) {
-      console.error(`[${job.recordId}] File download error:`, downloadError);
-      // No need to manually delete tempDir here, finally block will handle it
+      console.error(`[${recordId}] File download error:`, downloadError);
       throw new Error(`File download failed: ${downloadError instanceof Error ? downloadError.message : String(downloadError)}`);
     }
 
-    // 処理進捗状況を更新 (ダウンロード完了)
-    try {
-      console.log(`[${job.recordId}] Updating progress to 10% (Download complete)`);
-      await prisma.record.update({
-        where: { id: job.recordId },
-        data: {
-          processing_step: 'TRANSCRIPTION_AUDIO_EXTRACTION',
-          processing_progress: 10
-        }
-      });
-      console.log(`[${job.recordId}] Progress updated to 10%`);
-    } catch (dbError: any) {
-      console.error(`[${job.recordId}] Failed to update progress after download:`, dbError);
-      // Continue processing, but log the error
-    }
+    // 進捗更新 (ダウンロード完了)
+    await job.updateProgress(10);
+    await prisma.record.update({
+      where: { id: recordId },
+      data: { processing_step: 'TRANSCRIPTION_AUDIO_EXTRACTION', processing_progress: 10 }
+    });
 
     // ファイル処理（音声抽出、最適化、チャンク処理を含む）
-    console.log(`[${job.recordId}] Starting audio processing for file: ${tempFilePath}`);
-    const transcriptParts = await processLargeFile(tempFilePath); // This function now includes audio extraction
-    console.log(`[${job.recordId}] Audio processing completed. Transcript parts received: ${transcriptParts.length}`);
-
-    // 処理進捗状況を更新 (文字起こし完了)
-    try {
-      console.log(`[${job.recordId}] Updating progress to 80% (Transcription complete)`);
-      await prisma.record.update({
-        where: { id: job.recordId },
-        data: {
-          processing_step: 'TRANSCRIPTION_SAVING',
-          processing_progress: 80
-        }
-      });
-      console.log(`[${job.recordId}] Progress updated to 80%`);
-    } catch (dbError: any) {
-      console.error(`[${job.recordId}] Failed to update progress after transcription:`, dbError);
-      // Continue processing, but log the error
-    }
-
-    // 結果をデータベースに保存
+    console.log(`[${recordId}] Starting audio processing for file: ${tempFilePath}`);
+    const transcriptParts = await processLargeFile(tempFilePath);
     const fullTranscript = transcriptParts.join('\n\n');
-    console.log(`[${job.recordId}] Full transcript length: ${fullTranscript.length}`);
+    console.log(`[${recordId}] Audio processing completed. Transcript length: ${fullTranscript.length}`);
 
-    // ★★★ タイムスタンプ抽出処理 ★★★
+    // 進捗更新 (文字起こし完了)
+    await job.updateProgress(80);
+    await prisma.record.update({
+      where: { id: recordId },
+      data: { processing_step: 'TRANSCRIPTION_SAVING', processing_progress: 80 }
+    });
+
+    // タイムスタンプ抽出
     let timestampsJson: string | null = null;
     try {
-      // 上で定義した関数を呼び出す
       const timestampsArray = await extractTimestampsWithGemini(fullTranscript);
       if (timestampsArray) {
         timestampsJson = JSON.stringify(timestampsArray);
-        console.log(`[${job.recordId}] Timestamps extracted and stringified.`);
+        console.log(`[${recordId}] Timestamps extracted and stringified.`);
       } else {
-        console.warn(`[${job.recordId}] Timestamp extraction did not return a valid array.`);
+        console.warn(`[${recordId}] Timestamp extraction did not return a valid array.`);
       }
     } catch (timestampError) {
-      console.error(`[${job.recordId}] Error during timestamp extraction call:`, timestampError);
-      // 抽出エラーは警告に留め、処理は続行
+      console.error(`[${recordId}] Error during timestamp extraction call:`, timestampError);
     }
 
-    try {
-      console.log(`[${job.recordId}] Updating DB with transcript, timestamps, and status TRANSCRIBED`);
-      await prisma.record.update({
-        where: { id: job.recordId },
-        data: {
-          transcript_text: fullTranscript,
-          timestamps_json: timestampsJson, // ★★★ タイムスタンプJSONを保存 ★★★
-          status: Status.TRANSCRIBED, // 列挙型を使用
-          processing_step: null, // Clear step on successful stage completion
-          processing_progress: 100 // Mark as 100% for this stage
-        }
-      });
-      console.log(`[${job.recordId}] Successfully saved transcript and timestamps to DB`);
-    } catch (dbError: any) {
-      console.error(`[${job.recordId}] Database update error after transcription:`, dbError);
-      throw new Error(`Database update failed: ${dbError.message}`);
-    }
+    // DB更新 (最終結果)
+    await prisma.record.update({
+      where: { id: recordId },
+      data: {
+        transcript_text: fullTranscript,
+        timestamps_json: timestampsJson,
+        status: Status.TRANSCRIBED,
+        processing_step: null,
+        processing_progress: 100
+      }
+    });
+    console.log(`[${recordId}] Successfully saved transcript and timestamps to DB`);
 
-    // 要約キューにジョブを追加
-    try {
-      console.log(`[${job.recordId}] Adding job to summary queue`);
-      await addJob(SUMMARY_QUEUE, {
-        type: 'summary',
-        recordId: job.recordId,
-        fileKey: job.fileKey // Pass fileKey along
-      });
-      console.log(`[${job.recordId}] Successfully added job to summary queue`);
-    } catch (queueError: any) {
-      console.error(`[${job.recordId}] Failed to add job to summary queue:`, queueError);
-      // If adding to the next queue fails, the process stops here for this record.
-      // Consider how to handle this - maybe update status to a specific error state?
-      throw new Error(`Failed to queue summary job: ${queueError.message}`);
-    }
+    // 次のキューにジョブを追加
+    await queueManager.addJob(SUMMARY_QUEUE, {
+      type: 'summary',
+      recordId: recordId,
+      fileKey: fileKey // Pass original fileKey if needed by summary
+    });
+    console.log(`[${recordId}] Successfully added job to summary queue`);
 
-    // 一時ファイルの削除 (tempFilePath should be valid here)
-    // Moved to finally block
-
-    // ジョブを完了としてマーク
-    try {
-      console.log(`[${job.recordId}] Marking transcription job ${job.id} as complete`);
-      await completeJob(QUEUE_NAME, job.id);
-      console.log(`[${job.recordId}] Transcription job ${job.id} completed successfully`);
-    } catch (completeError: any) {
-      console.error(`[${job.recordId}] Failed to mark job ${job.id} as complete:`, completeError);
-      // Log error but proceed, as the main work is done.
-    }
+    // ジョブ完了 (BullMQでは return で完了を示す)
+    console.log(`[${recordId}] Transcription job ${job.id} completed successfully`);
+    return { success: true }; // Indicate successful completion
 
   } catch (error) {
-    console.error(`[${QUEUE_NAME}] Error processing job ${job?.id} for record ${job?.recordId}:`, error);
-
-    // ジョブIDがある場合のみリトライを実行
-    if (job?.id && job.recordId) { // Ensure recordId is also available
+    console.error(`[${QUEUE_NAME}] Error processing job ${job?.id} for record ${job?.data?.recordId}:`, error); // Use job.data here
+    // エラー情報をDBに記録
+    if (job?.data?.recordId) { // Use job.data here
       try {
-        console.error(`[${job.recordId}] Attempting to mark job ${job.id} as failed`);
-        await failJob(QUEUE_NAME, job.id);
-        console.error(`[${job.recordId}] Marked job ${job.id} as failed`);
-      } catch (failJobError: any) {
-        console.error(`[${job.recordId}] CRITICAL: Failed to mark job ${job.id} as failed:`, failJobError);
-      }
-
-      // エラーステータスを記録
-      try {
-        console.error(`[${job.recordId}] Attempting to update record status to ERROR`);
         await prisma.record.update({
-          where: { id: job.recordId },
+          where: { id: job.data.recordId }, // Use job.data here
           data: {
-            status: Status.ERROR, // 列挙型を使用
+            status: Status.ERROR,
             error: error instanceof Error ? error.message : String(error),
-            processing_step: null, // Clear step on error
-            processing_progress: null // Clear progress on error
+            processing_step: null,
+            processing_progress: null
           }
         });
-        console.error(`[${job.recordId}] Updated record status to ERROR`);
+        console.error(`[${job.data.recordId}] Updated record status to ERROR`); // Use job.data here
       } catch (dbError: any) {
-        console.error(`[${job.recordId}] CRITICAL: Failed to update record status to ERROR:`, dbError);
+        console.error(`[${job.data.recordId}] CRITICAL: Failed to update record status to ERROR:`, dbError); // Use job.data here
       }
-    } else {
-      console.error(`[${QUEUE_NAME}] Cannot fail job or update record status because job or recordId is missing.`);
     }
+    // エラーを再スローしてBullMQに失敗を通知
+    throw error;
   } finally {
-    // 一時ディレクトリの削除 (ensure tempDir was created)
+    // 一時ディレクトリの削除
     if (tempDir) {
       try {
-        console.log(`[${job?.recordId || 'Unknown Record'}] Cleaning up temporary directory: ${tempDir}`);
+        console.log(`[${job?.data?.recordId || 'Unknown Record'}] Cleaning up temporary directory: ${tempDir}`); // Use job.data here
         fs.rmSync(tempDir, { recursive: true, force: true });
-        console.log(`[${job?.recordId || 'Unknown Record'}] Temporary directory cleaned up: ${tempDir}`);
+        console.log(`[${job?.data?.recordId || 'Unknown Record'}] Temporary directory cleaned up: ${tempDir}`); // Use job.data here
       } catch (cleanupError) {
-        console.error(`[${job?.recordId || 'Unknown Record'}] Failed to clean up temporary directory ${tempDir}:`, cleanupError);
+        console.error(`[${job?.data?.recordId || 'Unknown Record'}] Failed to clean up temporary directory ${tempDir}:`, cleanupError); // Use job.data here
       }
     }
   }
-}
+};
 
-
-// Helper function for logging memory usage (optional, can be removed if not needed)
+// Helper function for logging memory usage
 function logMemoryUsage(context: string = '') {
     const memoryUsage = process.memoryUsage();
     const rss = Math.round(memoryUsage.rss / 1024 / 1024);
@@ -669,35 +555,69 @@ function logMemoryUsage(context: string = '') {
     console.log(`[Memory Usage${context ? ' - ' + context : ''}] RSS=${rss}MB Heap=${heapUsed}/${heapTotal}MB`);
 }
 
-
-/**
- * メインワーカー処理
- */
-async function startWorker() {
-  console.log(`[${QUEUE_NAME}] Worker starting... Node version: ${process.version}`);
-  logMemoryUsage('Initial');
-
-  try {
-    // 継続的にジョブを処理
-    while (true) {
-      try {
-        await processJob();
-      } catch (jobError) {
-        // processJob内でエラーは処理されるはずだが、念のためキャッチ
-        console.error(`[${QUEUE_NAME}] Uncaught error during processJob loop:`, jobError);
-      }
-      // 少し待機してからポーリング
-      await new Promise(resolve => setTimeout(resolve, 1000)); // 1秒待機
-    }
-  } catch (error) {
-    console.error(`[${QUEUE_NAME}] Worker encountered a fatal error:`, error);
-    logMemoryUsage('Fatal Error');
-    process.exit(1); // Exit if the loop itself fails critically
-  }
+// --- BullMQ Worker Initialization ---
+const redisUrl = process.env.REDIS_URL;
+if (!redisUrl) {
+  console.error('REDIS_URL environment variable is not set. Worker cannot start.');
+  process.exit(1);
 }
 
-// ワーカー開始
-startWorker().catch(error => {
-  console.error('ワーカーの起動に失敗:', error);
-  process.exit(1);
+const workerConnection = queueManager.getQueue(QUEUE_NAME)?.opts.connection; // Reuse connection from queueManager if possible
+
+if (!workerConnection) {
+    console.error(`Could not get Redis connection for queue ${QUEUE_NAME}. Worker cannot start.`);
+    process.exit(1);
+}
+
+
+console.log(`[${QUEUE_NAME}] Initializing worker...`);
+logMemoryUsage('Initial');
+
+const worker = new Worker(QUEUE_NAME, transcriptionProcessor, {
+  connection: workerConnection,
+  concurrency: parseInt(process.env.WORKER_CONCURRENCY || '2'), // Allow concurrency configuration
+  limiter: { // Optional: Add rate limiting if needed
+    max: 10, // Max 10 jobs per
+    duration: 1000 // 1 second
+  }
+});
+
+worker.on('completed', (job: Job, result: any) => {
+  console.log(`[${QUEUE_NAME}] Job ${job.id} completed successfully.`);
+  logMemoryUsage(`Completed Job ${job.id}`);
+});
+
+worker.on('failed', (job: Job | undefined, error: Error) => {
+  console.error(`[${QUEUE_NAME}] Job ${job?.id} failed:`, error);
+  logMemoryUsage(`Failed Job ${job?.id}`);
+  // Error is already logged and status updated in the processor's catch block
+});
+
+worker.on('error', (error: Error) => {
+  // This logs errors related to the worker itself (e.g., connection issues)
+  console.error(`[${QUEUE_NAME}] Worker encountered an error:`, error);
+  logMemoryUsage('Worker Error');
+});
+
+worker.on('ready', () => {
+  console.log(`[${QUEUE_NAME}] Worker is ready and listening for jobs.`);
+});
+
+console.log(`[${QUEUE_NAME}] Worker started. Node version: ${process.version}`);
+
+// Graceful shutdown
+process.on('SIGTERM', async () => {
+  console.log(`[${QUEUE_NAME}] SIGTERM received, closing worker...`);
+  await worker.close();
+  await prisma.$disconnect();
+  console.log(`[${QUEUE_NAME}] Worker closed.`);
+  process.exit(0);
+});
+
+process.on('SIGINT', async () => {
+  console.log(`[${QUEUE_NAME}] SIGINT received, closing worker...`);
+  await worker.close();
+  await prisma.$disconnect();
+  console.log(`[${QUEUE_NAME}] Worker closed.`);
+  process.exit(0);
 });
