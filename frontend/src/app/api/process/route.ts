@@ -116,46 +116,30 @@ export async function POST(req: NextRequest) {
         
         if (!processResponse.ok) {
           console.warn('バックエンドAPI処理警告:', responseData);
-          
-          // 「既に処理中」エラーの場合は、transcribeエンドポイントを呼び出す
+
+          // 「既に処理中」エラーの場合、不要なtranscribe呼び出しを削除
           if (responseData.error && responseData.error.includes("already being processed")) {
-            console.log('レコードは既に処理中です。transcribeエンドポイントを呼び出します。');
-            
-            // transcribeエンドポイントを呼び出す
-            try {
-              const transcribeResponse = await fetch(`${apiUrl}/api/transcribe`, {
-                method: 'POST',
-                headers: {
-                  'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({
-                  recordId: record!.id,
-                  fileUrl: record!.file_url,
-                  fileKey: fileKey, // fileKeyを追加
-                }),
-              });
-              
-              console.log('transcribeエンドポイントレスポンスステータス:', transcribeResponse.status);
-              
-              if (transcribeResponse.ok) {
-                const transcribeResult = await transcribeResponse.json();
-                console.log('transcribeエンドポイント処理結果:', transcribeResult);
-                processResult = transcribeResult;
-              } else {
-                console.error('transcribeエンドポイントエラー:', await transcribeResponse.text());
-              }
-            } catch (transcribeError) {
-              console.error('transcribeエンドポイントリクエストエラー:', transcribeError);
+            console.log('レコードは既に処理中です。バックエンドからの情報を利用します。');
+            // バックエンドからのレスポンスにjobIdが含まれていれば、それをprocessResultに設定
+            if (responseData.jobId) {
+              processResult = { jobId: responseData.jobId };
+              console.log('既存のジョブIDを使用:', processResult.jobId);
+            } else {
+               console.warn('バックエンドの警告レスポンスにjobIdが含まれていませんでした。');
+               // processResult は { jobId: null } のまま
             }
           } else {
             // その他のエラーの場合は、エラー情報をデータベースに保存
+            // ★注意: エラー発生時にDBを更新するロジックは一旦コメントアウト（必要に応じて再検討）
+            /*
             await prisma.record.update({
               where: { id: record!.id },
               data: { 
-                status: 'PROCESSING', // エラーではなく処理中として扱う
-                error: null // エラー情報をクリア
+                status: 'ERROR', // エラー発生時はERRORステータスにするべきか？
+                error: responseData.error || 'Unknown backend error'
               },
             });
+            */
           }
         } else {
           processResult = responseData;
