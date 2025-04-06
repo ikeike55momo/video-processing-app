@@ -36,14 +36,14 @@ const CHUNK_DURATION = 300; // 5分
 async function optimizeAudioForGemini(inputPath: string): Promise<string> {
   const workDir = path.dirname(inputPath);
   const optimizedPath = path.join(workDir, 'optimized.wav');
-  
+
   console.log(`音声ファイルを最適化: ${inputPath} -> ${optimizedPath}`);
-  
+
   try {
     // FFmpegを使用して16kHz、モノラル、WAV形式に変換
-    execSync(`ffmpeg -i "${inputPath}" -ar 16000 -ac 1 -c:a pcm_s16le "${optimizedPath}" -y`, 
+    execSync(`ffmpeg -i "${inputPath}" -ar 16000 -ac 1 -c:a pcm_s16le "${optimizedPath}" -y`,
       { stdio: 'inherit' });
-    
+
     return optimizedPath;
   } catch (error) {
     console.error('音声最適化エラー:', error);
@@ -58,7 +58,7 @@ async function optimizeAudioForGemini(inputPath: string): Promise<string> {
  */
 async function transcribeAudio(audioPath: string): Promise<string> {
   const apiKey = process.env.GEMINI_API_KEY;
-  
+
   if (!apiKey) {
     throw new Error('GEMINI_API_KEY is missing');
   }
@@ -66,11 +66,11 @@ async function transcribeAudio(audioPath: string): Promise<string> {
   try {
     // 音声ファイルを最適化
     const optimizedAudioPath = await optimizeAudioForGemini(audioPath);
-    
+
     // ファイルサイズを確認
     const stats = fs.statSync(optimizedAudioPath);
     console.log(`最適化された音声ファイルサイズ: ${stats.size} バイト`);
-    
+
     if (stats.size > MAX_DIRECT_PROCESS_SIZE) {
       // 大きなファイルはチャンク処理
       console.log(`ファイルサイズが大きいため、チャンク処理を適用します: ${stats.size} バイト`);
@@ -93,14 +93,14 @@ async function transcribeAudio(audioPath: string): Promise<string> {
  */
 async function transcribeWithGemini(audioPath: string): Promise<string> {
   const apiKey = process.env.GEMINI_API_KEY;
-  
+
   try {
     // 音声ファイルをBase64エンコード
     const audioData = fs.readFileSync(audioPath);
     const base64Audio = audioData.toString('base64');
-    
+
     console.log(`Gemini Flashで文字起こしを実行中...`);
-    
+
     // Gemini APIリクエスト
     const response = await axios.post(
       'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent',
@@ -140,17 +140,17 @@ async function transcribeWithGemini(audioPath: string): Promise<string> {
         }
       }
     );
-    
+
     // レスポンスから文字起こし結果を抽出
     const transcription = response.data.candidates[0].content.parts[0].text;
-    
+
     // 架空のセミナー内容が含まれていないか確認
-    if (transcription.includes('架空のセミナー内容') || 
-        transcription.includes('実際の音声ファイルがない') || 
+    if (transcription.includes('架空のセミナー内容') ||
+        transcription.includes('実際の音声ファイルがない') ||
         transcription.includes('音声ファイルが提供されていない')) {
       throw new Error('Gemini APIが架空の内容を生成しました。文字起こし結果は信頼できません。');
     }
-    
+
     return transcription;
   } catch (error) {
     console.error('Gemini API文字起こしエラー:', error);
@@ -166,42 +166,42 @@ async function transcribeWithGemini(audioPath: string): Promise<string> {
 async function processAudioInChunks(audioPath: string): Promise<string> {
   const workDir = path.dirname(audioPath);
   const chunkDir = path.join(workDir, 'chunks');
-  
+
   // チャンクディレクトリを作成
   fs.mkdirSync(chunkDir, { recursive: true });
-  
+
   try {
     // 音声ファイルの長さを取得（秒）
     const durationOutput = execSync(`ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "${audioPath}"`).toString().trim();
     const duration = parseFloat(durationOutput);
-    
+
     console.log(`音声ファイルの長さ: ${duration}秒`);
-    
+
     // チャンク数を計算
     const numChunks = Math.ceil(duration / CHUNK_DURATION);
     console.log(`${numChunks}個のチャンクに分割します（各${CHUNK_DURATION}秒）`);
-    
+
     const transcriptionParts: string[] = [];
-    
+
     // 各チャンクを処理
     for (let i = 0; i < numChunks; i++) {
       const startTime = i * CHUNK_DURATION;
       const chunkPath = path.join(chunkDir, `chunk_${i}.wav`);
-      
+
       // チャンクを抽出
       console.log(`チャンク ${i+1}/${numChunks} を抽出中: ${startTime}秒から ${CHUNK_DURATION}秒間`);
-      execSync(`ffmpeg -i "${audioPath}" -ss ${startTime} -t ${CHUNK_DURATION} -c copy "${chunkPath}" -y`, 
+      execSync(`ffmpeg -i "${audioPath}" -ss ${startTime} -t ${CHUNK_DURATION} -c copy "${chunkPath}" -y`,
         { stdio: 'inherit' });
-      
+
       // チャンクを文字起こし
       console.log(`チャンク ${i+1}/${numChunks} を文字起こし中...`);
       const chunkTranscription = await transcribeWithGemini(chunkPath);
       transcriptionParts.push(chunkTranscription);
-      
+
       // 処理済みのチャンクを削除
       fs.unlinkSync(chunkPath);
     }
-    
+
     // すべてのチャンクの結果を結合
     return transcriptionParts.join('\n\n');
   } catch (error) {
@@ -226,37 +226,37 @@ async function processLargeFile(filePath: string): Promise<string[]> {
   // 処理開始時のメモリ使用量をログ出力
   console.log('ファイル処理開始時のメモリ使用量:');
   logMemoryUsage();
-  
+
   // ファイル情報を取得
   const fileStats = fs.statSync(filePath);
   console.log(`ファイル情報: 存在=${fs.existsSync(filePath)}, サイズ=${fileStats.size} バイト`);
-  
+
   // 一時ディレクトリの作成
   const workDir = path.join(TMP_DIR, `transcription-${Date.now()}`);
   fs.mkdirSync(workDir, { recursive: true });
-  
+
   try {
     // 動画ファイルから音声を抽出
     const audioPath = path.join(workDir, 'audio.mp3');
     console.log(`動画ファイルから音声を抽出: ${filePath} -> ${audioPath}`);
-    
+
     // FFmpegを使用して音声抽出
     execSync(`ffmpeg -i "${filePath}" -q:a 0 -map a "${audioPath}" -y`, { stdio: 'inherit' });
-    
+
     // 音声抽出後のメモリ使用量をログ出力
     console.log('音声抽出後のメモリ使用量:');
     logMemoryUsage();
-    
+
     // 音声ファイルを文字起こし（最適化と必要に応じたチャンク処理を含む）
     const transcription = await transcribeAudio(audioPath);
-    
+
     // 文字起こし後のメモリ使用量をログ出力
     console.log('文字起こし完了後のメモリ使用量:');
     logMemoryUsage();
-    
+
     // 一時ファイルの削除
     fs.unlinkSync(audioPath);
-    
+
     return [transcription];
   } catch (error) {
     console.error('ファイル処理エラー:', error);
@@ -268,7 +268,7 @@ async function processLargeFile(filePath: string): Promise<string[]> {
     } catch (cleanupError) {
       console.error('一時ディレクトリの削除に失敗:', cleanupError);
     }
-    
+
     // 処理完了時のメモリ使用量をログ出力
     console.log('メモリ使用量（処理完了時）:');
     logMemoryUsage();
@@ -324,7 +324,7 @@ ${transcriptText}
     console.log('Gemini APIにタイムスタンプ抽出リクエストを送信します...');
     const response = await axios.post(
       // Use a text-focused model endpoint if available and suitable, otherwise flash might work
-      'https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent', 
+      'https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent',
       {
         contents: [{ role: 'user', parts: [{ text: prompt }] }],
         // generation_config might need adjustment for text generation
@@ -386,6 +386,9 @@ async function processJob() {
       // console.log(`[${QUEUE_NAME}] No job found. Waiting...`); // Reduce log noise
       return;
     }
+
+    // ★★★ ジョブ受信ログ ★★★
+    console.log(`[Transcription Worker] Received job ${job.id} with data:`, JSON.stringify(job.data, null, 2));
 
     console.log(`[${QUEUE_NAME}] Processing job ${job.id} for record ${job.recordId}`);
 
