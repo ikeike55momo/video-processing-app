@@ -530,20 +530,41 @@ app.get('/api/job-status/:jobId', async (req: Request<{ jobId: string }>, res: R
           let progress = 0;
           let state = 'waiting'; // BullMQのステートに合わせる
 
+          // ★★★ 修正: DBステータスに基づいた進捗計算 ★★★
           switch (record.status) {
             case 'UPLOADED':
-              progress = 0; state = 'waiting'; break;
+              progress = 0;
+              state = 'waiting';
+              break;
             case 'PROCESSING':
-              progress = record.processing_progress || 25; // DBの進捗を使う
-              state = 'active'; break;
+              // PROCESSING中はDBの値を優先、なければステップに応じて推定
+              progress = record.processing_progress ?? 25; // デフォルト25%
+              // より詳細な推定（オプション）
+              // if (record.processing_step === 'DOWNLOAD') progress = 5;
+              // else if (record.processing_step === 'TRANSCRIPTION_AUDIO_EXTRACTION') progress = 10;
+              // else if (record.processing_step?.startsWith('TRANSCRIPTION')) progress = record.processing_progress ?? 30; // 文字起こし中はDB値優先、なければ30
+              // else if (record.processing_step?.startsWith('SUMMARY')) progress = record.processing_progress ?? 60; // 要約中はDB値優先、なければ60
+              // else if (record.processing_step?.startsWith('ARTICLE')) progress = record.processing_progress ?? 85; // 記事生成中はDB値優先、なければ85
+              state = 'active';
+              break;
             case 'TRANSCRIBED':
-              progress = 50; state = 'active'; break; // 次のステップに進むのでactive
+              // 文字起こし完了 -> 要約処理中/待機中
+              progress = 50; // 要約フェーズ開始点
+              state = 'active'; // 全体プロセスとしてはまだアクティブ
+              break;
             case 'SUMMARIZED':
-              progress = 75; state = 'active'; break; // 次のステップに進むのでactive
+              // 要約完了 -> 記事生成中/待機中
+              progress = 75; // 記事生成フェーズ開始点
+              state = 'active'; // 全体プロセスとしてはまだアクティブ
+              break;
             case 'DONE':
-              progress = 100; state = 'completed'; break;
+              progress = 100;
+              state = 'completed';
+              break;
             case 'ERROR':
-              progress = 0; state = 'failed'; break;
+              progress = record.processing_progress ?? 0; // エラー発生時の進捗を保持、なければ0
+              state = 'failed';
+              break;
             default:
               state = 'unknown'; // 不明な状態
           }
@@ -555,7 +576,9 @@ app.get('/api/job-status/:jobId', async (req: Request<{ jobId: string }>, res: R
             // dataフィールドはBullMQのjob.dataに合わせる
             data: {
               recordId: record.id,
-              status: record.status // DBステータスも参考情報として含める
+              status: record.status, // DBステータスも参考情報として含める
+              processing_step: record.processing_step, // ステップ情報も追加
+              error: record.error // エラー情報も追加
             },
             timestamp: Date.now()
           };
