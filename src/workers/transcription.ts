@@ -326,8 +326,8 @@ ${transcriptText}
 
     console.log('Gemini APIにタイムスタンプ抽出リクエストを送信します...');
     const response = await axios.post(
-      // Use a text-focused model endpoint if available and suitable, otherwise flash might work
-      'https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent',
+      // ★★★ モデル名を gemini-1.5-flash-latest に変更 ★★★
+      'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent',
       {
         contents: [{ role: 'user', parts: [{ text: prompt }] }],
         // generation_config might need adjustment for text generation
