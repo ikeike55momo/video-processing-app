@@ -91,38 +91,43 @@ export default function UploadPage() {
         throw new Error("署名付きURLの取得に失敗しました");
       }
 
-      const result = await response.json();
+      const uploadUrlResult = await response.json(); // 変数名を変更
+      const initialRecordId = uploadUrlResult.recordId; // upload-urlで生成されたrecordIdを保持
+      const initialFileKey = uploadUrlResult.fileKey;   // upload-urlで生成されたfileKeyを保持
       let fileUrl: string;
 
       // アップロード方法の選択
-      if (result.isMultipart) {
+      if (uploadUrlResult.isMultipart) {
         // マルチパートアップロードの場合
         setUploadStage("マルチパートアップロード準備中...");
-        console.log("マルチパートアップロードを開始します", result);
-        
+        console.log("マルチパートアップロードを開始します", uploadUrlResult);
+
         // マルチパートアップロードの実行
-        const uploadResult = await uploadMultipart(file, result, (progress) => {
+        const uploadResult = await uploadMultipart(file, uploadUrlResult, (progress) => {
           setUploadProgress(progress);
           console.log(`マルチパートアップロード進捗: ${progress}%`);
         });
-        
+
         fileUrl = uploadResult.fileUrl;
         console.log("マルチパートアップロード完了:", fileUrl);
       } else {
         // 通常のアップロード
         setUploadStage("アップロード中...");
-        
+
         // uploadUrlが存在するか確認
-        if (!result.uploadUrl) {
-          console.error("アップロードURLが取得できませんでした", result);
+        if (!uploadUrlResult.uploadUrl) {
+          console.error("アップロードURLが取得できませんでした", uploadUrlResult);
           throw new Error("アップロードURLが取得できませんでした");
         }
-        
-        await uploadFileWithProgress(file, result.uploadUrl);
-        fileUrl = result.fileUrl || result.uploadUrl;
+
+        await uploadFileWithProgress(file, uploadUrlResult.uploadUrl);
+        // fileUrlはR2からの直接URLを使うのが確実な場合がある
+        fileUrl = uploadUrlResult.fileUrl || uploadUrlResult.uploadUrl;
+        console.log("通常アップロード完了:", fileUrl);
       }
 
       // 処理開始リクエスト
+      console.log(`処理開始リクエスト送信: recordId=${initialRecordId}, fileKey=${initialFileKey}, fileUrl=${fileUrl}`);
       setUploadStage("処理を開始中...");
       const processResponse = await fetch(`/api/process`, {
         method: "POST",
@@ -130,21 +135,30 @@ export default function UploadPage() {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          fileUrl: fileUrl,
+          recordId: initialRecordId, // upload-urlで取得したrecordIdを使用
+          fileKey: initialFileKey,   // upload-urlで取得したfileKeyを使用
+          fileUrl: fileUrl,          // アップロード完了後のURL
         }),
       });
 
       if (!processResponse.ok) {
-        throw new Error("処理の開始に失敗しました");
+         const errorData = await processResponse.json();
+         console.error("処理開始APIエラー:", errorData);
+        // エラーメッセージに詳細を含める
+        throw new Error(`処理の開始に失敗しました: ${errorData.error || processResponse.statusText}`);
       }
 
-      const { recordId, jobId } = await processResponse.json();
-      
-      // ジョブIDを設定
-      setJobId(jobId);
-      setRecordId(recordId);
+      // process APIはjobIdを返す想定 (recordIdは既に持っている)
+      const processResult = await processResponse.json();
+      const returnedJobId = processResult.jobId; // APIから返されたjobId
+
+      console.log(`処理開始API成功: jobId=${returnedJobId}`);
+
+      // ジョブIDと、最初に取得したレコードIDを設定
+      setJobId(returnedJobId);
+      setRecordId(initialRecordId); // 最初に生成されたrecordIdを使用
       setUploadStage("処理中...");
-      
+
       // 結果ページへのリダイレクトは行わず、このページで進捗を表示する
       // router.push(`/results?recordId=${recordId}`);
     } catch (err) {
