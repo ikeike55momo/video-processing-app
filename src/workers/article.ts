@@ -1,6 +1,9 @@
 import * as dotenv from 'dotenv';
-import { PrismaClient } from '@prisma/client';
-import { getJob, completeJob, failJob } from '../lib/queue';
+import { PrismaClient, Status } from '@prisma/client';
+import { Job, Worker } from 'bullmq';
+import IORedis from 'ioredis';
+import { queueManager, QUEUE_NAMES, JobData } from '../lib/bull-queue';
+import axios from 'axios'; // Import axios
 
 // 環境変数の読み込み
 dotenv.config();
@@ -9,145 +12,214 @@ dotenv.config();
 const prisma = new PrismaClient();
 
 // キュー名の定義
-const QUEUE_NAME = 'article';
+const QUEUE_NAME = QUEUE_NAMES.ARTICLE;
 
 /**
- * 記事生成を行う
+ * 記事生成を行う (async/awaitを使用)
  * @param transcript 文字起こしテキスト
  * @param summary 要約テキスト
  * @returns 生成された記事テキスト
  */
 async function generateArticle(transcript: string, summary: string): Promise<string> {
-  // ここではOpenRouter（Claude）APIを使用する簡易的な実装
-  // 実際の実装では適切なAPIクライアントを使用
   const apiKey = process.env.OPENROUTER_API_KEY;
-  
   if (!apiKey) {
     throw new Error('OPENROUTER_API_KEY is missing');
   }
 
-  // TODO: 実際のOpenRouter API呼び出し実装
-  // この例では単純なモックを返しています
-  console.log(`[MOCK] Generating article from transcript(${transcript.length} chars) and summary(${summary.length} chars)`);
-  
-  // モック応答（実際はAPIを使用）
-  return `# 記事タイトル
+  console.log(`Starting article generation: Transcript length=${transcript.length}, Summary length=${summary.length}`);
 
-## はじめに
+  try {
+    const response = await axios.post(
+      'https://openrouter.ai/api/v1/chat/completions',
+      {
+        model: 'anthropic/claude-3-opus:beta', // Use Claude 3 Opus
+        messages: [
+          {
+            role: 'system',
+            content: '文字起こしと要約から記事を生成する専門家です。'
+          },
+          {
+            role: 'user',
+            content: `以下の文字起こしと要約から、読みやすく構造化された記事を生成してください。
 
+## 文字起こし:
+${transcript}
+
+## 要約:
 ${summary}
 
-## 内容
+## 指示:
+- 記事には適切な見出しをつけてください
+- 内容を論理的に整理し、セクションに分けてください
+- 要約の内容を中心に、文字起こしから重要な詳細を追加してください
+- 読者が理解しやすいように、専門用語があれば簡潔に説明してください
+- 記事の最後に簡潔なまとめを追加してください
+- マークダウン形式で出力してください`
+          }
+        ],
+        temperature: 0.7,
+        max_tokens: 4000
+      },
+      {
+        headers: {
+          'Authorization': `Bearer ${apiKey}`,
+          'Content-Type': 'application/json'
+        }
+      }
+    );
 
-これはデモの記事です。実際にはClaudeなどのAIを使用して文字起こしと要約から記事を生成します。
-
-## まとめ
-
-これはOpenRouterを使用した文章生成のデモです。`;
+    const article = response.data.choices[0].message.content;
+    console.log(`Article generation completed: Article length=${article.length}`);
+    return article;
+  } catch (error: any) {
+    console.error('Error calling OpenRouter API:', error);
+    if (error.response) {
+      console.error('OpenRouter API Response:', error.response.data);
+    }
+    throw new Error(`Failed to generate article: ${error.message}`);
+  }
 }
 
 /**
- * ジョブを処理する関数
+ * BullMQワーカーのプロセッサ関数 (Article)
+ * @param job BullMQジョブオブジェクト
  */
-async function processJob() {
-  let job = null;
-  
+const articleProcessor = async (job: Job<JobData>) => {
+  console.log(`[Article Worker] Received job ${job.id}:`, JSON.stringify(job.data, null, 2));
+  const { recordId } = job.data;
+
   try {
-    // キューからジョブを取得
-    job = await getJob(QUEUE_NAME);
-    if (!job) {
-      // ジョブがなければ待機して終了
-      console.log('No jobs in queue. Waiting...');
-      return;
-    }
+    console.log(`[${QUEUE_NAME}] Processing job ${job.id} for record ${recordId}`);
 
-    console.log(`Processing article job ${job.id} for record ${job.recordId}`);
-
-    // 処理状態の更新
+    // 処理状態の更新 (PROCESSING, step: ARTICLE)
     await prisma.record.update({
-      where: { id: job.recordId },
-      data: { 
-        status: 'PROCESSING',
-        processing_step: 'ARTICLE'
+      where: { id: recordId },
+      data: {
+        status: Status.PROCESSING,
+        processing_step: 'ARTICLE',
+        processing_progress: 85, // Progress indicating article generation start
+        error: null
       }
     });
+    console.log(`[${recordId}] Status updated to PROCESSING (ARTICLE)`);
 
     // 文字起こしと要約結果を取得
     const record = await prisma.record.findUnique({
-      where: { id: job.recordId },
-      select: { 
-        transcript_text: true,
-        summary_text: true
-      }
+      where: { id: recordId },
+      select: { transcript_text: true, summary_text: true }
     });
 
     if (!record || !record.transcript_text || !record.summary_text) {
-      throw new Error('Transcript or summary text not found');
+      throw new Error(`Transcript or summary text not found for record ${recordId}`);
     }
 
     // 記事生成処理
-    console.log(`Starting article generation process for record ${job.recordId}`);
+    console.log(`Starting article generation for record: ${recordId}`);
+    await job.updateProgress(90); // Update progress before API call
     const article = await generateArticle(record.transcript_text, record.summary_text);
-    
+    await job.updateProgress(95); // Update progress after API call
+
     // 結果をデータベースに保存
     await prisma.record.update({
-      where: { id: job.recordId },
-      data: { 
+      where: { id: recordId },
+      data: {
         article_text: article,
-        status: 'DONE',
-        processing_step: null
+        status: Status.DONE, // Final status
+        processing_step: null,
+        processing_progress: 100 // Mark as 100% complete
       }
     });
-    
-    // ジョブを完了としてマーク
-    await completeJob(QUEUE_NAME, job.id);
-    
-    console.log(`Article job ${job.id} completed successfully`);
+    console.log(`[${recordId}] Successfully saved article to DB`);
+
+    console.log(`[${recordId}] Article job ${job.id} completed successfully`);
+    return { success: true };
+
   } catch (error) {
-    console.error('Error processing article job:', error);
-    
-    // ジョブIDがある場合のみリトライを実行
-    if (job?.id) {
-      await failJob(QUEUE_NAME, job.id);
-      
-      // エラーステータスを記録
+    console.error(`[${QUEUE_NAME}] Error processing job ${job?.id} for record ${job?.data?.recordId}:`, error);
+    if (job?.data?.recordId) {
       try {
         await prisma.record.update({
-          where: { id: job.recordId },
-          data: { 
-            status: 'ERROR',
+          where: { id: job.data.recordId },
+          data: {
+            status: Status.ERROR,
             error: error instanceof Error ? error.message : String(error),
-            processing_step: null
+            processing_step: 'ARTICLE', // Indicate error happened during article generation
+            processing_progress: null
           }
         });
-      } catch (dbError) {
-        console.error('Failed to update record status:', dbError);
+        console.error(`[${job.data.recordId}] Updated record status to ERROR during article generation`);
+      } catch (dbError: any) {
+        console.error(`[${job.data.recordId}] CRITICAL: Failed to update record status to ERROR during article generation:`, dbError);
       }
     }
+    throw error; // Rethrow error to notify BullMQ
   }
-}
+};
 
-/**
- * メインワーカー処理
- */
-async function startWorker() {
-  console.log('Article worker started');
-  
-  try {
-    // 継続的にジョブを処理
-    while (true) {
-      await processJob();
-      // 少し待機してからポーリング
-      await new Promise(resolve => setTimeout(resolve, 1000));
-    }
-  } catch (error) {
-    console.error('Fatal error in worker:', error);
-    process.exit(1);
-  }
-}
-
-// ワーカー開始
-startWorker().catch(error => {
-  console.error('Failed to start worker:', error);
+// --- BullMQ Worker Initialization ---
+const redisUrl = process.env.REDIS_URL;
+if (!redisUrl) {
+  console.error('REDIS_URL environment variable is not set. Worker cannot start.');
   process.exit(1);
+}
+
+const workerConnection = new IORedis(redisUrl, {
+  maxRetriesPerRequest: null,
+  enableReadyCheck: false,
+  connectTimeout: 10000
+});
+
+workerConnection.on('error', (err: Error) => {
+  console.error(`[${QUEUE_NAME}] Worker Redis connection error:`, err);
+  process.exit(1);
+});
+
+workerConnection.on('connect', () => {
+    console.log(`[${QUEUE_NAME}] Worker successfully connected to Redis.`);
+});
+
+console.log(`[${QUEUE_NAME}] Initializing worker...`);
+
+const worker = new Worker(QUEUE_NAME, articleProcessor, {
+  connection: workerConnection,
+  concurrency: parseInt(process.env.WORKER_CONCURRENCY || '1'), // Lower concurrency for potentially heavier task
+  limiter: {
+    max: 5, // Limit API calls if necessary
+    duration: 1000
+  }
+});
+
+worker.on('completed', (job: Job, result: any) => {
+  console.log(`[${QUEUE_NAME}] Job ${job.id} completed successfully.`);
+});
+
+worker.on('failed', (job: Job | undefined, error: Error) => {
+  console.error(`[${QUEUE_NAME}] Job ${job?.id} failed:`, error);
+});
+
+worker.on('error', (error: Error) => {
+  console.error(`[${QUEUE_NAME}] Worker encountered an error:`, error);
+});
+
+worker.on('ready', () => {
+  console.log(`[${QUEUE_NAME}] Worker is ready and listening for jobs.`);
+});
+
+console.log(`[${QUEUE_NAME}] Worker started. Node version: ${process.version}`);
+
+// Graceful shutdown
+process.on('SIGTERM', async () => {
+  console.log(`[${QUEUE_NAME}] SIGTERM received, closing worker...`);
+  await worker.close();
+  await prisma.$disconnect();
+  console.log(`[${QUEUE_NAME}] Worker closed.`);
+  process.exit(0);
+});
+
+process.on('SIGINT', async () => {
+  console.log(`[${QUEUE_NAME}] SIGINT received, closing worker...`);
+  await worker.close();
+  await prisma.$disconnect();
+  console.log(`[${QUEUE_NAME}] Worker closed.`);
+  process.exit(0);
 });
