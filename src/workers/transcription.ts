@@ -326,8 +326,8 @@ ${transcriptText}
 
     console.log('Gemini APIにタイムスタンプ抽出リクエストを送信します...');
     const response = await axios.post(
-      // ★★★ モデル名を gemini-1.5-flash-latest に変更 ★★★
-      'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent',
+      // ★★★ モデル名を gemini-2.0-flash に戻す ★★★
+      'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent',
       {
         contents: [{ role: 'user', parts: [{ text: prompt }] }],
         // generation_config might need adjustment for text generation
