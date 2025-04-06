@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react"; // useEffect をインポート
 import { useRouter } from "next/navigation";
 import { useSession } from "next-auth/react";
 import { uploadMultipart } from "@/lib/storage";
@@ -16,6 +16,7 @@ export default function UploadPage() {
   const [uploadStage, setUploadStage] = useState<string>("");
   const [jobId, setJobId] = useState<string | null>(null);
   const [recordId, setRecordId] = useState<string | null>(null);
+  const [isJobComplete, setIsJobComplete] = useState(false); // 完了状態を管理するステート
 
   // セッションチェック
   if (status === "loading") {
@@ -193,6 +194,20 @@ export default function UploadPage() {
     }
   };
 
+  // isJobComplete ステートが true になったらリダイレクトを実行する useEffect
+  useEffect(() => {
+    if (isJobComplete && recordId) {
+      console.log(`Job completed for record ${recordId}, redirecting...`);
+      // 短い遅延を入れてからリダイレクトを試みる
+      const redirectTimeout = setTimeout(() => {
+        router.push(`/results/${recordId}`);
+      }, 500); // 0.5秒の遅延
+
+      // クリーンアップ
+      return () => clearTimeout(redirectTimeout);
+    }
+  }, [isJobComplete, recordId, router]);
+
   // 進捗表示付きアップロード（小さなファイル用）
   const uploadFileWithProgress = (file: File, signedUrl: string) => {
     return new Promise<void>((resolve, reject) => {
@@ -353,18 +368,10 @@ export default function UploadPage() {
           {jobId && (
             <div className="mb-6">
               <JobProgressMonitor 
-                jobId={jobId} 
+                jobId={jobId}
                 onComplete={(result) => {
-                  // 処理完了時に結果ページへリダイレクト
-                  // 処理完了時に結果詳細ページへリダイレクト
-                  // recordId ステートを使用 (upload-url で取得したもの)
-                  console.log('処理完了、結果詳細ページへリダイレクト:', { result, recordId });
-                  if (recordId) { // recordId が null でないことを確認
-                    router.push(`/results/${recordId}`);
-                  } else {
-                    console.error("リダイレクトできません: recordId が見つかりません");
-                    setError("処理は完了しましたが、結果ページへのリダイレクトに失敗しました。一覧画面から確認してください。");
-                  }
+                  console.log('JobProgressMonitor: onComplete triggered', { result, recordId });
+                  setIsJobComplete(true); // 完了状態をセット
                 }}
                 onError={(error) => {
                   setError(`処理中にエラーが発生しました: ${error}`);
