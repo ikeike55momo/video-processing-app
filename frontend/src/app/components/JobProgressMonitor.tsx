@@ -113,6 +113,17 @@ const JobProgressMonitor: React.FC<JobProgressMonitorProps> = ({
     socket?.disconnect();
   }, [completed, onComplete, socket]);
 
+  // 進捗ステートを更新する共通関数
+  const updateProgressState = useCallback((data: Partial<ProgressState>) => {
+    if (!isMountedRef.current) return;
+    setProgress(prev => {
+        const newState = { ...(prev || { progress: 0, status: 'waiting', timestamp: 0 }), ...data, timestamp: Date.now() } as ProgressState;
+        // Recalculate progress based on the most definitive status and dbProgress
+        newState.progress = getProgressValue(newState.dbStatus || newState.status, newState.dbProgress);
+        return newState;
+    });
+  }, [getProgressValue]);
+
   const handleFailure = useCallback((errorMessage: string) => {
     if (!isMountedRef.current || completed || error) return;
     console.error('Job failed:', errorMessage);
@@ -134,15 +145,6 @@ const JobProgressMonitor: React.FC<JobProgressMonitorProps> = ({
     isMountedRef.current = true;
     let socketIoInstance: Socket | null = null;
 
-    const updateProgressState = (data: Partial<ProgressState>) => {
-        if (!isMountedRef.current) return;
-        setProgress(prev => {
-            const newState = { ...(prev || { progress: 0, status: 'waiting', timestamp: 0 }), ...data, timestamp: Date.now() } as ProgressState;
-            // Recalculate progress based on the most definitive status and dbProgress
-            newState.progress = getProgressValue(newState.dbStatus || newState.status, newState.dbProgress);
-            return newState;
-        });
-    };
 
 
     const connectWebSocket = () => {
