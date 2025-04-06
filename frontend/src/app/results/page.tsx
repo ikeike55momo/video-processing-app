@@ -3,20 +3,17 @@
 import { useState, useEffect, useRef } from "react"; // useRef をインポート
 import { useRouter } from "next/navigation"; // useParams は不要なので削除
 import { useSession } from "next-auth/react";
-import { Status, Record } from '@prisma/client'; // PrismaClient は不要なので削除
+import { Status, Record } from '@prisma/client'; // Status と Record をインポート
 import ProgressIndicator from "../components/ProgressIndicator";
 import ContentModal from "../components/ContentModal";
 import TimestampList from "../components/TimestampList";
 import VideoPlayer from "../components/VideoPlayer";
-// import { Record } from "@/types/record"; // Prismaの型を使用
 
 export const dynamic = 'force-dynamic'; // 動的レンダリングを強制
 
 export default function ResultsPage() {
   const { data: session, status: sessionStatus } = useSession(); // status 変数名を変更
   const router = useRouter();
-  // const params = useParams(); // 一覧ページでは不要
-  // const urlRecordId = params?.id as string; // 一覧ページでは不要
   const [records, setRecords] = useState<Record[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -55,7 +52,13 @@ export default function ResultsPage() {
       }
 
       const data = await response.json();
-      setRecords(data.records);
+      // APIからのデータが { records: [], pagination: {} } 形式であることを確認
+      if (data && Array.isArray(data.records)) {
+        setRecords(data.records);
+      } else {
+        console.error("APIからのレコードデータ形式が不正:", data);
+        setRecords([]); // 不正な場合は空にする
+      }
     } catch (err) {
       console.error("データ取得エラー:", err);
       setError(
@@ -81,7 +84,7 @@ export default function ResultsPage() {
       if (pollingIntervalRef.current) {
         clearInterval(pollingIntervalRef.current);
         pollingIntervalRef.current = null; // クリアしたことを明示
-        console.log("既存のポーリングをクリア");
+        // console.log("既存のポーリングをクリア"); // デバッグ用ログはコメントアウト推奨
       }
 
        // 処理中のレコードがあるか確認
@@ -92,30 +95,33 @@ export default function ResultsPage() {
 
        // 処理中のレコードがあり、かつローディング中でなければポーリング開始
        if (isProcessing && !loading) {
-         console.log("処理中のレコードがあるためポーリング開始/継続");
+         // console.log("処理中のレコードがあるためポーリング開始/継続"); // デバッグ用ログはコメントアウト推奨
          pollingIntervalRef.current = setInterval(() => {
-           console.log("一覧画面ポーリング実行");
+           // console.log("一覧画面ポーリング実行"); // デバッグ用ログはコメントアウト推奨
            fetchRecords(); // fetchRecords内で再度 isProcessing を評価し、不要なら停止する
          }, 5000); // 5秒間隔
        } else {
-         // 処理中のものがなければポーリング停止
+         // 処理中のものがなければポーリング停止 (既に停止している場合も含む)
          if (pollingIntervalRef.current) {
-             console.log("処理中のレコードがない、またはローディング中のためポーリング停止");
+             // console.log("処理中のレコードがない、またはローディング中のためポーリング停止"); // デバッグ用ログはコメントアウト推奨
              clearInterval(pollingIntervalRef.current);
              pollingIntervalRef.current = null;
          } else {
-             console.log("処理中のレコードがない、またはローディング中のためポーリングせず");
+             // console.log("処理中のレコードがない、またはローディング中のためポーリングせず"); // デバッグ用ログはコメントアウト推奨
          }
        }
     };
 
-    setupPolling(); // ポーリング開始/停止の判断を実行
+    // loading完了後、またはrecordsが更新された後にポーリング設定を実行
+    if (!loading) {
+        setupPolling();
+    }
 
     // クリーンアップ関数
     return () => {
       if (pollingIntervalRef.current) {
         clearInterval(pollingIntervalRef.current);
-        console.log("コンポーネントアンマウントによりポーリング停止");
+        // console.log("コンポーネントアンマウントによりポーリング停止"); // デバッグ用ログはコメントアウト推奨
       }
     };
   // loading と records の変更を監視してポーリングを再設定/停止
@@ -124,6 +130,7 @@ export default function ResultsPage() {
   // 処理のリトライ
   const handleRetry = async (recordId: string) => {
     try {
+      setError(""); // エラー表示をクリア
       const response = await fetch(`/api/records/${recordId}/retry`, {
         method: "POST",
         headers: {
@@ -132,7 +139,8 @@ export default function ResultsPage() {
       });
 
       if (!response.ok) {
-        throw new Error("処理の再試行に失敗しました");
+        const errorData = await response.json();
+        throw new Error(errorData.error || "処理の再試行に失敗しました");
       }
 
       // 再取得して表示を更新
@@ -147,32 +155,34 @@ export default function ResultsPage() {
     }
   };
 
-  // 特定のステップから処理を再開
-  const handleRetryFromStep = async (recordId: string, step: number) => {
-    try {
-      const response = await fetch(`/api/records/${recordId}/retry-step`, { // APIエンドポイント名を修正 (仮)
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ step }),
-      });
+  // 特定のステップから処理を再開するAPIエンドポイントが存在しないためコメントアウト
+  // const handleRetryFromStep = async (recordId: string, step: number) => {
+  //   try {
+  //     setError(""); // エラー表示をクリア
+  //     const response = await fetch(`/api/records/${recordId}/retry-step`, { // APIエンドポイント名を修正 (仮)
+  //       method: "POST",
+  //       headers: {
+  //         "Content-Type": "application/json",
+  //       },
+  //       body: JSON.stringify({ step }),
+  //     });
 
-      if (!response.ok) {
-        throw new Error("処理の再開に失敗しました");
-      }
+  //     if (!response.ok) {
+  //       const errorData = await response.json();
+  //       throw new Error(errorData.error || "処理の再開に失敗しました");
+  //     }
 
-      // 再取得して表示を更新
-      fetchRecords(); // fetchRecordsを呼び出す
-    } catch (err) {
-      console.error("ステップ再開エラー:", err);
-      setError(
-        err instanceof Error
-          ? err.message
-          : "処理の再開中にエラーが発生しました"
-      );
-    }
-  };
+  //     // 再取得して表示を更新
+  //     fetchRecords(); // fetchRecordsを呼び出す
+  //   } catch (err) {
+  //     console.error("ステップ再開エラー:", err);
+  //     setError(
+  //       err instanceof Error
+  //         ? err.message
+  //         : "処理の再開中にエラーが発生しました"
+  //     );
+  //   }
+  // };
 
   // レコードの削除
   const handleDelete = async (recordId: string) => {
@@ -182,6 +192,7 @@ export default function ResultsPage() {
 
     try {
       setLoading(true); // 削除処理中はローディング表示
+      setError(""); // エラー表示をクリア
 
       const response = await fetch(`/api/records/${recordId}`, {
         method: "DELETE",
@@ -227,8 +238,10 @@ export default function ResultsPage() {
       case Status.TRANSCRIBED: // Status enum を使用
         return 3;
       case Status.PROCESSING: // Status enum を使用
-        // processing_step を見てより正確に判断することも可能
-        return 2;
+        // processing_progress を見てより正確に判断
+        if (record.processing_progress && record.processing_progress >= 80) return 3; // 保存中以降
+        if (record.processing_progress && record.processing_progress >= 10) return 2; // 音声処理中
+        return 1; // ダウンロード中など
       case Status.UPLOADED: // Status enum を使用
         return 1;
       default:
@@ -261,7 +274,7 @@ export default function ResultsPage() {
           </div>
           <div>
             <button
-              onClick={() => router.push("/logs")}
+              onClick={() => router.push("/logs")} // ログページへのリンク (仮)
               className="rounded-md bg-slate-600 px-4 py-2 text-white hover:bg-slate-700 focus:outline-none focus:ring-2 focus:ring-slate-500 focus:ring-offset-2"
             >
               システムログを表示
@@ -275,11 +288,11 @@ export default function ResultsPage() {
           </div>
         )}
 
-        {loading ? (
+        {loading && records.length === 0 ? ( // 初回ロード中のみ表示
           <div className="rounded-lg bg-white p-8 text-center shadow-md">
             <p className="text-slate-600">データを読み込んでいます...</p>
           </div>
-        ) : records.length === 0 ? (
+        ) : !loading && records.length === 0 ? ( // ロード完了後、データがない場合
           <div className="rounded-lg bg-white p-8 text-center shadow-md">
             <p className="text-slate-600">処理済みの動画はありません</p>
             <button
@@ -311,8 +324,9 @@ export default function ResultsPage() {
                       totalSteps={5}
                       status={record.status}
                       error={record.error}
-                      onRetry={() => handleRetry(record.id)}
-                      onRetryStep={(step) => handleRetryFromStep(record.id, step)}
+                      onRetry={handleRetryError} // エラーからの再試行
+                      // onRetryStep は現在APIがないためコメントアウト
+                      // onRetryStep={(step) => handleRetryFromStep(record.id, step)}
                     />
                   </div>
                   <button
@@ -332,8 +346,7 @@ export default function ResultsPage() {
                   詳細を表示
                 </button>
 
-                {/* DONE ステータスの場合のみ結果を表示 (削除) */}
-                {/* {record.status === Status.DONE && ( ... )} */}
+                {/* 一覧画面では結果のプレビューは表示しない */}
               </div>
             ))}
           </div>
