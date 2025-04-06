@@ -4,6 +4,7 @@ import * as dotenv from 'dotenv';
 import * as crypto from 'crypto';
 import { PrismaClient, Status } from '@prisma/client';
 import { Job, Worker } from 'bullmq'; // Import Worker from bullmq
+import IORedis from 'ioredis'; // ★★★ Import IORedis ★★★
 import { queueManager, QUEUE_NAMES, JobData, JobProgress } from '../lib/bull-queue'; // Import from bull-queue
 import { getFileContents, getDownloadUrl } from '../lib/storage';
 import { execSync } from 'child_process';
@@ -562,12 +563,30 @@ if (!redisUrl) {
   process.exit(1);
 }
 
-const workerConnection = queueManager.getQueue(QUEUE_NAME)?.opts.connection; // Reuse connection from queueManager if possible
+// ★★★ Worker用に新しいRedis接続を作成 ★★★
+const workerConnection = new IORedis(redisUrl, {
+  // Worker用の接続オプション (必要に応じて調整)
+  maxRetriesPerRequest: null, // Workerにはnullが推奨される場合がある
+  enableReadyCheck: false,
+  connectTimeout: 10000
+});
 
-if (!workerConnection) {
-    console.error(`Could not get Redis connection for queue ${QUEUE_NAME}. Worker cannot start.`);
-    process.exit(1);
-}
+// 接続エラーハンドリングを追加 (errに型を追加)
+workerConnection.on('error', (err: Error) => {
+  console.error(`[${QUEUE_NAME}] Worker Redis connection error:`, err);
+  // 必要に応じてプロセスを終了させるなどの処理を追加
+  process.exit(1);
+});
+
+// 接続成功時のログ
+workerConnection.on('connect', () => {
+    console.log(`[${QUEUE_NAME}] Worker successfully connected to Redis.`);
+});
+
+// if (!workerConnection) { // このチェックは不要になる
+//     console.error(`Could not get Redis connection for queue ${QUEUE_NAME}. Worker cannot start.`);
+//     process.exit(1);
+// }
 
 
 console.log(`[${QUEUE_NAME}] Initializing worker...`);
