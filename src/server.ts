@@ -144,9 +144,12 @@ app.post('/api/process', async (req: Request, res: Response): Promise<void> => {
        return; // voidを返す
     }
 
+    // ★★★ 取得したレコードのステータスをログ出力 ★★★
+    console.log(`[${recordId}] Found record. Current status: ${record.status}`);
+
     // ステータスチェックを修正 (PROCESSING を追加し、重複を削除)
     if (record.status === 'PROCESSING' || record.status === 'DONE' || record.status === 'TRANSCRIBED' || record.status === 'SUMMARIZED') {
-      console.warn(`[${recordId}] Process request received but record status is already ${record.status}.`);
+      console.warn(`[${recordId}] Process request received but record status is already ${record.status}. Returning error.`);
        res.status(400).json({ // return を削除
         error: 'Record is already being processed or completed',
         status: record.status
