@@ -3,7 +3,7 @@ import express from 'express';
 import type { Request, Response, NextFunction } from 'express';
 import { PrismaClient } from '@prisma/client';
 import * as dotenv from 'dotenv';
-import { addJob } from './lib/queue';
+import { addJob } from './lib/queue'; // Assuming addJob is correctly exported from queue or bull-queue
 import { generateUploadUrl, getDownloadUrl } from './lib/storage';
 import path from 'path';
 import http from 'http';
@@ -126,7 +126,8 @@ app.post('/api/upload-url', async (req: Request, res: Response) => {
         file_key: uploadData.key,
         r2_bucket: uploadData.bucket || '',
         status: 'UPLOADED',
-        file_url: uploadData.fileUrl || uploadData.url
+        file_url: uploadData.fileUrl || uploadData.url,
+        file_name: fileName // ファイル名を保存
       }
     });
 
@@ -145,8 +146,8 @@ app.post('/api/upload-url', async (req: Request, res: Response) => {
   }
 });
 
-// 処理開始エンドポイント
-app.post('/api/process', async (req: Request, res: Response) => { // 戻り値の型指定を削除
+// 処理開始エンドポイント (修正済み)
+app.post('/api/process', async (req: Request, res: Response) => {
   try {
     const { recordId, fileUrl, fileKey } = req.body;
 
@@ -167,89 +168,77 @@ app.post('/api/process', async (req: Request, res: Response) => { // 戻り値�
        return;
     }
 
-    // ★★★ 取得したレコードのステータスをログ出力 ★★★
     console.log(`[${recordId}] Found record. Current status: ${record.status}`);
 
-    // ステータスチェックを修正 (PROCESSING を追加し、重複を削除)
-    if (record.status === 'PROCESSING' || record.status === 'DONE' || record.status === 'TRANSCRIBED' || record.status === 'SUMMARIZED') {
-      console.warn(`[${recordId}] Process request received but record status is already ${record.status}. Returning error.`);
-       res.status(400).json({
+    // ★★★ バックエンドでステータスチェックとジョブ追加を一元化 ★★★
+    if (record.status === 'UPLOADED' || record.status === 'ERROR') { // UPLOADED または ERROR の場合のみ処理を開始
+      console.log(`[${recordId}] Starting processing. Current status: ${record.status}`);
+
+      // fileKeyが提供されていれば更新 (異なる場合のみ)
+      if (fileKey && record.file_key !== fileKey) {
+        console.log(`[${recordId}] Updating file_key from ${record.file_key} to ${fileKey}`);
+        await prisma.record.update({
+          where: { id: recordId },
+          data: { file_key: fileKey }
+        });
+        console.log(`[${recordId}] file_key updated`);
+      }
+
+      // fileUrlが提供されていれば更新 (異なる場合のみ)
+      if (fileUrl && record.file_url !== fileUrl) {
+        console.log(`[${recordId}] Updating file_url`);
+        await prisma.record.update({
+          where: { id: recordId },
+          data: { file_url: fileUrl }
+        });
+        console.log(`レコード ${recordId} のfile_urlを更新しました: ${fileUrl}`);
+      }
+
+      // 最新のレコード情報を取得 (fileKey/fileUrl更新後)
+      const updatedRecordForJob = await prisma.record.findUnique({
+        where: { id: recordId }
+      });
+      if (!updatedRecordForJob) {
+        console.error(`[${recordId}] Failed to refetch record after potential updates before adding job.`);
+        res.status(500).json({ error: 'Failed to refetch record before adding job' });
+        return;
+      }
+
+      // 文字起こしキューにジョブを追加
+      const jobId = await queueManager.addJob(QUEUE_NAMES.TRANSCRIPTION, { // Use queueManager instance
+        type: 'transcription',
+        recordId: recordId,
+        // fileKey または fileUrl を渡す。両方あれば fileKey を優先
+        fileKey: updatedRecordForJob.file_key || updatedRecordForJob.file_url || ''
+      });
+
+      // ステータスをPROCESSINGに更新し、エラーをクリア
+      await prisma.record.update({
+        where: { id: recordId },
+        data: {
+          status: 'PROCESSING',
+          error: null, // エラーをクリア
+          processing_step: null, // ステップをリセット
+          processing_progress: 0 // 進捗をリセット
+        }
+      });
+      console.log(`[${recordId}] Status updated to PROCESSING.`);
+
+      res.status(200).json({
+        message: 'Processing started',
+        recordId: recordId,
+        jobId: jobId // フロントエンドが追跡できるようにjobIdを返す
+      });
+
+    } else { // 既に処理中または完了している場合
+      console.warn(`[${recordId}] Process request received but record status is already ${record.status}.`);
+      // 既に処理中の場合は、現在のステータスと（もしあれば）関連するジョブIDを返すことを検討
+      // ここではシンプルにエラーメッセージを返す
+      res.status(409).json({ // 409 Conflict
         error: 'Record is already being processed or completed',
         status: record.status
       });
-       return;
     }
-
-    // fileKeyが提供されていれば更新
-    if (fileKey && record.file_key !== fileKey) { // file_keyが異なる場合のみ更新
-      console.log(`[${recordId}] Updating file_key from ${record.file_key} to ${fileKey}`);
-      await prisma.record.update({
-        where: { id: recordId },
-        data: { file_key: fileKey }
-      });
-      console.log(`[${recordId}] file_key updated`);
-    }
-
-    // fileUrlが提供されていれば更新 (異なる場合のみ)
-    if (fileUrl && record.file_url !== fileUrl) {
-      console.log(`[${recordId}] Updating file_url`);
-      await prisma.record.update({
-        where: { id: recordId },
-        data: { file_url: fileUrl }
-      });
-      console.log(`レコード ${recordId} のfile_urlを更新しました: ${fileUrl}`);
-    }
-
-    // 最新のレコード情報を取得
-    const updatedRecord = await prisma.record.findUnique({
-      where: { id: recordId }
-    });
-
-    if (!updatedRecord) {
-      // このエラーは通常発生しないはずだが、念のため
-      console.error(`[${recordId}] Failed to refetch record after potential updates.`);
-       res.status(404).json({ error: 'Updated record not found after updates' });
-       return;
-    }
-
-    // 文字起こしキューにジョブを追加
-    const jobId = await addJob(QUEUE_NAMES.TRANSCRIPTION, {
-      type: 'transcription',
-      recordId: recordId,
-      // fileKey または fileUrl を渡す。両方あれば fileKey を優先
-      fileKey: updatedRecord.file_key || updatedRecord.file_url || ''
-    });
-
-    // ステータスを更新 (UPLOADEDの場合のみPROCESSINGに更新)
-    const updateResult = await prisma.record.updateMany({
-      where: {
-        id: recordId,
-        status: 'UPLOADED' // UPLOADED ステータスの場合のみ更新
-      },
-      data: { status: 'PROCESSING' }
-    });
-
-    // 更新が行われなかった場合 (競合が発生したか、既に処理中だった場合)
-    if (updateResult.count === 0) {
-        console.warn(`[${recordId}] Failed to update status to PROCESSING (possibly already processing or status changed).`);
-        // 既に処理中である可能性が高いので、エラーではなく成功としてjobIdを返すことも検討できるが、
-        // ここではエラーとして扱う（クライアント側でリロードや再確認を促す）
-        // あるいは、最新のレコード情報を取得して、現在のステータスとjobIdを返す
-        const currentRecord = await prisma.record.findUnique({ where: { id: recordId } });
-         res.status(409).json({ // 409 Conflict を返す
-             error: 'Record status could not be updated to PROCESSING. It might be already processing or its status changed.',
-             currentStatus: currentRecord?.status || 'unknown',
-             jobId: jobId // ジョブは追加されている可能性があるのでjobIdは返す
-         });
-         return;
-    }
-    console.log(`[${recordId}] Status updated to PROCESSING.`);
-
-    res.status(200).json({
-      message: 'Processing started',
-      recordId: recordId,
-      jobId: jobId // フロントエンドが追跡できるようにjobIdを返す
-    });
   } catch (error) {
     console.error('Error starting process:', error);
     res.status(500).json({
@@ -260,7 +249,7 @@ app.post('/api/process', async (req: Request, res: Response) => { // 戻り値�
 });
 
 // レコード情報取得エンドポイント
-app.get('/api/records/:id', async (req: Request<{ id: string }>, res: Response) => { // 戻り値の型指定を削除
+app.get('/api/records/:id', async (req: Request<{ id: string }>, res: Response) => {
   try {
     const recordId = req.params.id;
 
@@ -309,7 +298,7 @@ app.get('/api/records/:id', async (req: Request<{ id: string }>, res: Response) 
 });
 
 // すべてのレコード取得エンドポイント
-app.get('/api/records', async (req: Request, res: Response) => { // 戻り値の型指定を削除
+app.get('/api/records', async (req: Request, res: Response) => {
   try {
     // クエリパラメータからページネーション情報を取得
     const page = parseInt(req.query.page as string) || 1;
@@ -358,7 +347,7 @@ app.get('/api/records', async (req: Request, res: Response) => { // 戻り値の
 });
 
 // 再試行エンドポイント
-app.post('/api/records/:id/retry', async (req: Request<{ id: string }>, res: Response) => { // 戻り値の型指定を削除
+app.post('/api/records/:id/retry', async (req: Request<{ id: string }>, res: Response) => {
   try {
     const recordId = req.params.id;
     const { step } = req.body; // 再開するステップ番号を受け取る
@@ -431,7 +420,7 @@ app.post('/api/records/:id/retry', async (req: Request<{ id: string }>, res: Res
     console.log(`[${recordId}] Retrying job. Target queue: ${queueName}, Job type: ${jobType}, Target status: ${targetStatus}`);
 
     // ジョブをキューに追加
-    const jobId = await addJob(queueName, {
+    const jobId = await queueManager.addJob(queueName, { // Use queueManager instance
       type: jobType,
       recordId: recordId,
       fileKey: record.file_key || record.file_url || '' // fileKeyまたはURLを渡す
@@ -478,7 +467,7 @@ app.post('/api/records/:id/retry', async (req: Request<{ id: string }>, res: Res
 
 
 // WebSocketの進捗状況を取得するエンドポイント
-app.get('/api/job-status/:jobId', async (req: Request<{ jobId: string }>, res: Response) => { // 戻り値の型指定を削除
+app.get('/api/job-status/:jobId', async (req: Request<{ jobId: string }>, res: Response) => {
   try {
     // console.log(`Job status request received for jobId: ${req.params.jobId}`); // Reduce log noise
     const jobId = req.params.jobId;
@@ -544,13 +533,13 @@ app.get('/api/job-status/:jobId', async (req: Request<{ jobId: string }>, res: R
             case 'TRANSCRIBED':
               // 文字起こし完了 -> 要約処理中/待機中
               // DBに進捗があればそれを使い、なければ50%とする
-              progress = record.processing_progress ?? 50; 
+              progress = record.processing_progress ?? 50;
               state = 'active'; // 全体プロセスとしてはまだアクティブ
               break;
             case 'SUMMARIZED':
               // 要約完了 -> 記事生成中/待機中
               // DBに進捗があればそれを使い、なければ75%とする
-              progress = record.processing_progress ?? 75; 
+              progress = record.processing_progress ?? 75;
               state = 'active'; // 全体プロセスとしてはまだアクティブ
               break;
             case 'DONE':
@@ -559,7 +548,7 @@ app.get('/api/job-status/:jobId', async (req: Request<{ jobId: string }>, res: R
               break;
             case 'ERROR':
               // エラー発生時の進捗を保持、なければ0
-              progress = record.processing_progress ?? 0; 
+              progress = record.processing_progress ?? 0;
               state = 'failed';
               break;
             default:
@@ -637,7 +626,7 @@ app.get('/api/job-status/:jobId', async (req: Request<{ jobId: string }>, res: R
 // 文字起こし処理を開始するエンドポイント (旧 /api/transcribe)
 // 注意: このエンドポイントは /api/process に統合されたため、通常は不要
 //       互換性のため、または特定のユースケースのために残す場合は注意が必要
-app.post('/api/transcribe', async (req: Request, res: Response) => { // 戻り値の型指定を削除
+app.post('/api/transcribe', async (req: Request, res: Response) => {
    console.warn("Deprecated /api/transcribe endpoint called. Use /api/process instead.");
   try {
     const { fileKey, fileName, recordId } = req.body; // recordIdも受け取れるようにする
@@ -688,7 +677,7 @@ app.post('/api/transcribe', async (req: Request, res: Response) => { // 戻り�
 
     // ジョブをキューに追加
     console.log(`Adding transcription job for record ${targetRecordId} with fileKey ${targetFileKey}`);
-    const jobId = await queueManager.addJob(QUEUE_NAMES.TRANSCRIPTION, {
+    const jobId = await queueManager.addJob(QUEUE_NAMES.TRANSCRIPTION, { // Use queueManager instance
       type: 'transcription',
       fileKey: targetFileKey,
       recordId: targetRecordId,
