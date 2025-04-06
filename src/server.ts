@@ -211,6 +211,8 @@ app.post('/api/process', async (req: Request, res: Response) => {
         // fileKey または fileUrl を渡す。両方あれば fileKey を優先
         fileKey: updatedRecordForJob.file_key || updatedRecordForJob.file_url || ''
       });
+      // ★★★ ジョブ追加成功ログ ★★★
+      console.log(`[${recordId}] Job ${jobId} successfully added to queue ${QUEUE_NAMES.TRANSCRIPTION}`);
 
       // ステータスをPROCESSINGに更新し、エラーをクリア
       await prisma.record.update({
