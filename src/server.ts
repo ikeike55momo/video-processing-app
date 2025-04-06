@@ -82,8 +82,31 @@ app.get('/api/healthcheck', (req: Request, res: Response) => {
 });
 
 // アップロード用URLを生成するエンドポイント
-app.post('/api/upload-url', async (req: Request, res: Response) => { // 戻り値の型指定を削除
+app.post('/api/upload-url', async (req: Request, res: Response) => {
   try {
+    // --- 古い未完了レコードの削除処理を追加 ---
+    try {
+      const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
+      const deletedRecords = await prisma.record.deleteMany({
+        where: {
+          status: {
+            in: ['UPLOADED', 'PROCESSING'], // UPLOADED または PROCESSING
+          },
+          created_at: {
+            lt: twentyFourHoursAgo, // 24時間以上前
+          },
+          deleted_at: null, // まだ削除されていないもの
+        },
+      });
+      if (deletedRecords.count > 0) {
+        console.log(`Deleted ${deletedRecords.count} old incomplete records.`);
+      }
+    } catch (deleteError) {
+      console.error("Error deleting old incomplete records:", deleteError);
+      // 削除エラーは続行可能とする
+    }
+    // --- 削除処理ここまで ---
+
     const { fileName, contentType } = req.body;
 
     if (!fileName || !contentType) {
