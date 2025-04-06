@@ -32,7 +32,7 @@ async function generateArticle(transcript: string, summary: string): Promise<str
     const response = await axios.post(
       'https://openrouter.ai/api/v1/chat/completions',
       {
-        model: 'anthropic/claude-3-opus:beta', // Use Claude 3 Opus
+        model: 'anthropic/claude-3-7-sonnet-20250219', // Use Claude 3 Opus
         messages: [
           {
             role: 'system',
