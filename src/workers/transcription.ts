@@ -387,8 +387,8 @@ async function processJob() {
       return;
     }
 
-    // ★★★ ジョブ受信ログ ★★★
-    console.log(`[Transcription Worker] Received job ${job.id} with data:`, JSON.stringify(job.data, null, 2));
+    // ★★★ ジョブ受信ログ (修正: jobオブジェクト全体をログ) ★★★
+    console.log(`[Transcription Worker] Received job ${job.id}:`, JSON.stringify(job, null, 2));
 
     console.log(`[${QUEUE_NAME}] Processing job ${job.id} for record ${job.recordId}`);
 
