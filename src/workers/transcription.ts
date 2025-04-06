@@ -7,6 +7,7 @@ import { getJob, completeJob, failJob, addJob, JobData } from '../lib/queue';
 import { getFileContents, getDownloadUrl } from '../lib/storage';
 import { execSync } from 'child_process';
 import axios from 'axios';
+// import { extractTimestamps } from '../services/timestamp-service'; // 仮のインポート削除
 
 // 環境変数の読み込み
 dotenv.config();
@@ -274,6 +275,102 @@ async function processLargeFile(filePath: string): Promise<string[]> {
   }
 }
 
+
+/**
+ * ★★★ 新規追加: Gemini APIを使用して文字起こしテキストからタイムスタンプを抽出する関数 ★★★
+ * @param transcriptText 文字起こしテキスト
+ * @returns タイムスタンプ情報の配列 (例: [{ timestamp: "00:00:10", text: "..." }]) または null
+ */
+async function extractTimestampsWithGemini(transcriptText: string): Promise<any[] | null> {
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) {
+    console.error('GEMINI_API_KEY is missing for timestamp extraction');
+    return null;
+  }
+
+  // テキストが短い場合はタイムスタンプ抽出をスキップ (必要に応じて調整)
+  if (!transcriptText || transcriptText.length < 10) {
+      console.log('Transcript too short, skipping timestamp extraction.');
+      return null;
+  }
+
+  console.log(`タイムスタンプ抽出処理を開始: テキスト長=${transcriptText.length}文字`);
+
+  try {
+    // Gemini API (text-only model might be better, e.g., gemini-pro, but flash might work)
+    // プロンプトを調整して、望ましいJSON形式または特定のテキスト形式でタイムスタンプを出力させる
+    const prompt = `
+以下の文字起こしテキストにタイムスタンプを追加してください。
+各発言や重要な区切りに対して、[HH:MM:SS] 形式のタイムスタンプを付与し、JSON配列形式で出力してください。
+例:
+[
+  { "timestamp": "00:00:05", "text": "最初の発言内容..." },
+  { "timestamp": "00:00:15", "text": "次の発言内容..." },
+  { "timestamp": "00:00:28", "text": "[効果音] 説明..." }
+]
+
+重要:
+- 必ず上記のJSON配列形式で出力してください。
+- タイムスタンプはテキストの内容に基づいて可能な限り正確に推定してください。
+- 元のテキストの内容は変更しないでください。
+- 架空の内容やタイムスタンプを生成しないでください。
+
+文字起こしテキスト:
+---
+${transcriptText}
+---
+`;
+
+    console.log('Gemini APIにタイムスタンプ抽出リクエストを送信します...');
+    const response = await axios.post(
+      // Use a text-focused model endpoint if available and suitable, otherwise flash might work
+      'https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent', 
+      {
+        contents: [{ role: 'user', parts: [{ text: prompt }] }],
+        // generation_config might need adjustment for text generation
+        generation_config: {
+          temperature: 0.1, // Lower temperature for more deterministic output
+          // max_output_tokens: ... // Adjust if needed
+        }
+      },
+      {
+        headers: {
+          'Content-Type': 'application/json',
+          'x-goog-api-key': apiKey
+        }
+      }
+    );
+
+    const generatedText = response.data.candidates[0].content.parts[0].text;
+    console.log('Geminiからのタイムスタンプ抽出レスポンス:', generatedText);
+
+    // GeminiのレスポンスからJSON部分を抽出してパース
+    // 応答が ```json ... ``` で囲まれている場合を考慮
+    const jsonMatch = generatedText.match(/```json\s*([\s\S]*?)\s*```/);
+    const jsonString = jsonMatch ? jsonMatch[1] : generatedText;
+
+    try {
+      const timestamps = JSON.parse(jsonString);
+      if (Array.isArray(timestamps)) {
+        console.log(`タイムスタンプ抽出完了: ${timestamps.length}個`);
+        return timestamps;
+      } else {
+        console.error('抽出されたタイムスタンプが配列形式ではありません:', timestamps);
+        return null;
+      }
+    } catch (parseError) {
+      console.error('タイムスタンプJSONのパースに失敗しました:', parseError);
+      console.error('Gemini Raw Response:', generatedText); // パース失敗時に生の応答をログ出力
+      return null; // パース失敗時はnullを返す
+    }
+
+  } catch (error: any) {
+    console.error('Gemini APIでのタイムスタンプ抽出中にエラーが発生しました:', error.response?.data || error.message || error);
+    return null; // エラー時もnullを返す
+  }
+}
+
+
 /**
  * ジョブを処理する関数
  */
@@ -450,18 +547,35 @@ async function processJob() {
     const fullTranscript = transcriptParts.join('\n\n');
     console.log(`[${job.recordId}] Full transcript length: ${fullTranscript.length}`);
 
+    // ★★★ タイムスタンプ抽出処理 ★★★
+    let timestampsJson: string | null = null;
     try {
-      console.log(`[${job.recordId}] Updating DB with transcript and status TRANSCRIBED`);
+      // 上で定義した関数を呼び出す
+      const timestampsArray = await extractTimestampsWithGemini(fullTranscript);
+      if (timestampsArray) {
+        timestampsJson = JSON.stringify(timestampsArray);
+        console.log(`[${job.recordId}] Timestamps extracted and stringified.`);
+      } else {
+        console.warn(`[${job.recordId}] Timestamp extraction did not return a valid array.`);
+      }
+    } catch (timestampError) {
+      console.error(`[${job.recordId}] Error during timestamp extraction call:`, timestampError);
+      // 抽出エラーは警告に留め、処理は続行
+    }
+
+    try {
+      console.log(`[${job.recordId}] Updating DB with transcript, timestamps, and status TRANSCRIBED`);
       await prisma.record.update({
         where: { id: job.recordId },
         data: {
           transcript_text: fullTranscript,
+          timestamps_json: timestampsJson, // ★★★ タイムスタンプJSONを保存 ★★★
           status: Status.TRANSCRIBED, // 列挙型を使用
           processing_step: null, // Clear step on successful stage completion
           processing_progress: 100 // Mark as 100% for this stage
         }
       });
-      console.log(`[${job.recordId}] Successfully saved transcript to DB`);
+      console.log(`[${job.recordId}] Successfully saved transcript and timestamps to DB`);
     } catch (dbError: any) {
       console.error(`[${job.recordId}] Database update error after transcription:`, dbError);
       throw new Error(`Database update failed: ${dbError.message}`);
