@@ -141,6 +141,27 @@ export default function UploadPage() {
         }),
       });
 
+      // ★★★ /api/process が失敗した場合のフォールバック処理を削除 ★★★
+      // if (!processResponse.ok) {
+      //    const errorData = await processResponse.json();
+      //    console.error("処理開始APIエラー:", errorData);
+      //   // エラーメッセージに詳細を含める
+      //   // フォールバックとして /api/transcribe を試す (本来は不要になるはず)
+      //   console.warn("Fallback: Calling /api/transcribe due to /api/process failure.");
+      //   const transcribeResponse = await fetch(`/api/transcribe`, {
+      //       method: "POST",
+      //       headers: { "Content-Type": "application/json" },
+      //       body: JSON.stringify({ recordId: initialRecordId, fileKey: initialFileKey }),
+      //   });
+      //   if (!transcribeResponse.ok) {
+      //       const transcribeErrorData = await transcribeResponse.json();
+      //       console.error("/api/transcribe fallback error:", transcribeErrorData);
+      //       throw new Error(`処理の開始に失敗しました (fallback failed): ${transcribeErrorData.error || transcribeResponse.statusText}`);
+      //   }
+      //   processResult = await transcribeResponse.json(); // transcribeの結果を使用
+      // } else {
+      //    processResult = await processResponse.json(); // processの結果を使用
+      // }
       if (!processResponse.ok) {
          const errorData = await processResponse.json();
          console.error("処理開始APIエラー:", errorData);

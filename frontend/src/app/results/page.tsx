@@ -1,17 +1,20 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { useRouter } from "next/navigation";
+import { useState, useEffect, useRef } from "react"; // useRef をインポート
+import { useRouter, useParams } from "next/navigation"; // useParams をインポート
 import { useSession } from "next-auth/react";
+import { Status, Record } from '@prisma/client'; // PrismaClient は不要なので削除
 import ProgressIndicator from "../components/ProgressIndicator";
 import ContentModal from "../components/ContentModal";
 import TimestampList from "../components/TimestampList";
 import VideoPlayer from "../components/VideoPlayer";
-import { Record } from "@/types/record";
+// import { Record } from "@/types/record"; // Prismaの型を使用
 
 export default function ResultsPage() {
-  const { data: session, status } = useSession();
+  const { data: session, status: sessionStatus } = useSession(); // status 変数名を変更
   const router = useRouter();
+  const params = useParams(); // useParams を使用
+  const urlRecordId = params?.id as string; // URLパラメータから取得するID (詳細ページ用だが、ここでは使わない想定)
   const [records, setRecords] = useState<Record[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -37,91 +40,75 @@ export default function ResultsPage() {
     return null;
   }
 
-  // URLパラメータからrecordIdを取得
-  useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const recordId = params.get('recordId');
-    
-    // recordIdが指定されている場合は、そのレコードの処理状況を定期的に確認
-    if (recordId) {
-      console.log(`指定されたレコードID: ${recordId}`);
-      
-      // レコードIDが有効かどうかを確認
-      if (recordId === 'undefined' || recordId === 'null') {
-        console.error('無効なレコードID:', recordId);
-        setError('無効なレコードIDが指定されました。');
-        setLoading(false);
-        return;
+  const pollingIntervalRef = useRef<NodeJS.Timeout | null>(null); // ポーリングのインターバルIDを保持
+
+  // レコード一覧取得関数
+  const fetchRecords = async () => {
+    try {
+      // setLoading(true); // ポーリング中はローディング表示しない方が自然な場合も
+      const response = await fetch("/api/records");
+
+      if (!response.ok) {
+        throw new Error("処理済み動画の取得に失敗しました");
       }
-      
-      const checkRecordStatus = async () => {
-        try {
-          setLoading(true);
-          const response = await fetch(`/api/records/${recordId}`);
-          
-          if (!response.ok) {
-            throw new Error("レコード情報の取得に失敗しました");
-          }
-          
-          const data = await response.json();
-          
-          // データの構造を確認
-          console.log('レコードデータ:', data);
-          
-          if (data && typeof data === 'object') {
-            // レコードが直接返される場合
-            setRecords([data]);
-            
-            // 処理が完了していない場合は定期的に更新
-            if (data.status === 'PROCESSING' || data.status === 'UPLOADED' || data.status === 'TRANSCRIBED' || data.status === 'SUMMARIZED') {
-              setTimeout(checkRecordStatus, 5000); // 5秒ごとに更新
-            }
-          } else {
-            throw new Error("レコードデータの形式が不正です");
-          }
-        } catch (err) {
-          console.error("データ取得エラー:", err);
-          setError(
-            err instanceof Error
-              ? err.message
-              : "データの取得中にエラーが発生しました"
-          );
-          // エラーが発生した場合でも定期的に再試行
-          setTimeout(checkRecordStatus, 10000); // 10秒後に再試行
-        } finally {
-          setLoading(false);
-        }
-      };
-      
-      checkRecordStatus();
-    } else {
-      // recordIdが指定されていない場合は、すべてのレコードを取得
-      const fetchRecords = async () => {
-        try {
-          setLoading(true);
-          const response = await fetch("/api/records");
-          
-          if (!response.ok) {
-            throw new Error("処理済み動画の取得に失敗しました");
-          }
-          
-          const data = await response.json();
-          setRecords(data.records);
-        } catch (err) {
-          console.error("データ取得エラー:", err);
-          setError(
-            err instanceof Error
-              ? err.message
-              : "データの取得中にエラーが発生しました"
-          );
-        } finally {
-          setLoading(false);
-        }
-      };
-      
-      fetchRecords();
+
+      const data = await response.json();
+      setRecords(data.records);
+    } catch (err) {
+      console.error("データ取得エラー:", err);
+      setError(
+        err instanceof Error
+          ? err.message
+          : "データの取得中にエラーが発生しました"
+      );
+    } finally {
+      setLoading(false); // 初回読み込み完了
     }
-  }, []);
+  };
+
+  // 初期表示とポーリング設定
+  useEffect(() => {
+    fetchRecords(); // 初回読み込み
+
+    // ポーリング設定
+    const setupPolling = () => {
+      // 既存のインターバルがあればクリア
+      if (pollingIntervalRef.current) {
+        clearInterval(pollingIntervalRef.current);
+      }
+
+      // 新しいインターバルを設定
+      pollingIntervalRef.current = setInterval(() => {
+        // 処理中のレコードがあるか確認
+        const isProcessing = records.some(r =>
+          r.status === Status.PROCESSING || r.status === Status.UPLOADED ||
+          r.status === Status.TRANSCRIBED || r.status === Status.SUMMARIZED
+        );
+
+        if (isProcessing && !loading) { // ローディング中でない場合のみ実行
+          console.log("一覧画面ポーリング実行");
+          fetchRecords();
+        } else if (!isProcessing) {
+           // 処理中のものがなければポーリング停止
+           console.log("処理中のレコードがないため一覧ポーリング停止");
+           if (pollingIntervalRef.current) {
+             clearInterval(pollingIntervalRef.current);
+             pollingIntervalRef.current = null;
+           }
+        }
+      }, 5000); // 5秒間隔
+    };
+
+    setupPolling(); // ポーリング開始
+
+    // クリーンアップ関数
+    return () => {
+      if (pollingIntervalRef.current) {
+        clearInterval(pollingIntervalRef.current);
+      }
+    };
+  // loading と records の変更を監視してポーリングを再設定
+  }, [loading, records]);
 
   // 処理のリトライ
   const handleRetry = async (recordId: string) => {
@@ -217,15 +204,32 @@ export default function ResultsPage() {
     }
   };
 
-  // 処理ステップの計算
-  const calculateStep = (record: Record) => {
-    if (record.status === "ERROR") return 1;
-    if (record.status === "DONE") return 5;
-    if (record.article_text) return 4;
-    if (record.summary_text) return 3;
-    if (record.timestamps_json) return 2;
-    if (record.transcript_text) return 1;
-    return 1;
+   // 処理ステップの計算 (ステータスベース、Status enum を使用)
+   const calculateStep = (record: Record) => {
+    if (!record) return 1;
+
+    switch (record.status) {
+      case Status.ERROR: // Status enum を使用
+        // エラー発生前の状態に基づいて返す
+        if (record.article_text) return 4;
+        if (record.summary_text) return 3;
+        if (record.transcript_text) return 1; // 文字起こしは完了していたと仮定
+        return 1;
+      case Status.DONE: // Status enum を使用
+        return 5;
+      case Status.SUMMARIZED: // Status enum を使用
+        return 4;
+      case Status.TRANSCRIBED: // Status enum を使用
+        return 3;
+      case Status.PROCESSING: // Status enum を使用
+        // processing_step を見てより正確に判断することも可能
+        return 2;
+      case Status.UPLOADED: // Status enum を使用
+        return 1;
+      default:
+        console.warn("Unknown record status in list:", record.status);
+        return 1;
+    }
   };
 
   // モーダルを開く関数
