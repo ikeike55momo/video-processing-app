@@ -80,14 +80,14 @@ export async function POST(req: NextRequest) {
       console.log('新しいレコードを作成しました:', record);
     }
 
-    // ステータスをPROCESSINGに更新
-    await prisma.record.update({
-      where: { id: record!.id },
-      data: { 
-        status: 'PROCESSING',
-        error: null // エラー情報をクリア
-      },
-    });
+    // ★★★ フロントエンドでのステータス更新を削除 ★★★
+    // await prisma.record.update({
+    //   where: { id: record!.id },
+    //   data: { 
+    //     status: 'PROCESSING',
+    //     error: null // エラー情報をクリア
+    //   },
+    // });
 
     // バックエンドAPIに処理開始リクエストを送信
     const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'https://video-processing-api.onrender.com';
