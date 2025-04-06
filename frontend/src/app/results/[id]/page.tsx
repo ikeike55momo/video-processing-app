@@ -76,12 +76,12 @@ export default function RecordDetailPage() {
       // ポーリング処理を設定
       const pollingInterval = setInterval(() => {
         if (recordId) {
-          // 処理中の場合のみポーリングを続ける
-          if (record && record.status === "PROCESSING") {
+          // 処理中または処理ステータスが変わる可能性がある場合はポーリングを続ける
+          if (!record || record.status === "PROCESSING" || record.status === "UPLOADED" || record.status === "TRANSCRIBED" || record.status === "SUMMARIZED") {
             fetchRecord();
           }
         }
-      }, 5000); // 5秒ごとに更新
+      }, 2000); // 2秒ごとに更新（5秒から短縮）
       
       // クリーンアップ関数
       return () => {
@@ -90,15 +90,38 @@ export default function RecordDetailPage() {
     }
   }, [recordId, record?.status]);
 
-  // 処理ステップの計算
+  // 処理ステップの計算 (ステータスベースに変更)
   const calculateStep = (record: any) => {
-    if (record.status === "ERROR") return record.lastCompletedStep || 1;
-    if (record.status === "DONE") return 5;
-    if (record.article_text) return 4;
-    if (record.summary_text) return 3;
-    if (record.timestamps_json) return 2;
-    if (record.transcript_text) return 1;
-    return 1;
+    if (!record) return 1; // レコードがない場合はステップ1
+
+    switch (record.status) {
+      case 'ERROR':
+        // エラー発生時の表示。どのステップでエラーになったかを示す方が親切かもしれないが、
+        // ここでは ProgressIndicator 側でエラー状態を表示するため、ステップは1に戻すか、
+        // 最後に成功したステップを保持するフィールドがあればそれを使う。
+        // 今回は簡略化のため、エラー発生前の状態に基づいて返す。
+        if (record.article_text) return 4; // 記事生成まで完了していた場合
+        if (record.summary_text) return 3; // 要約まで完了していた場合
+        if (record.transcript_text) return 1; // 文字起こしまで完了していた場合
+        return 1; // それ以外はステップ1扱い
+      case 'DONE':
+        return 5; // 完了
+      case 'SUMMARIZED': // 要約完了 -> ステップ4 (記事生成中)
+        return 4;
+      case 'TRANSCRIBED': // 文字起こし完了 -> ステップ3 (要約中)
+        return 3;
+      case 'PROCESSING': // 処理中 -> ステップ2 (文字起こし中) or 1 (アップロード直後)
+        // processing_step を見てより正確に判断することも可能
+        // 例: if (record.processing_step === 'TRANSCRIPTION') return 2;
+        //     if (record.processing_step === 'SUMMARY') return 3; ...
+        // ここでは簡略化し、PROCESSINGならステップ2とする
+        return 2;
+      case 'UPLOADED': // アップロード完了 -> ステップ1
+        return 1;
+      default:
+        console.warn("Unknown record status:", record.status);
+        return 1; // 不明なステータスはステップ1扱い
+    }
   };
 
   // モーダルを開く関数
