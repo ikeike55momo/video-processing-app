@@ -326,8 +326,8 @@ ${transcriptText}
 
     console.log('Gemini APIにタイムスタンプ抽出リクエストを送信します...');
     const response = await axios.post(
-      // ★★★ モデル名を gemini-2.0-flash に戻す ★★★
-      'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent',
+      // ★★★ モデル名を gemini-1.5-flash-latest に変更 (再々試行) ★★★
+      'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent',
       {
         contents: [{ role: 'user', parts: [{ text: prompt }] }],
         // generation_config might need adjustment for text generation
@@ -347,15 +347,40 @@ ${transcriptText}
     const generatedText = response.data.candidates[0].content.parts[0].text;
     console.log('Geminiからのタイムスタンプ抽出レスポンス:', generatedText);
 
-    // GeminiのレスポンスからJSON部分を抽出してパース
-    // 応答が ```json ... ``` で囲まれている場合を考慮
-    const jsonMatch = generatedText.match(/```json\s*([\s\S]*?)\s*```/);
-    const jsonString = jsonMatch ? jsonMatch[1] : generatedText;
+    // GeminiのレスポンスからJSON部分をさらに堅牢に抽出してパース
+    let jsonString = generatedText;
+    // ```json ... ``` マークダウンブロックを除去
+    const markdownMatch = jsonString.match(/```json\s*([\s\S]*?)\s*```/);
+    if (markdownMatch && markdownMatch[1]) {
+      jsonString = markdownMatch[1];
+    }
+    // 前後の空白や改行を除去
+    jsonString = jsonString.trim();
 
-    try {
-      const timestamps = JSON.parse(jsonString);
-      if (Array.isArray(timestamps)) {
-        console.log(`タイムスタンプ抽出完了: ${timestamps.length}個`);
+    // JSON配列と思われる部分を抽出 ([...] の部分)
+    const arrayMatch = jsonString.match(/^\[[\s\S]*\]$/);
+
+    if (arrayMatch && arrayMatch[0]) {
+      jsonString = arrayMatch[0]; // マッチした配列部分のみを使用
+      try {
+        // JSON.parseを試行
+        const timestamps = JSON.parse(jsonString);
+        if (Array.isArray(timestamps)) {
+          console.log(`タイムスタンプ抽出完了: ${timestamps.length}個`);
+          return timestamps;
+        } else {
+          console.error('抽出されたタイムスタンプが配列形式ではありません:', timestamps);
+          return null;
+        }
+      } catch (parseError) {
+        console.error('タイムスタンプJSONのパースに失敗しました:', parseError);
+        console.error('抽出試行文字列:', jsonString); // パース試行文字列もログ出力
+        console.error('Gemini Raw Response:', generatedText);
+        return null; // パース失敗時はnullを返す
+      }
+    } else {
+      console.error('応答からJSON配列形式の部分を抽出できませんでした。');
+      console.error('Gemini Raw Response:', generatedText);
         return timestamps;
       } else {
         console.error('抽出されたタイムスタンプが配列形式ではありません:', timestamps);
