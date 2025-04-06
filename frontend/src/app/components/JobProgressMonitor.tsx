@@ -25,9 +25,9 @@ interface ProgressState {
   message?: string; // Optional message from worker
   timestamp: number;
   data?: JobProgressData; // Raw data from BullMQ job
-  dbStatus?: string; // DB status from polling /api/records
-  dbError?: string; // DB error from polling /api/records
-  dbProgress?: number | null; // DB progress from polling /api/records
+  dbStatus?: string; // DB status from polling /api/records or job data
+  dbError?: string; // DB error from polling /api/records or job data
+  dbProgress?: number | null; // DB progress from polling /api/records or job data
 }
 
 
@@ -60,7 +60,7 @@ const JobProgressMonitor: React.FC<JobProgressMonitorProps> = ({
   const [currentJobId, setCurrentJobId] = useState<string>(initialJobId);
 
   const pollingIntervalRef = useRef<NodeJS.Timeout | null>(null);
-  const isMountedRef = useRef(true); // Ref to track mount status
+  const isMountedRef = useRef(true);
 
   // --- Helper Functions ---
   const getProgressValue = useCallback((status: string | undefined, dbProgress: number | null | undefined): number => {
@@ -73,10 +73,10 @@ const JobProgressMonitor: React.FC<JobProgressMonitorProps> = ({
       case 'TRANSCRIBED': return 50;
       case 'SUMMARIZED': return 75;
       case 'DONE': case 'completed': return 100;
-      case 'ERROR': case 'failed': return 0;
+      case 'ERROR': case 'failed': return progress?.progress ?? 0; // Keep last progress on error if possible
       default: return 0;
     }
-  }, []);
+  }, [progress?.progress]); // Add progress dependency
 
   const getStatusText = useCallback((status: string | undefined): string => {
      switch (status) {
@@ -100,7 +100,7 @@ const JobProgressMonitor: React.FC<JobProgressMonitorProps> = ({
   const handleCompletion = useCallback((completionData: any) => {
     if (!isMountedRef.current || completed) return;
     console.log('Job completed. Data:', completionData);
-    setCompleted(true);
+    setCompleted(true); // Set completed flag first
     setProgress(prev => ({
         ...(prev || { progress: 0, status: '', timestamp: 0 }),
         progress: 100,
@@ -134,6 +134,17 @@ const JobProgressMonitor: React.FC<JobProgressMonitorProps> = ({
     isMountedRef.current = true;
     let socketIoInstance: Socket | null = null;
 
+    const updateProgressState = (data: Partial<ProgressState>) => {
+        if (!isMountedRef.current) return;
+        setProgress(prev => {
+            const newState = { ...(prev || { progress: 0, status: 'waiting', timestamp: 0 }), ...data, timestamp: Date.now() } as ProgressState;
+            // Recalculate progress based on the most definitive status and dbProgress
+            newState.progress = getProgressValue(newState.dbStatus || newState.status, newState.dbProgress);
+            return newState;
+        });
+    };
+
+
     const connectWebSocket = () => {
       if (completed || socket?.connected || !isMountedRef.current) return;
 
@@ -150,35 +161,41 @@ const JobProgressMonitor: React.FC<JobProgressMonitorProps> = ({
         if (!isMountedRef.current) return;
         console.log('WebSocket接続確立');
         setIsPollingFallback(false);
-        if (pollingIntervalRef.current) clearInterval(pollingIntervalRef.current);
+        if (pollingIntervalRef.current) {
+            clearInterval(pollingIntervalRef.current);
+            pollingIntervalRef.current = null;
+        }
         socketIoInstance?.emit('joinJobRoom', currentJobId);
       });
 
-      socketIoInstance.on('jobProgress', (data: { jobId: string; progress: ProgressState | number }) => { // Use ProgressState here
+      socketIoInstance.on('jobProgress', (data: { jobId: string; progress: ProgressState | number }) => {
         if (!isMountedRef.current || data.jobId !== currentJobId || completed) return;
 
         let progressUpdate: Partial<ProgressState> = {};
         let statusToCheck: string | undefined;
 
         if (typeof data.progress === 'number') {
-          progressUpdate.progress = data.progress;
-          statusToCheck = progress?.status;
+          progressUpdate.progress = data.progress; // Use direct progress if number
+          statusToCheck = progress?.status; // Keep previous status
         } else {
-          const jobData = data.progress.data; // Correctly reference nested data
-          const status = jobData?.status || data.progress.status;
+          const jobData = data.progress.data;
+          statusToCheck = jobData?.status || data.progress.status; // Prioritize DB status from data
           const dbProgress = jobData?.processing_progress;
-          progressUpdate.progress = getProgressValue(status, dbProgress);
-          progressUpdate.status = status;
-          progressUpdate.message = data.progress.message;
-          progressUpdate.data = jobData;
-          progressUpdate.dbStatus = jobData?.status;
-          progressUpdate.dbError = jobData?.error;
-          statusToCheck = progressUpdate.status;
+          progressUpdate = {
+              status: statusToCheck,
+              message: data.progress.message,
+              data: jobData,
+              dbStatus: jobData?.status,
+              dbError: jobData?.error,
+              dbProgress: dbProgress,
+              progress: getProgressValue(statusToCheck, dbProgress) // Calculate progress based on status/dbProgress
+          };
         }
 
         console.log('進捗更新 (WebSocket):', progressUpdate);
-        setProgress(prev => ({ ...prev, ...progressUpdate, timestamp: Date.now() } as ProgressState));
+        updateProgressState(progressUpdate); // Use centralized update function
 
+        // Check completion/failure only based on status
         if (statusToCheck === 'DONE' || statusToCheck === 'completed') {
            handleCompletion(progressUpdate.data || {});
         } else if (statusToCheck === 'ERROR' || statusToCheck === 'failed') {
@@ -232,10 +249,9 @@ const JobProgressMonitor: React.FC<JobProgressMonitorProps> = ({
                 const currentProgress = getProgressValue(dbStatus || data.state, dbProgress);
                 setCurrentJobId(data.jobId || initialJobId);
 
-                setProgress({
+                updateProgressState({ // Use centralized update function
                     progress: currentProgress,
                     status: dbStatus || data.state || 'waiting',
-                    timestamp: Date.now(),
                     data: data.data,
                     dbStatus: dbStatus,
                     dbError: data.data?.error,
@@ -262,10 +278,9 @@ const JobProgressMonitor: React.FC<JobProgressMonitorProps> = ({
                     const currentProgress = getProgressValue(recordData.status, recordData.processing_progress);
                     setCurrentJobId(recordIdProp);
 
-                    setProgress({
+                    updateProgressState({ // Use centralized update function
                         progress: currentProgress,
                         status: recordData.status,
-                        timestamp: Date.now(),
                         dbStatus: recordData.status,
                         dbError: recordData.error,
                         dbProgress: recordData.processing_progress
@@ -340,10 +355,9 @@ const JobProgressMonitor: React.FC<JobProgressMonitorProps> = ({
                 const currentProgress = getProgressValue(data.status, data.processing_progress);
                 console.log('ポーリング結果:', data.status, currentProgress);
 
-                setProgress({
+                updateProgressState({ // Use centralized update function
                   progress: currentProgress,
                   status: data.status,
-                  timestamp: Date.now(),
                   dbStatus: data.status,
                   dbError: data.error,
                   dbProgress: data.processing_progress
@@ -385,10 +399,11 @@ const JobProgressMonitor: React.FC<JobProgressMonitorProps> = ({
 
   // --- Render Logic ---
   const renderProgress = () => {
-    const displayStatus = progress?.dbStatus || progress?.status || 'waiting';
+    // Use the unified 'progress' state for display
+    const displayStatus = progress?.status || 'waiting';
     const displayProgress = progress?.progress ?? 0;
     const displayMessage = progress?.message;
-    const displayError = error || progress?.dbError;
+    const displayError = error || progress?.dbError; // Show component error state first
 
     if (displayError) {
       return (
