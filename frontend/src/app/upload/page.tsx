@@ -5,7 +5,6 @@ import { useRouter } from "next/navigation";
 import { useSession } from "next-auth/react";
 import { uploadMultipart } from "@/lib/storage"; // Assuming this handles multipart correctly
 import JobProgressMonitor from "../components/JobProgressMonitor";
-import { Box, Button, CircularProgress, Container, Paper, TextField, Typography, Alert, LinearProgress } from '@mui/material'; // Import MUI components and LinearProgress
 
 export default function UploadPage() {
   const { data: session, status } = useSession();
@@ -26,11 +25,12 @@ export default function UploadPage() {
     }
   }, [status, router]);
 
+  // セッションチェック
   if (status === "loading") {
     return (
       <div className="flex min-h-screen items-center justify-center">
         <div className="text-center">
-          <CircularProgress />
+          <div className="inline-block h-12 w-12 animate-spin rounded-full border-4 border-solid border-blue-600 border-r-transparent"></div>
           <h2 className="text-xl font-semibold mt-4">読み込み中...</h2>
           <p>ユーザー情報を確認しています</p>
         </div>
@@ -48,7 +48,6 @@ export default function UploadPage() {
     setUploadProgress(0);
     setUploadStage("");
     setIsJobComplete(false);
-
 
     if (!selectedFile) {
       return;
@@ -81,7 +80,6 @@ export default function UploadPage() {
     setJobId(null);
     setRecordId(null);
     setIsJobComplete(false);
-
 
     try {
       // 1. Get Upload URL and Record ID
@@ -192,91 +190,100 @@ export default function UploadPage() {
     setUploading(false);
   };
 
-
   return (
-    <Container maxWidth="md" sx={{ py: 4 }}>
-      <Paper elevation={3} sx={{ p: 4 }}>
-        <Typography variant="h4" component="h1" gutterBottom align="center">
-          動画アップロード
-        </Typography>
-        <Typography variant="body1" color="text.secondary" align="center" gutterBottom>
-          MP4形式の動画ファイル（最大15GB）をアップロードしてください
-        </Typography>
+    <div className="min-h-screen bg-slate-50 p-8">
+      <div className="mx-auto max-w-4xl">
+        <header className="mb-8 flex justify-between items-center">
+          <div>
+            <h1 className="text-3xl font-bold text-slate-800">動画アップロード</h1>
+            <p className="text-slate-600">
+              MP4形式の動画ファイル（最大15GB）をアップロードしてください
+            </p>
+          </div>
+          <div className="flex space-x-4">
+            <button
+              onClick={() => router.push("/results")}
+              className="rounded-md bg-blue-600 px-4 py-2 text-white hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
+            >
+              処理済み動画を表示
+            </button>
+          </div>
+        </header>
 
-        {error && (
-          <Alert severity="error" sx={{ mb: 3 }}>
-            {error}
-          </Alert>
-        )}
+        <div className="rounded-lg bg-white p-8 shadow-md">
+          {error && (
+            <div className="mb-6 rounded-md bg-red-50 p-4 text-sm text-red-700">
+              {error}
+            </div>
+          )}
 
-        <Box sx={{ mb: 3 }}>
-          <Button
-            variant="contained"
-            component="label"
-            disabled={uploading}
-            fullWidth
-          >
-            ファイルを選択
+          <div className="mb-6">
+            <label
+              htmlFor="video-upload"
+              className="block text-sm font-medium text-slate-700"
+            >
+              動画ファイル
+            </label>
             <input
+              id="video-upload"
               type="file"
-              hidden
               accept="video/mp4"
               onChange={handleFileChange}
               disabled={uploading}
+              className="mt-1 block w-full rounded-md border border-slate-300 px-3 py-2 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-blue-500"
             />
-          </Button>
+            <p className="mt-2 text-sm text-slate-500">
+              MP4形式の動画ファイルを選択してください（最大15GB）
+            </p>
+          </div>
+
           {file && (
-            <Typography variant="body2" sx={{ mt: 1 }}>
-              選択中: {file.name} ({(file.size / (1024 * 1024)).toFixed(2)} MB)
-            </Typography>
+            <div className="mb-6">
+              <h3 className="text-md font-medium text-slate-700">
+                選択されたファイル
+              </h3>
+              <p className="text-slate-600">{file.name}</p>
+              <p className="text-slate-500">
+                {(file.size / (1024 * 1024)).toFixed(2)} MB
+              </p>
+            </div>
           )}
-        </Box>
 
-        {uploading && !jobId && (
-          <Box sx={{ mb: 3 }}>
-            <Typography variant="body1" gutterBottom>{uploadStage}</Typography>
-            <Box sx={{ display: 'flex', alignItems: 'center' }}>
-              <Box sx={{ width: '100%', mr: 1 }}>
-                <LinearProgress variant="determinate" value={uploadProgress} />
-              </Box>
-              <Box sx={{ minWidth: 35 }}>
-                <Typography variant="body2" color="text.secondary">{`${Math.round(uploadProgress)}%`}</Typography>
-              </Box>
-            </Box>
-          </Box>
-        )}
+          {uploading && !jobId && (
+            <div className="mb-6">
+              <h3 className="mb-2 text-md font-medium text-slate-700">
+                {uploadStage} - 進捗: {uploadProgress}%
+              </h3>
+              <div className="h-2 w-full rounded-full bg-slate-200">
+                <div
+                  className="h-2 rounded-full bg-blue-600"
+                  style={{ width: `${uploadProgress}%` }}
+                ></div>
+              </div>
+            </div>
+          )}
 
-        {/* Render JobProgressMonitor only when jobId and recordId are set */}
-        {jobId && recordId && (
-           <JobProgressMonitor
-              jobId={jobId}
-              recordIdProp={recordId} // ★★★ Pass recordId to recordIdProp ★★★
-              onComplete={handleProcessingComplete}
-              onError={handleProcessingError}
-            />
-        )}
+          {/* JobProgressMonitorコンポーネントを追加 */}
+          {jobId && recordId && (
+            <div className="mb-6">
+              <JobProgressMonitor
+                jobId={jobId}
+                recordIdProp={recordId}
+                onComplete={handleProcessingComplete}
+                onError={handleProcessingError}
+              />
+            </div>
+          )}
 
-        <Button
-          variant="contained"
-          color="primary"
-          onClick={handleUpload}
-          disabled={!file || uploading}
-          fullWidth
-          sx={{ mt: 2 }}
-        >
-          {uploading ? "処理中..." : "アップロードして処理を開始"}
-        </Button>
-
-         <Button
-            variant="outlined"
-            onClick={() => router.push("/results")}
-            fullWidth
-            sx={{ mt: 2 }}
+          <button
+            onClick={handleUpload}
+            disabled={!file || uploading}
+            className="w-full rounded-md bg-blue-600 px-4 py-2 text-white hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:bg-blue-300"
           >
-            処理済み動画を表示
-          </Button>
-
-      </Paper>
-    </Container>
+            {uploading ? "アップロード中..." : "アップロードして処理を開始"}
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }
