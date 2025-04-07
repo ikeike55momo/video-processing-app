@@ -166,6 +166,55 @@ export default function RecordDetailPage() {
     }
   }, [record]);
 
+  // 大きなファイル処理時の進捗表示を改善するための追加処理
+  useEffect(() => {
+    // 初期表示時にプログレスバーを更新
+    if (record?.processing_progress) {
+      const progressElement = document.querySelector('.h-full') as HTMLElement;
+      if (progressElement) {
+        progressElement.style.width = `${record.processing_progress}%`;
+      }
+    }
+
+    // ポーリング間隔を短くして頻繁に更新
+    const shortPollingInterval = setInterval(async () => {
+      if (!recordId) return;
+      
+      try {
+        const response = await fetch(`/api/records/${recordId}`, {
+          cache: 'no-store',
+          headers: {
+            'Cache-Control': 'no-cache, no-store, must-revalidate',
+            'Pragma': 'no-cache'
+          }
+        });
+        
+        if (!response.ok) return;
+        
+        const data = await response.json();
+        if (data.processing_progress) {
+          // 進捗バーを直接更新
+          const progressElement = document.querySelector('.h-full') as HTMLElement;
+          if (progressElement) {
+            progressElement.style.width = `${data.processing_progress}%`;
+          }
+          
+          // 進捗テキストを直接更新
+          const progressTextElement = document.querySelector('.mt-2.text-right') as HTMLElement;
+          if (progressTextElement) {
+            progressTextElement.textContent = `文字起こし中 (${data.processing_progress}%)`;
+          }
+        }
+      } catch (err) {
+        console.error("短間隔ポーリングエラー:", err);
+      }
+    }, 2000); // 2秒ごとに更新
+    
+    return () => {
+      clearInterval(shortPollingInterval);
+    };
+  }, [recordId]);
+
   // モーダルを開く関数
   const openModal = (title: string, content: string | null) => {
     setModalTitle(title);
