@@ -149,6 +149,23 @@ export default function RecordDetailPage() {
     }
   };
 
+  // 進捗状況の更新を処理するための関数
+  useEffect(() => {
+    if (!record || !record.processing_progress) return;
+    
+    // 進捗状況に基づいてプログレスバーを更新
+    const progressElement = document.querySelector('.h-full') as HTMLElement;
+    if (progressElement) {
+      progressElement.style.width = `${record.processing_progress}%`;
+    }
+    
+    // 進捗テキストを更新
+    const progressTextElement = document.querySelector('.mt-2.text-right') as HTMLElement;
+    if (progressTextElement) {
+      progressTextElement.textContent = `文字起こし中 (${record.processing_progress}%)`;
+    }
+  }, [record]);
+
   // モーダルを開く関数
   const openModal = (title: string, content: string | null) => {
     setModalTitle(title);
