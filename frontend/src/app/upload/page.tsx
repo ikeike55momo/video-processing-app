@@ -82,7 +82,7 @@ export default function UploadPage() {
     setIsJobComplete(false);
 
     try {
-      // 1. Get Upload URL and Record ID
+      // 1. Get Upload URL and Record ID - ファイルサイズに応じた適切なアップロードURLを取得
       const uploadUrlResponse = await fetch("/api/upload-url", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -98,17 +98,29 @@ export default function UploadPage() {
       }
 
       const uploadUrlResult = await uploadUrlResponse.json();
-      const { uploadUrl, recordId: generatedRecordId, fileKey, fileUrl: publicFileUrl } = uploadUrlResult;
+      const { uploadUrl, recordId: generatedRecordId, fileKey, fileUrl: publicFileUrl, isMultipart } = uploadUrlResult;
 
-      if (!uploadUrl || !generatedRecordId || !fileKey) {
-         throw new Error("サーバーから必要なアップロード情報が返されませんでした。");
+      if (!generatedRecordId || !fileKey) {
+        throw new Error("サーバーから必要なアップロード情報が返されませんでした。");
       }
 
       setRecordId(generatedRecordId); // Store the generated record ID
 
-      // 2. Upload File
+      // 2. Upload File - マルチパートアップロードかどうかで処理を分岐
       setUploadStage("アップロード中...");
-      await uploadFileWithProgress(file, uploadUrl); // Use standard PUT upload
+      
+      if (isMultipart) {
+        // マルチパートアップロードの場合
+        console.log("マルチパートアップロードを開始します");
+        await uploadMultipart(file, uploadUrlResult, (progress) => {
+          setUploadProgress(progress);
+        });
+      } else {
+        // 通常のアップロードの場合
+        console.log("通常のアップロードを開始します");
+        await uploadFileWithProgress(file, uploadUrl);
+      }
+      
       console.log("アップロード成功");
 
       // 3. Start Processing
@@ -133,11 +145,11 @@ export default function UploadPage() {
       const returnedJobId = processResult.jobId;
 
       if (!returnedJobId) {
-          console.warn("バックエンドAPIからジョブIDが返されませんでした。レコードIDで監視します。");
-          setJobId(generatedRecordId);
+        console.warn("バックエンドAPIからジョブIDが返されませんでした。レコードIDで監視します。");
+        setJobId(generatedRecordId);
       } else {
-          console.log(`処理開始API成功: jobId=${returnedJobId}`);
-          setJobId(returnedJobId);
+        console.log(`処理開始API成功: jobId=${returnedJobId}`);
+        setJobId(returnedJobId);
       }
 
       setUploadStage("処理中...");

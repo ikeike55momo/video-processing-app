@@ -32,12 +32,19 @@ export async function POST(request: NextRequest) {
     let backendResponse;
     
     try {
+      // ファイルサイズを含めて適切なアップロード方法を決定するためのパラメータを追加
+      const requestBody = {
+        ...body,
+        // fileSize が未定義の場合は 0 を設定（通常のアップロードを使用）
+        fileSize: body.fileSize || 0
+      };
+      
       backendResponse = await fetch(`${API_URL}/api/upload-url`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify(body),
+        body: JSON.stringify(requestBody),
       });
       
       console.log("バックエンドAPIレスポンスステータス:", backendResponse.status);
