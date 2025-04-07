@@ -65,21 +65,21 @@ export default function RecordDetailPage() {
           return; // fetchRecord を終了
         }
 
-    const data = await response.json();
-    // APIレスポンス形式の両方に対応
-    setRecord(data.record || data);
+        const data = await response.json();
+        // APIレスポンス形式の両方に対応
+        setRecord(data);
 
-    // 処理が完了またはエラーでなければポーリング継続
-    const recordStatus = data.record?.status || data.status;
-    if (recordStatus !== Status.DONE && recordStatus !== Status.ERROR) {
-      // 既存のインターバルがあればクリア
-      if (pollingInterval) clearTimeout(pollingInterval); // setTimeoutなのでclearTimeout
-      // 新しいインターバルを設定
-      pollingInterval = setTimeout(fetchRecord, 2000); // 2秒後に再実行
-    } else {
-      // 完了またはエラーならポーリング停止
-      if (pollingInterval) clearTimeout(pollingInterval); // setTimeoutなのでclearTimeout
-    }
+        // 処理が完了またはエラーでなければポーリング継続
+        const recordStatus = data.status;
+        if (recordStatus !== Status.DONE && recordStatus !== Status.ERROR) {
+          // 既存のインターバルがあればクリア
+          if (pollingInterval) clearTimeout(pollingInterval); // setTimeoutなのでclearTimeout
+          // 新しいインターバルを設定
+          pollingInterval = setTimeout(fetchRecord, 2000); // 2秒後に再実行
+        } else {
+          // 完了またはエラーならポーリング停止
+          if (pollingInterval) clearTimeout(pollingInterval); // setTimeoutなのでclearTimeout
+        }
 
       } catch (err) {
         console.error("データ取得エラー:", err);
@@ -160,10 +160,10 @@ export default function RecordDetailPage() {
     // 文字列形式のタイムスタンプ（HH:MM:SS）を秒数に変換する関数
     const convertTimeStringToSeconds = (timeStr: string): number => {
       if (!timeStr) return 0;
-      
+
       // 数値の場合はそのまま返す
       if (typeof timeStr === 'number') return timeStr;
-      
+
       // HH:MM:SS 形式の文字列を秒数に変換
       const parts = timeStr.split(':').map(part => parseInt(part, 10));
       if (parts.length === 3) {
@@ -176,7 +176,7 @@ export default function RecordDetailPage() {
         // SS
         return parts[0];
       }
-      
+
       console.warn(`Invalid time format: ${timeStr}`);
       return 0;
     };
@@ -187,7 +187,7 @@ export default function RecordDetailPage() {
         // timestamp または time フィールドを探す
         const timeField = stamp.timestamp !== undefined ? 'timestamp' : 'time';
         const timeValue = stamp[timeField];
-        
+
         return {
           time: convertTimeStringToSeconds(timeValue),
           text: stamp.text || ''
@@ -197,7 +197,7 @@ export default function RecordDetailPage() {
 
     // APIレスポンス形式の両方に対応
     const timestampsJson = record.timestamps_json;
-    
+
     // 1. timestamps_json を優先
     if (timestampsJson) {
       try {
@@ -241,7 +241,7 @@ export default function RecordDetailPage() {
         }
       } catch (error) {
         console.error("Error parsing summary_text for timestamps:", error);
-        
+
         // JSON解析に失敗した場合、正規表現で抽出を試みる
         try {
           const timestampMatch = summaryText.match(/\{[\s\S]*?"timestamps?"\s*:\s*(\[[\s\S]*?\])[\s\S]*?\}/);
@@ -279,15 +279,15 @@ export default function RecordDetailPage() {
     // 4. 直接正規表現でタイムスタンプを抽出する最終手段
     try {
       const allTexts = [timestampsJson, summaryText, transcriptText].filter(Boolean).join(' ');
-      const timeRegex = /"timestamp"\s*:\s*"(\d{2}:\d{2}:\d{2})"\s*,\s*"text"\s*:\s*"([^"]*)"/g;
-      
+      const timeRegex = /"timestamp"\s*:\s*"(\d{2}:\d{2}:\d{2})"\s*\s*"text"\s*:\s*"([^"]*)"/g;
+
       // matchAll の代わりに exec を使用して互換性を確保
       const matches = [];
       let match;
       while ((match = timeRegex.exec(allTexts)) !== null) {
         matches.push(match);
       }
-      
+
       if (matches.length > 0) {
         console.warn("Extracted timestamps using direct regex");
         return matches.map(match => ({
@@ -308,7 +308,7 @@ export default function RecordDetailPage() {
         status: record.status
       });
     }
-    
+
     return [];
   };
 
@@ -327,9 +327,9 @@ export default function RecordDetailPage() {
       const response = await fetch(`/api/records/${recordId}/retry`, { // retry APIを使用
         method: "POST",
         headers: {
-          "Content-Type": "application/json",
+          "Content-Type": "application/json"
         },
-        body: JSON.stringify({ step }), // step番号を渡す
+        body: JSON.stringify({ step }) // step番号を渡す
       });
 
       if (!response.ok) {
@@ -371,8 +371,8 @@ export default function RecordDetailPage() {
       const response = await fetch(`/api/records/${recordId}/retry`, {
         method: "POST",
         headers: {
-          "Content-Type": "application/json",
-        },
+          "Content-Type": "application/json"
+        }
         // ステップ指定なしで呼び出す
       });
 

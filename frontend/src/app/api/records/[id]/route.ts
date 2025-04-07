@@ -14,7 +14,7 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
     // }
 
     const recordId = params.id;
-    
+
     if (!recordId) {
       return NextResponse.json(
         { error: 'レコードIDが必要です' },
@@ -26,8 +26,8 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
     const record = await prisma.record.findUnique({
       where: {
         id: recordId,
-        deleted_at: null,
-      },
+        deleted_at: null
+      }
     });
 
     if (!record) {
@@ -40,35 +40,35 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
     // 処理ログの取得（実際の実装では、別テーブルからログを取得）
     const logs = [
       { timestamp: new Date(record.created_at).toISOString(), message: 'レコード作成' },
-      { timestamp: new Date(new Date(record.created_at).getTime() + 60000).toISOString(), message: '処理開始' },
+      { timestamp: new Date(new Date(record.created_at).getTime() + 60000).toISOString(), message: '処理開始' }
     ];
 
     // ステータスに応じてログを追加
     if (record.transcript_text) {
-      logs.push({ 
-        timestamp: new Date(new Date(record.created_at).getTime() + 120000).toISOString(), 
-        message: '文字起こし完了' 
+      logs.push({
+        timestamp: new Date(new Date(record.created_at).getTime() + 120000).toISOString(),
+        message: '文字起こし完了'
       });
     }
 
     if (record.summary_text) {
-      logs.push({ 
-        timestamp: new Date(new Date(record.created_at).getTime() + 180000).toISOString(), 
-        message: '要約完了' 
+      logs.push({
+        timestamp: new Date(new Date(record.created_at).getTime() + 180000).toISOString(),
+        message: '要約完了'
       });
     }
 
     if (record.article_text) {
-      logs.push({ 
-        timestamp: new Date(new Date(record.created_at).getTime() + 240000).toISOString(), 
-        message: '記事生成完了' 
+      logs.push({
+        timestamp: new Date(new Date(record.created_at).getTime() + 240000).toISOString(),
+        message: '記事生成完了'
       });
     }
 
     if (record.status === 'ERROR') {
-      logs.push({ 
-        timestamp: new Date(new Date(record.created_at).getTime() + 300000).toISOString(), 
-        message: `エラー発生: ${record.error || '不明なエラー'}` 
+      logs.push({
+        timestamp: new Date(new Date(record.created_at).getTime() + 300000).toISOString(),
+        message: `エラー発生: ${record.error || '不明なエラー'}`
       });
     }
 
@@ -95,7 +95,7 @@ export async function DELETE(req: NextRequest, { params }: { params: { id: strin
     }
 
     const recordId = params.id;
-    
+
     if (!recordId) {
       return NextResponse.json(
         { error: 'レコードIDが必要です' },
@@ -106,8 +106,8 @@ export async function DELETE(req: NextRequest, { params }: { params: { id: strin
     // レコードの検索
     const record = await prisma.record.findUnique({
       where: {
-        id: recordId,
-      },
+        id: recordId
+      }
     });
 
     if (!record) {
@@ -119,27 +119,27 @@ export async function DELETE(req: NextRequest, { params }: { params: { id: strin
 
     // すでに削除済みの場合は成功として返す
     if (record.deleted_at) {
-      return NextResponse.json({ 
-        success: true, 
-        message: 'レコードはすでに削除されています', 
-        recordId: record.id 
+      return NextResponse.json({
+        success: true,
+        message: 'レコードはすでに削除されています',
+        recordId: record.id
       });
     }
 
     // 論理削除（deleted_atを設定）
     const deletedRecord = await prisma.record.update({
       where: {
-        id: recordId,
+        id: recordId
       },
       data: {
-        deleted_at: new Date(),
-      },
+        deleted_at: new Date()
+      }
     });
 
-    return NextResponse.json({ 
-      success: true, 
-      message: 'レコードを削除しました', 
-      recordId: deletedRecord.id 
+    return NextResponse.json({
+      success: true,
+      message: 'レコードを削除しました',
+      recordId: deletedRecord.id
     });
   } catch (error) {
     console.error('レコード削除エラー:', error);
