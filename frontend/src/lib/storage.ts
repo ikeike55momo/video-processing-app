@@ -232,18 +232,18 @@ export async function uploadBuffer(buffer: Buffer, key: string, contentType?: st
  */
 export async function generateAppropriateUploadUrl(fileName: string, contentType: string, fileSize: number) {
   // 大きいファイルはマルチパートアップロードを使用（より小さいファイルでも分割することで信頼性向上）
-  const MULTIPART_THRESHOLD = 1024 * 1024 * 1024; // 1GB
+  const MULTIPART_THRESHOLD = 3 * 1024 * 1024; // 3MB
 
-  // 3GBを超えるファイルは常にマルチパートアップロードを使用
-  const FORCE_MULTIPART_THRESHOLD = 3 * 1024 * 1024 * 1024; // 3GB
+  // 3MBを超えるファイルは常にマルチパートアップロードを使用
+  const FORCE_MULTIPART_THRESHOLD = 3 * 1024 * 1024; // 3MB
 
   console.log(`ファイルサイズ: ${fileSize} バイト (${(fileSize / (1024 * 1024)).toFixed(2)} MB)`);
 
   if (fileSize > FORCE_MULTIPART_THRESHOLD) {
-    console.log(`3GBを超えるファイルのため、強制的にマルチパートアップロードを使用します`);
+    console.log(`3MBを超えるファイルのため、強制的にマルチパートアップロードを使用します`);
     return await generateMultipartUploadUrls(fileName, contentType, fileSize);
   } else if (fileSize > MULTIPART_THRESHOLD) {
-    console.log(`1GBを超えるファイルのため、マルチパートアップロードを使用します`);
+    console.log(`3MBを超えるファイルのため、マルチパートアップロードを使用します`);
     return await generateMultipartUploadUrls(fileName, contentType, fileSize);
   } else {
     console.log(`通常のアップロードを使用します`);
