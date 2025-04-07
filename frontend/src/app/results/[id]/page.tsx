@@ -52,7 +52,14 @@ export default function RecordDetailPage() {
 
       try {
         // setLoading(true); // ポーリング中はローディング表示しない
-        const response = await fetch(`/api/records/${recordId}`); // /status なしでレコード全体を取得
+        const response = await fetch(`/api/records/${recordId}`, {
+          // キャッシュを無効化して常に最新データを取得
+          cache: 'no-store',
+          headers: {
+            'Cache-Control': 'no-cache, no-store, must-revalidate',
+            'Pragma': 'no-cache'
+          }
+        });
 
         if (!response.ok) {
           if (response.status === 404) {
@@ -66,6 +73,7 @@ export default function RecordDetailPage() {
         }
 
         const data = await response.json();
+        console.log("Fetched record data:", data); // デバッグ用ログ
         // APIレスポンス形式の両方に対応
         setRecord(data);
 
@@ -75,7 +83,7 @@ export default function RecordDetailPage() {
           // 既存のインターバルがあればクリア
           if (pollingInterval) clearTimeout(pollingInterval); // setTimeoutなのでclearTimeout
           // 新しいインターバルを設定
-          pollingInterval = setTimeout(fetchRecord, 2000); // 2秒後に再実行
+          pollingInterval = setTimeout(fetchRecord, 5000); // 5秒後に再実行（2秒から5秒に変更）
         } else {
           // 完了またはエラーならポーリング停止
           if (pollingInterval) clearTimeout(pollingInterval); // setTimeoutなのでclearTimeout
