@@ -72,10 +72,8 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
       });
     }
 
-    return NextResponse.json({ 
-      record,
-      logs
-    });
+    // APIレスポンス形式を統一（結果ページでの処理を簡素化するため）
+    return NextResponse.json(record);
   } catch (error) {
     console.error('レコード詳細取得エラー:', error);
     return NextResponse.json(

@@ -65,19 +65,21 @@ export default function RecordDetailPage() {
           return; // fetchRecord を終了
         }
 
-        const data = await response.json();
-        setRecord(data); // 取得したレコード情報をセット
+    const data = await response.json();
+    // APIレスポンス形式の両方に対応
+    setRecord(data.record || data);
 
-        // 処理が完了またはエラーでなければポーリング継続
-        if (data.status !== Status.DONE && data.status !== Status.ERROR) {
-          // 既存のインターバルがあればクリア
-          if (pollingInterval) clearTimeout(pollingInterval); // setTimeoutなのでclearTimeout
-          // 新しいインターバルを設定
-          pollingInterval = setTimeout(fetchRecord, 2000); // 2秒後に再実行
-        } else {
-          // 完了またはエラーならポーリング停止
-          if (pollingInterval) clearTimeout(pollingInterval); // setTimeoutなのでclearTimeout
-        }
+    // 処理が完了またはエラーでなければポーリング継続
+    const recordStatus = data.record?.status || data.status;
+    if (recordStatus !== Status.DONE && recordStatus !== Status.ERROR) {
+      // 既存のインターバルがあればクリア
+      if (pollingInterval) clearTimeout(pollingInterval); // setTimeoutなのでclearTimeout
+      // 新しいインターバルを設定
+      pollingInterval = setTimeout(fetchRecord, 2000); // 2秒後に再実行
+    } else {
+      // 完了またはエラーならポーリング停止
+      if (pollingInterval) clearTimeout(pollingInterval); // setTimeoutなのでclearTimeout
+    }
 
       } catch (err) {
         console.error("データ取得エラー:", err);
@@ -106,7 +108,14 @@ export default function RecordDetailPage() {
   const calculateStep = (record: Record | null) => {
     if (!record) return 1;
 
-    switch (record.status) {
+    // APIレスポンス形式の両方に対応
+    const status = record.status;
+    if (!status) {
+      console.warn("Unknown record status:", record.status);
+      return 1;
+    }
+
+    switch (status) {
       case Status.ERROR:
         // エラー発生前の状態に基づいて返す
         if (record.article_text) return 4;
@@ -148,10 +157,13 @@ export default function RecordDetailPage() {
   const parseTimestamps = (record: Record | null): { time: number; text: string }[] => {
     if (!record) return [];
 
+    // APIレスポンス形式の両方に対応
+    const timestampsJson = record.timestamps_json;
+    
     // 1. timestamps_json を優先
-    if (record.timestamps_json) {
+    if (timestampsJson) {
       try {
-        const data = JSON.parse(record.timestamps_json);
+        const data = JSON.parse(timestampsJson);
         if (Array.isArray(data?.timestamps)) {
           console.log("Parsed timestamps from timestamps_json");
           return data.timestamps;
@@ -162,10 +174,11 @@ export default function RecordDetailPage() {
     }
 
     // 2. summary_text に含まれるかチェック (フォールバック)
-    if (record.summary_text && record.summary_text.includes('"timestamps"')) {
+    const summaryText = record.summary_text;
+    if (summaryText && summaryText.includes('"timestamps"')) {
       try {
         // summary_text 全体がJSON形式であると仮定して解析
-        const data = JSON.parse(record.summary_text);
+        const data = JSON.parse(summaryText);
          if (Array.isArray(data?.timestamps)) {
            console.warn("Parsed timestamps from summary_text (fallback)");
            return data.timestamps;
