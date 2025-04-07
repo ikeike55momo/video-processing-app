@@ -48,7 +48,7 @@ const defaultQueueOptions = {
       type: 'exponential',     // 指数関数的バックオフ
       delay: 60 * 1000         // 初回再試行までの遅延（ミリ秒）
     },
-    timeout: 30 * 60 * 1000,   // ジョブタイムアウト（30分）
+    timeout: 120 * 60 * 1000,   // ジョブタイムアウト（120分）
     removeOnComplete: false,   // 完了ジョブを保持（デバッグ用）
     removeOnFail: false,       // 失敗ジョブを保持（デバッグ用）
     stalledInterval: 60000     // 停滞ジョブの検出間隔（60秒）
