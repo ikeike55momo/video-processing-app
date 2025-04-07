@@ -141,6 +141,10 @@ export default function UploadPage() {
       }
 
       setUploadStage("処理中...");
+      
+      // 処理開始後、すぐに結果ページにリダイレクト
+      console.log(`処理が開始されました。結果ページにリダイレクトします: ${generatedRecordId}`);
+      router.push(`/results/${generatedRecordId}`);
 
     } catch (err) {
       console.error("アップロードまたは処理開始エラー:", err);
