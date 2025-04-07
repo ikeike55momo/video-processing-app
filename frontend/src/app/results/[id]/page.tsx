@@ -157,6 +157,44 @@ export default function RecordDetailPage() {
   const parseTimestamps = (record: Record | null): { time: number; text: string }[] => {
     if (!record) return [];
 
+    // 文字列形式のタイムスタンプ（HH:MM:SS）を秒数に変換する関数
+    const convertTimeStringToSeconds = (timeStr: string): number => {
+      if (!timeStr) return 0;
+      
+      // 数値の場合はそのまま返す
+      if (typeof timeStr === 'number') return timeStr;
+      
+      // HH:MM:SS 形式の文字列を秒数に変換
+      const parts = timeStr.split(':').map(part => parseInt(part, 10));
+      if (parts.length === 3) {
+        // HH:MM:SS
+        return parts[0] * 3600 + parts[1] * 60 + parts[2];
+      } else if (parts.length === 2) {
+        // MM:SS
+        return parts[0] * 60 + parts[1];
+      } else if (parts.length === 1 && !isNaN(parts[0])) {
+        // SS
+        return parts[0];
+      }
+      
+      console.warn(`Invalid time format: ${timeStr}`);
+      return 0;
+    };
+
+    // タイムスタンプ配列を処理して、文字列形式の時間を秒数に変換する関数
+    const processTimestamps = (timestamps: any[]): { time: number; text: string }[] => {
+      return timestamps.map(stamp => {
+        // timestamp または time フィールドを探す
+        const timeField = stamp.timestamp !== undefined ? 'timestamp' : 'time';
+        const timeValue = stamp[timeField];
+        
+        return {
+          time: convertTimeStringToSeconds(timeValue),
+          text: stamp.text || ''
+        };
+      });
+    };
+
     // APIレスポンス形式の両方に対応
     const timestampsJson = record.timestamps_json;
     
@@ -166,12 +204,12 @@ export default function RecordDetailPage() {
         const data = JSON.parse(timestampsJson);
         if (Array.isArray(data?.timestamps)) {
           console.log("Parsed timestamps from timestamps_json");
-          return data.timestamps;
+          return processTimestamps(data.timestamps);
         }
         // timestamps_json が直接配列の場合
         if (Array.isArray(data)) {
           console.log("Parsed timestamps array directly from timestamps_json");
-          return data;
+          return processTimestamps(data);
         }
       } catch (error) {
         console.error("Error parsing timestamps_json:", error);
@@ -180,22 +218,22 @@ export default function RecordDetailPage() {
 
     // 2. summary_text に含まれるかチェック (フォールバック)
     const summaryText = record.summary_text;
-    if (summaryText && summaryText.includes('"timestamps"')) {
+    if (summaryText && summaryText.includes('"timestamps"') || summaryText?.includes('"timestamp"')) {
       try {
         // summary_text 全体がJSON形式であると仮定して解析
         const data = JSON.parse(summaryText);
         if (Array.isArray(data?.timestamps)) {
           console.warn("Parsed timestamps from summary_text (fallback)");
-          return data.timestamps;
+          return processTimestamps(data.timestamps);
         }
         // summary_text 内にJSON文字列が含まれる場合の抽出ロジック
-        const timestampMatch = summaryText.match(/\{[\s\S]*?"timestamps"\s*:\s*(\[[\s\S]*?\])[\s\S]*?\}/);
+        const timestampMatch = summaryText.match(/\{[\s\S]*?"timestamps?"\s*:\s*(\[[\s\S]*?\])[\s\S]*?\}/);
         if (timestampMatch && timestampMatch[1]) {
           try {
             const extractedTimestamps = JSON.parse(timestampMatch[1]);
             if (Array.isArray(extractedTimestamps)) {
               console.warn("Extracted timestamps from summary_text JSON substring");
-              return extractedTimestamps;
+              return processTimestamps(extractedTimestamps);
             }
           } catch (e) {
             console.error("Error parsing extracted timestamps:", e);
@@ -206,12 +244,12 @@ export default function RecordDetailPage() {
         
         // JSON解析に失敗した場合、正規表現で抽出を試みる
         try {
-          const timestampMatch = summaryText.match(/\{[\s\S]*?"timestamps"\s*:\s*(\[[\s\S]*?\])[\s\S]*?\}/);
+          const timestampMatch = summaryText.match(/\{[\s\S]*?"timestamps?"\s*:\s*(\[[\s\S]*?\])[\s\S]*?\}/);
           if (timestampMatch && timestampMatch[1]) {
             const extractedTimestamps = JSON.parse(timestampMatch[1]);
             if (Array.isArray(extractedTimestamps)) {
               console.warn("Extracted timestamps using regex fallback");
-              return extractedTimestamps;
+              return processTimestamps(extractedTimestamps);
             }
           }
         } catch (e) {
@@ -222,20 +260,43 @@ export default function RecordDetailPage() {
 
     // 3. transcript_text に含まれるかチェック (最終フォールバック)
     const transcriptText = record.transcript_text;
-    if (transcriptText && transcriptText.includes('"timestamps"')) {
+    if (transcriptText && (transcriptText.includes('"timestamps"') || transcriptText.includes('"timestamp"'))) {
       try {
         // 正規表現でタイムスタンプ部分を抽出
-        const timestampMatch = transcriptText.match(/\{[\s\S]*?"timestamps"\s*:\s*(\[[\s\S]*?\])[\s\S]*?\}/);
+        const timestampMatch = transcriptText.match(/\{[\s\S]*?"timestamps?"\s*:\s*(\[[\s\S]*?\])[\s\S]*?\}/);
         if (timestampMatch && timestampMatch[1]) {
           const extractedTimestamps = JSON.parse(timestampMatch[1]);
           if (Array.isArray(extractedTimestamps)) {
             console.warn("Extracted timestamps from transcript_text");
-            return extractedTimestamps;
+            return processTimestamps(extractedTimestamps);
           }
         }
       } catch (error) {
         console.error("Error extracting timestamps from transcript_text:", error);
       }
+    }
+
+    // 4. 直接正規表現でタイムスタンプを抽出する最終手段
+    try {
+      const allTexts = [timestampsJson, summaryText, transcriptText].filter(Boolean).join(' ');
+      const timeRegex = /"timestamp"\s*:\s*"(\d{2}:\d{2}:\d{2})"\s*,\s*"text"\s*:\s*"([^"]*)"/g;
+      
+      // matchAll の代わりに exec を使用して互換性を確保
+      const matches = [];
+      let match;
+      while ((match = timeRegex.exec(allTexts)) !== null) {
+        matches.push(match);
+      }
+      
+      if (matches.length > 0) {
+        console.warn("Extracted timestamps using direct regex");
+        return matches.map(match => ({
+          time: convertTimeStringToSeconds(match[1]),
+          text: match[2] || ''
+        }));
+      }
+    } catch (error) {
+      console.error("Error in direct regex extraction:", error);
     }
 
     // デバッグ情報
