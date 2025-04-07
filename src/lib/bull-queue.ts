@@ -50,7 +50,8 @@ const defaultQueueOptions = {
     },
     timeout: 30 * 60 * 1000,   // ジョブタイムアウト（30分）
     removeOnComplete: false,   // 完了ジョブを保持（デバッグ用）
-    removeOnFail: false        // 失敗ジョブを保持（デバッグ用）
+    removeOnFail: false,       // 失敗ジョブを保持（デバッグ用）
+    stalledInterval: 60000     // 停滞ジョブの検出間隔（60秒）
   }
 };
 
@@ -112,6 +113,8 @@ export class QueueManager {
         connection,
         autorun: true,
         concurrency: 2, // 同時実行数
+        stalledInterval: 60000, // 停滞ジョブの検出間隔を60秒に設定（デフォルトは30秒）
+        maxStalledCount: 3, // 最大停滞回数を3回に設定（デフォルトは1回）
       });
 
       // ワーカーイベントリスナーを設定
