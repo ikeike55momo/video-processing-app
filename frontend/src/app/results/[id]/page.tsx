@@ -168,6 +168,11 @@ export default function RecordDetailPage() {
           console.log("Parsed timestamps from timestamps_json");
           return data.timestamps;
         }
+        // timestamps_json が直接配列の場合
+        if (Array.isArray(data)) {
+          console.log("Parsed timestamps array directly from timestamps_json");
+          return data;
+        }
       } catch (error) {
         console.error("Error parsing timestamps_json:", error);
       }
@@ -179,18 +184,70 @@ export default function RecordDetailPage() {
       try {
         // summary_text 全体がJSON形式であると仮定して解析
         const data = JSON.parse(summaryText);
-         if (Array.isArray(data?.timestamps)) {
-           console.warn("Parsed timestamps from summary_text (fallback)");
-           return data.timestamps;
-         }
-         // summary_text 内にJSON文字列が含まれる場合 (例: "Summary text... {\"timestamps\": [...]}")
-         // このような複雑なケースは現状考慮しない、または別途抽出ロジックが必要
+        if (Array.isArray(data?.timestamps)) {
+          console.warn("Parsed timestamps from summary_text (fallback)");
+          return data.timestamps;
+        }
+        // summary_text 内にJSON文字列が含まれる場合の抽出ロジック
+        const timestampMatch = summaryText.match(/\{[\s\S]*?"timestamps"\s*:\s*(\[[\s\S]*?\])[\s\S]*?\}/);
+        if (timestampMatch && timestampMatch[1]) {
+          try {
+            const extractedTimestamps = JSON.parse(timestampMatch[1]);
+            if (Array.isArray(extractedTimestamps)) {
+              console.warn("Extracted timestamps from summary_text JSON substring");
+              return extractedTimestamps;
+            }
+          } catch (e) {
+            console.error("Error parsing extracted timestamps:", e);
+          }
+        }
       } catch (error) {
         console.error("Error parsing summary_text for timestamps:", error);
+        
+        // JSON解析に失敗した場合、正規表現で抽出を試みる
+        try {
+          const timestampMatch = summaryText.match(/\{[\s\S]*?"timestamps"\s*:\s*(\[[\s\S]*?\])[\s\S]*?\}/);
+          if (timestampMatch && timestampMatch[1]) {
+            const extractedTimestamps = JSON.parse(timestampMatch[1]);
+            if (Array.isArray(extractedTimestamps)) {
+              console.warn("Extracted timestamps using regex fallback");
+              return extractedTimestamps;
+            }
+          }
+        } catch (e) {
+          console.error("Error in regex extraction fallback:", e);
+        }
       }
     }
 
-    console.log("No valid timestamps found.");
+    // 3. transcript_text に含まれるかチェック (最終フォールバック)
+    const transcriptText = record.transcript_text;
+    if (transcriptText && transcriptText.includes('"timestamps"')) {
+      try {
+        // 正規表現でタイムスタンプ部分を抽出
+        const timestampMatch = transcriptText.match(/\{[\s\S]*?"timestamps"\s*:\s*(\[[\s\S]*?\])[\s\S]*?\}/);
+        if (timestampMatch && timestampMatch[1]) {
+          const extractedTimestamps = JSON.parse(timestampMatch[1]);
+          if (Array.isArray(extractedTimestamps)) {
+            console.warn("Extracted timestamps from transcript_text");
+            return extractedTimestamps;
+          }
+        }
+      } catch (error) {
+        console.error("Error extracting timestamps from transcript_text:", error);
+      }
+    }
+
+    // デバッグ情報
+    if (record.status !== 'UPLOADED' && record.status !== 'PROCESSING') {
+      console.log("No valid timestamps found. Record data:", {
+        hasTimestampsJson: !!timestampsJson,
+        hasSummaryText: !!summaryText,
+        hasTranscriptText: !!record.transcript_text,
+        status: record.status
+      });
+    }
+    
     return [];
   };
 
