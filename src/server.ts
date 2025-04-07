@@ -4,7 +4,7 @@ import type { Request, Response, NextFunction } from 'express';
 import { PrismaClient } from '@prisma/client';
 import * as dotenv from 'dotenv';
 import { addJob } from './lib/queue'; // Assuming addJob is correctly exported from queue or bull-queue
-import { generateUploadUrl, getDownloadUrl } from './lib/storage';
+import { generateUploadUrl, getDownloadUrl, generateAppropriateUploadUrl } from './lib/storage';
 import path from 'path';
 import http from 'http';
 import { queueManager, QUEUE_NAMES } from './lib/bull-queue';
@@ -107,7 +107,7 @@ app.post('/api/upload-url', async (req: Request, res: Response) => {
     }
     // --- 削除処理ここまで ---
 
-    const { fileName, contentType } = req.body;
+    const { fileName, contentType, fileSize } = req.body;
 
     if (!fileName || !contentType) {
        res.status(400).json({
@@ -117,8 +117,15 @@ app.post('/api/upload-url', async (req: Request, res: Response) => {
        return;
     }
 
-    // 署名付きURLの生成
-    const uploadData = await generateUploadUrl(fileName, contentType);
+    // ファイルサイズに基づいて適切なアップロード方法を選択
+    let uploadData;
+    if (fileSize && fileSize > 0) {
+      console.log(`ファイルサイズ情報あり: ${fileSize} バイト (${(fileSize / (1024 * 1024)).toFixed(2)} MB)`);
+      uploadData = await generateAppropriateUploadUrl(fileName, contentType, fileSize);
+    } else {
+      console.log(`ファイルサイズ情報なし: 通常のアップロードを使用`);
+      uploadData = await generateUploadUrl(fileName, contentType);
+    }
 
     // 新しいレコードをデータベースに作成
     const record = await prisma.record.create({
