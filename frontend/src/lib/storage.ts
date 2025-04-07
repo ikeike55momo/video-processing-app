@@ -394,9 +394,9 @@ export async function uploadMultipart(
     let uploadedParts = 0;
 
     // 並列処理の設定
-    const MAX_CONCURRENT_UPLOADS = 5; // 同時アップロード数
+    const MAX_CONCURRENT_UPLOADS = 3; // 同時アップロード数を5から3に削減
     const MAX_RETRIES = 3; // 最大再試行回数
-    const TIMEOUT_MS = 30000; // タイムアウト時間（ミリ秒）
+    const TIMEOUT_MS = 120000; // タイムアウト時間を30秒から120秒（2分）に延長
 
     // パートを処理するための関数
     const processPartUpload = async (partInfo: { url: string; partNumber: number }, retryCount = 0) => {
@@ -423,6 +423,8 @@ export async function uploadMultipart(
         // 再試行回数が上限に達していない場合は再試行
         if (retryCount < MAX_RETRIES) {
           console.log(`パート ${partInfo.partNumber} のアップロードに失敗しました。再試行 ${retryCount + 1}/${MAX_RETRIES}`);
+          // 指数バックオフで待機（1秒、2秒、4秒...）
+          await new Promise(resolve => setTimeout(resolve, Math.pow(2, retryCount) * 1000));
           return processPartUpload(partInfo, retryCount + 1);
         }
         throw error;
@@ -476,6 +478,14 @@ export async function uploadMultipart(
     };
   } catch (error) {
     console.error('マルチパートアップロードエラー:', error);
+    console.error('エラー詳細:', {
+      message: error instanceof Error ? error.message : String(error),
+      stack: error instanceof Error ? error.stack : undefined,
+      uploadId: multipartData.uploadId,
+      key: multipartData.key,
+      totalParts: multipartData.partUrls.length,
+      uploadedParts
+    });
     
     // エラー時はアップロードを中止
     try {

@@ -118,13 +118,13 @@ export async function getFileContents(key: string): Promise<Buffer> {
       const url = new URL(key);
       // パスの先頭の/を削除
       fileKey = url.pathname.startsWith('/') ? url.pathname.substring(1) : url.pathname;
-      console.log(`URLからファイルキーを抽出しました: ${fileKey}`);
+      console.log(`URLからファイルキーを抽出しました: ${fileKey}`, { originalKey: key, extractedKeyLength: fileKey.length });
     } catch (error) {
       console.warn(`URLの解析に失敗しました: ${key}`, error);
     }
   }
   
-  console.log(`getFileContents関数を呼び出します。fileKey: ${fileKey}`);
+  console.log(`getFileContents関数を呼び出します。fileKey: ${fileKey}`, { keyLength: fileKey.length });
   
   // ★★★ 修正: デコード処理を削除し、元のキーを使用 ★★★
   const command = new GetObjectCommand({
