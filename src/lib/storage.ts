@@ -271,7 +271,7 @@ export async function getDownloadUrl(key: string) {
  * @returns ファイルの内容（Buffer）
  */
 export async function getFileContents(key: string): Promise<Buffer> {
-  // キーが完全なURLの場合は、パスだけを抽出
+  // URLの場合は、パスだけを抽出
   let fileKey = key;
   if (key.startsWith('http')) {
     try {
@@ -283,21 +283,21 @@ export async function getFileContents(key: string): Promise<Buffer> {
       console.warn(`URLの解析に失敗しました: ${key}`, error);
     }
   }
-  
+
   console.log(`getFileContents関数を呼び出します。fileKey: ${fileKey}`, { keyLength: fileKey.length });
-  
+
   // ★★★ 修正: デコード処理を削除し、元のキーを使用 ★★★
   const command = new GetObjectCommand({
     Bucket: R2_BUCKET_NAME,
-    Key: fileKey, // ★★★ 修正: 元のエンコードされたキーを使用 ★★★
+    Key: fileKey // ★★★ 修正: 元のエンコードされたキーを使用 ★★★
   });
-  
+
   try {
     const response = await s3Client.send(command);
     if (!response.Body) {
       throw new Error("File not found or empty");
     }
-    
+
     // StreamをBufferに変換
     return await streamToBuffer(response.Body);
   } catch (error) {
@@ -333,9 +333,101 @@ export async function getFileContents(key: string): Promise<Buffer> {
  * @param stream 
  * @returns バッファ
  */
+/**
+ * ストリームをファイルに直接書き込む関数
+ * @param key R2のキー
+ * @param filePath 書き込み先のファイルパス
+ * @returns 成功時はtrue
+ */
+export async function streamToFile(key: string, filePath: string): Promise<boolean> {
+  let fileKey = key;
+  if (key.startsWith('http')) {
+    try {
+      const url = new URL(key);
+      fileKey = url.pathname.startsWith('/') ? url.pathname.substring(1) : url.pathname;
+    } catch (error) {
+      console.warn(`URLの解析に失敗しました: ${key}`, error);
+    }
+  }
+
+  console.log(`streamToFile関数を呼び出します。fileKey: ${fileKey}`, { keyLength: fileKey.length });
+
+  const command = new GetObjectCommand({
+    Bucket: R2_BUCKET_NAME,
+    Key: fileKey
+  });
+
+  try {
+    const response = await s3Client.send(command);
+    if (!response.Body) {
+      throw new Error("File not found or empty");
+    }
+
+    // ストリームを直接ファイルに書き込む
+    const writeStream = fs.createWriteStream(filePath);
+    const readStream = response.Body as any;
+
+    return new Promise((resolve, reject) => {
+      readStream.pipe(writeStream);
+      readStream.on('error', (err: Error) => {
+        writeStream.end();
+        reject(err);
+      });
+      writeStream.on('finish', () => {
+        resolve(true);
+      });
+      writeStream.on('error', (err: Error) => {
+        reject(err);
+      });
+    });
+  } catch (error) {
+    console.error(`streamToFile関数でエラーが発生しました: ${error}`);
+
+    // 公開URLからのダウンロードを試みる
+    if (R2_PUBLIC_URL) {
+      console.log(`R2からのダウンロードに失敗しました。公開URLを試みます: ${error}`);
+      const publicUrl = `${R2_PUBLIC_URL}/${fileKey}`;
+      console.log(`公開URLを使用してファイルにアクセスします: ${publicUrl}`);
+
+      try {
+        const response = await fetch(publicUrl);
+        if (!response.ok) {
+          throw new Error(`公開URLからのダウンロードに失敗しました: ${response.status} ${response.statusText}`);
+        }
+
+        const writeStream = fs.createWriteStream(filePath);
+        const readStream = response.body as any;
+        
+        if (!readStream) {
+          throw new Error("Response body is null");
+        }
+
+        return new Promise((resolve, reject) => {
+          readStream.pipe(writeStream);
+          readStream.on('error', (err: Error) => {
+            writeStream.end();
+            reject(err);
+          });
+          writeStream.on('finish', () => {
+            resolve(true);
+          });
+          writeStream.on('error', (err: Error) => {
+            reject(err);
+          });
+        });
+      } catch (fetchError) {
+        console.error(`公開URLからのダウンロードにも失敗しました: ${fetchError}`);
+        throw fetchError;
+      }
+    }
+
+    throw error;
+  }
+}
+
 async function streamToBuffer(stream: any): Promise<Buffer> {
   const chunks: Buffer[] = [];
-  
+
   return new Promise((resolve, reject) => {
     stream.on('data', (chunk: Buffer) => chunks.push(Buffer.from(chunk)));
     stream.on('error', (err: Error) => reject(err));

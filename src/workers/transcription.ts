@@ -6,7 +6,7 @@ import { PrismaClient, Status } from '@prisma/client';
 import { Job, Worker } from 'bullmq'; // Import Worker from bullmq
 import IORedis from 'ioredis'; // ★★★ Import IORedis ★★★
 import { queueManager, QUEUE_NAMES, JobData, JobProgress } from '../lib/bull-queue'; // Import from bull-queue
-import { getFileContents, getDownloadUrl } from '../lib/storage';
+import { getFileContents, getDownloadUrl, streamToFile } from '../lib/storage';
 import { execSync } from 'child_process';
 import axios from 'axios';
 
@@ -510,10 +510,10 @@ const transcriptionProcessor = async (job: Job<JobData>) => {
       if (effectiveFileKey) {
         try {
           console.log(`[${recordId}] Attempting download from R2: ${effectiveFileKey}`, { fileKeyLength: effectiveFileKey.length });
-          const fileData = await getFileContents(effectiveFileKey);
+          // ストリーミング処理を使用して直接ファイルに書き込む
           const fileName = effectiveFileKey.split('/').pop() || `${Date.now()}.mp4`;
           tempFilePath = path.join(tempDir, fileName);
-          fs.writeFileSync(tempFilePath, fileData);
+          await streamToFile(effectiveFileKey, tempFilePath);
           console.log(`[${recordId}] Successfully wrote R2 data to ${tempFilePath}`, { fileSize: fs.statSync(tempFilePath).size });
         } catch (r2Error) {
           console.error(`[${recordId}] R2 download failed for key ${effectiveFileKey}:`, r2Error);
