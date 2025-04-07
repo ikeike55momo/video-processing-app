@@ -483,8 +483,7 @@ export async function uploadMultipart(
       stack: error instanceof Error ? error.stack : undefined,
       uploadId: multipartData.uploadId,
       key: multipartData.key,
-      totalParts: multipartData.partUrls.length,
-      uploadedParts
+      totalParts: multipartData.partUrls.length
     });
     
     // エラー時はアップロードを中止
