@@ -231,12 +231,22 @@ export async function uploadBuffer(buffer: Buffer, key: string, contentType?: st
  * @returns アップロードURL情報
  */
 export async function generateAppropriateUploadUrl(fileName: string, contentType: string, fileSize: number) {
-  // 50MBを超えるファイルはマルチパートアップロードを使用（より小さいファイルでも分割することで信頼性向上）
-  const MULTIPART_THRESHOLD = 50 * 1024 * 1024; // 50MB
-  
-  if (fileSize > MULTIPART_THRESHOLD) {
+  // 大きいファイルはマルチパートアップロードを使用（より小さいファイルでも分割することで信頼性向上）
+  const MULTIPART_THRESHOLD = 1024 * 1024 * 1024; // 1GB
+
+  // 3GBを超えるファイルは常にマルチパートアップロードを使用
+  const FORCE_MULTIPART_THRESHOLD = 3 * 1024 * 1024 * 1024; // 3GB
+
+  console.log(`ファイルサイズ: ${fileSize} バイト (${(fileSize / (1024 * 1024)).toFixed(2)} MB)`);
+
+  if (fileSize > FORCE_MULTIPART_THRESHOLD) {
+    console.log(`3GBを超えるファイルのため、強制的にマルチパートアップロードを使用します`);
+    return await generateMultipartUploadUrls(fileName, contentType, fileSize);
+  } else if (fileSize > MULTIPART_THRESHOLD) {
+    console.log(`1GBを超えるファイルのため、マルチパートアップロードを使用します`);
     return await generateMultipartUploadUrls(fileName, contentType, fileSize);
   } else {
+    console.log(`通常のアップロードを使用します`);
     return await generateUploadUrl(fileName, contentType);
   }
 }
@@ -437,6 +447,7 @@ export async function uploadMultipart(
       if (progressCallback) {
         progressCallback(Math.round((uploadedParts / totalParts) * 100));
       }
+      console.log(`アップロード進捗: ${uploadedParts}/${totalParts} (${Math.round((uploadedParts / totalParts) * 100)}%)`);
     };
 
     // チャンクを並列処理するための関数
@@ -509,6 +520,10 @@ export async function uploadMultipart(
 async function uploadPart(url: string, chunk: Blob): Promise<string> {
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
+    
+    // タイムアウトを設定（10分 = 600000ミリ秒）
+    xhr.timeout = 600000;
+    
     xhr.open('PUT', url, true);
     xhr.withCredentials = false;
     
@@ -522,12 +537,24 @@ async function uploadPart(url: string, chunk: Blob): Promise<string> {
         }
         resolve(etag);
       } else {
+        console.error(`パートアップロード失敗: ${xhr.status} ${xhr.statusText}`);
         reject(new Error(`パートアップロード失敗: ${xhr.status} ${xhr.statusText}`));
       }
     };
     
-    xhr.onerror = () => {
+    xhr.onerror = (e) => {
+      console.error("パートアップロードエラー:", e);
       reject(new Error('パートアップロード中にネットワークエラーが発生しました'));
+    };
+    
+    xhr.ontimeout = () => {
+      console.error("パートアップロードがタイムアウトしました");
+      reject(new Error("パートアップロードがタイムアウトしました"));
+    };
+    
+    xhr.onabort = () => {
+      console.error("パートアップロードが中断されました");
+      reject(new Error("パートアップロードが中断されました"));
     };
     
     xhr.send(chunk);
