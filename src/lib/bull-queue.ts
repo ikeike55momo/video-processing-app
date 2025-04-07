@@ -275,7 +275,9 @@ export class QueueManager {
   async checkForDeadJobs(queueName: string, olderThanMs = 2 * 60 * 60 * 1000): Promise<number> {
     const queue = this.getQueue(queueName);
     if (!queue) {
-      throw new Error(`Queue ${queueName} not found`);
+      console.warn(`Queue ${queueName} not found for dead job check, initializing it`);
+      this.initQueue(queueName);
+      return 0;
     }
 
     const activeJobs = await queue.getJobs(['active']);
