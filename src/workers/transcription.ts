@@ -345,43 +345,108 @@ const response = await axios.post(
 );
 
     const generatedText = response.data.candidates[0].content.parts[0].text;
-    console.log('Geminiからのタイムスタンプ抽出レスポンス:', generatedText);
+    console.log('Geminiからのタイムスタンプ抽出レスポンス: ```json\n' + generatedText + '\n```');
 
-    // GeminiのレスポンスからJSON部分をさらに堅牢に抽出してパース
+    // GeminiのレスポンスからJSON部分を抽出する改善版
     let jsonString = generatedText;
-    // ```json ... ``` マークダウンブロックを除去
-    const markdownMatch = jsonString.match(/```json\s*([\s\S]*?)\s*```/);
+    
+    // 1. マークダウンコードブロックの処理
+    const markdownMatch = jsonString.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
     if (markdownMatch && markdownMatch[1]) {
       jsonString = markdownMatch[1];
+      console.log('マークダウンブロックから抽出:', jsonString.substring(0, 100) + '...');
     }
-    // 前後の空白や改行を除去
+    
+    // 2. 前後の空白や改行を除去
     jsonString = jsonString.trim();
-
-    // JSON配列と思われる部分を抽出 ([...] の部分)
-    const arrayMatch = jsonString.match(/^\[[\s\S]*\]$/);
-
+    
+    // 3. JSON配列を探す - 最も外側の角括弧とその中身を抽出
+    let arrayMatch = jsonString.match(/\[\s*\{[\s\S]*\}\s*\]/);
     if (arrayMatch && arrayMatch[0]) {
-      jsonString = arrayMatch[0]; // マッチした配列部分のみを使用
-      try {
-        // JSON.parseを試行  <--- この try ブロック内
-        const timestamps = JSON.parse(jsonString);
-        if (Array.isArray(timestamps)) {
-          console.log(`タイムスタンプ抽出完了: ${timestamps.length}個`);
-          return timestamps; // 成功: 配列を返す
-        } else {
-          console.error('抽出されたタイムスタンプが配列形式ではありません:', timestamps);
-          // パースは成功したが配列ではない場合
+      jsonString = arrayMatch[0];
+      console.log('JSON配列パターンを抽出:', jsonString.substring(0, 100) + '...');
+    }
+    
+    // 4. 不正な文字の除去と修正
+    // 一般的な問題: 余分なカンマ、引用符の不一致、制御文字など
+    jsonString = jsonString
+      .replace(/,\s*\]/g, ']')                // 配列末尾の余分なカンマを削除
+      .replace(/\]\s*,\s*$/g, ']')            // 配列末尾の余分なカンマを削除
+      .replace(/([^\\])\\([^"\\\/bfnrtu])/g, '$1$2'); // 無効なエスケープシーケンスを修正
+    
+    // 5. JSON.parseを試行
+    try {
+      const timestamps = JSON.parse(jsonString);
+      if (Array.isArray(timestamps)) {
+        console.log(`タイムスタンプ抽出完了: ${timestamps.length}個`);
+        return timestamps; // 成功: 配列を返す
+      } else {
+        console.error('抽出されたタイムスタンプが配列形式ではありません:', typeof timestamps);
+        
+        // 6. オブジェクトから配列を抽出する試み
+        if (timestamps && typeof timestamps === 'object' && timestamps.timestamps && Array.isArray(timestamps.timestamps)) {
+          console.log(`オブジェクトから配列を抽出: ${timestamps.timestamps.length}個`);
+          return timestamps.timestamps;
         }
-      } catch (parseError) { // <--- パース失敗時の処理
-        console.error('タイムスタンプJSONのパースに失敗しました:', parseError);
-        console.error('抽出試行文字列:', jsonString);
-        console.error('Gemini Raw Response:', generatedText);
-        // パース失敗の場合
       }
-    } else { // <--- そもそもJSON配列形式が見つからない場合の処理
-      console.error('応答からJSON配列形式の部分を抽出できませんでした。');
+    } catch (parseError) {
+      console.error('タイムスタンプJSONのパースに失敗しました:', parseError);
+      
+      // 7. 手動パース - 最後の手段
+      try {
+        // タイムスタンプエントリを正規表現で抽出
+        const entries = jsonString.match(/\{\s*"timestamp"\s*:\s*"[^"]+"\s*,\s*"text"\s*:\s*"[^"]*"\s*\}/g);
+        if (entries && entries.length > 0) {
+          console.log(`正規表現で ${entries.length} 個のエントリを抽出しました`);
+          
+          // 各エントリを個別にパースして配列を構築
+          const manualTimestamps = [];
+          for (const entry of entries) {
+            try {
+              const entryObj = JSON.parse(entry);
+              if (entryObj.timestamp && entryObj.text) {
+                manualTimestamps.push(entryObj);
+              }
+            } catch (e) {
+              // 個別エントリのパースエラーは無視
+            }
+          }
+          
+          if (manualTimestamps.length > 0) {
+            console.log(`手動パースで ${manualTimestamps.length} 個のタイムスタンプを抽出しました`);
+            return manualTimestamps;
+          }
+        }
+      } catch (manualError) {
+        console.error('手動パースにも失敗しました:', manualError);
+      }
+      
+      // 8. 直接文字列から時間と文字列を抽出する最終手段
+      try {
+        const timeTextPairs = generatedText.match(/["{\s]timestamp[":\s]+["']?(\d{2}:\d{2}:\d{2})["']?[,\s]+[":]?text[":\s]+["']([^"']+)["']/g);
+        if (timeTextPairs && timeTextPairs.length > 0) {
+          const extractedPairs = [];
+          for (const pair of timeTextPairs) {
+            const timeMatch = pair.match(/(\d{2}:\d{2}:\d{2})/);
+            const textMatch = pair.match(/text[":\s]+["']([^"']+)["']/);
+            if (timeMatch && textMatch) {
+              extractedPairs.push({
+                timestamp: timeMatch[1],
+                text: textMatch[1]
+              });
+            }
+          }
+          if (extractedPairs.length > 0) {
+            console.log(`最終手段で ${extractedPairs.length} 個のタイムスタンプを抽出しました`);
+            return extractedPairs;
+          }
+        }
+      } catch (finalError) {
+        console.error('最終抽出手段にも失敗しました:', finalError);
+      }
+      
+      console.error('抽出試行文字列:', jsonString);
       console.error('Gemini Raw Response:', generatedText);
-      // 配列形式が見つからない場合
     }
 
     // パース失敗、非配列、または配列形式が見つからない場合はnullを返す
