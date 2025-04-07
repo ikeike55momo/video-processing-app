@@ -509,12 +509,12 @@ const transcriptionProcessor = async (job: Job<JobData>) => {
 
       if (effectiveFileKey) {
         try {
-          console.log(`[${recordId}] Attempting download from R2: ${effectiveFileKey}`);
+          console.log(`[${recordId}] Attempting download from R2: ${effectiveFileKey}`, { fileKeyLength: effectiveFileKey.length });
           const fileData = await getFileContents(effectiveFileKey);
           const fileName = effectiveFileKey.split('/').pop() || `${Date.now()}.mp4`;
           tempFilePath = path.join(tempDir, fileName);
           fs.writeFileSync(tempFilePath, fileData);
-          console.log(`[${recordId}] Successfully wrote R2 data to ${tempFilePath}`);
+          console.log(`[${recordId}] Successfully wrote R2 data to ${tempFilePath}`, { fileSize: fs.statSync(tempFilePath).size });
         } catch (r2Error) {
           console.error(`[${recordId}] R2 download failed for key ${effectiveFileKey}:`, r2Error);
           if (!effectiveFileUrl) throw r2Error; // Rethrow if URL fallback is not possible
