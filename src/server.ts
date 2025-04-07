@@ -138,12 +138,43 @@ app.post('/api/upload-url', async (req: Request, res: Response) => {
       }
     });
 
-    res.status(200).json({
-      uploadUrl: uploadData.url,
-      recordId: record.id,
-      fileKey: uploadData.key,
-      fileUrl: uploadData.fileUrl || uploadData.url
-    });
+    // マルチパートアップロードの場合はisMultipartフラグを追加
+    // uploadDataの型をチェックして、マルチパートアップロードかどうかを判断
+    if ('partUrls' in uploadData && 'uploadId' in uploadData) {
+      // TypeScriptのエラーを回避するためにキャスト
+      const multipartData = uploadData as {
+        isMultipart: boolean;
+        url: string;
+        key: string;
+        bucket: string | undefined;
+        fileUrl: string;
+        uploadId: string;
+        partUrls: Array<{url: string; partNumber: number}>;
+        completeUrl: string;
+        abortUrl: string;
+        partSize: number;
+      };
+      
+      res.status(200).json({
+        isMultipart: true,
+        uploadUrl: multipartData.url,
+        recordId: record.id,
+        fileKey: multipartData.key,
+        fileUrl: multipartData.fileUrl || multipartData.url,
+        uploadId: multipartData.uploadId,
+        partUrls: multipartData.partUrls,
+        completeUrl: multipartData.completeUrl,
+        abortUrl: multipartData.abortUrl,
+        partSize: multipartData.partSize
+      });
+    } else {
+      res.status(200).json({
+        uploadUrl: uploadData.url,
+        recordId: record.id,
+        fileKey: uploadData.key,
+        fileUrl: uploadData.fileUrl || uploadData.url
+      });
+    }
   } catch (error) {
     console.error('Error generating upload URL:', error);
     res.status(500).json({
