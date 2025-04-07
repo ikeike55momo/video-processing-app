@@ -686,6 +686,8 @@ logMemoryUsage('Initial');
 const worker = new Worker(QUEUE_NAME, transcriptionProcessor, {
   connection: workerConnection,
   concurrency: parseInt(process.env.WORKER_CONCURRENCY || '2'), // Allow concurrency configuration
+  lockDuration: 180000, // ロックの有効期間を3分に延長（デフォルトは30秒）
+  lockRenewTime: 60000, // ロック更新間隔を1分に設定（デフォルトはlockDurationの半分）
   limiter: { // Optional: Add rate limiting if needed
     max: 10, // Max 10 jobs per
     duration: 1000 // 1 second
