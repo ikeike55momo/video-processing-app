@@ -243,8 +243,24 @@ async function processLargeFile(filePath: string): Promise<string[]> {
     const audioPath = path.join(workDir, 'audio.mp3');
     console.log(`動画ファイルから音声を抽出: ${filePath} -> ${audioPath}`);
 
-    // FFmpegを使用して音声抽出
-    execSync(`ffmpeg -i "${filePath}" -q:a 0 -map a "${audioPath}" -y`, { stdio: 'inherit' });
+    // FFmpegを使用して音声抽出（エラーハンドリングを強化）
+    try {
+      // まず音声ストリームの存在を確認
+      const probeOutput = execSync(`ffprobe -v error -select_streams a -show_streams "${filePath}"`, { stdio: 'pipe' }).toString();
+      
+      if (!probeOutput || probeOutput.trim() === '') {
+        console.log(`音声ストリームが見つかりません。代替抽出方法を使用します。`);
+        // 音声ストリームが見つからない場合は -map 0:a ではなく直接変換を試みる
+        execSync(`ffmpeg -i "${filePath}" -q:a 0 "${audioPath}" -y`, { stdio: 'inherit' });
+      } else {
+        // 通常の音声抽出（音声ストリームが存在する場合）
+        execSync(`ffmpeg -i "${filePath}" -q:a 0 -map a "${audioPath}" -y`, { stdio: 'inherit' });
+      }
+    } catch (ffmpegError) {
+      console.error(`-map a オプションでの音声抽出中にエラーが発生しました。代替方法を試行します:`, ffmpegError);
+      // 最初の方法が失敗した場合、-map オプションなしで再試行
+      execSync(`ffmpeg -i "${filePath}" -q:a 0 "${audioPath}" -y`, { stdio: 'inherit' });
+    }
 
     // 音声抽出後のメモリ使用量をログ出力
     console.log('音声抽出後のメモリ使用量:');
