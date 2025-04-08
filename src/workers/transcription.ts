@@ -72,15 +72,25 @@ async function transcribeAudio(audioPath: string): Promise<string> {
 
     // ファイルサイズを確認
     const stats = fs.statSync(optimizedAudioPath);
-    console.log(`最適化された音声ファイルサイズ: ${stats.size} バイト`);
+    const fileSizeMB = stats.size / (1024 * 1024);
+    console.log(`最適化された音声ファイルサイズ: ${stats.size} バイト (${fileSizeMB.toFixed(2)} MB)`);
 
-    if (stats.size > MAX_DIRECT_PROCESS_SIZE) {
-      // 大きなファイルはチャンク処理
-      console.log(`ファイルサイズが大きいため、チャンク処理を適用します: ${stats.size} バイト`);
+    // 音声ファイルの長さを取得（秒）
+    const durationOutput = execSync(`ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "${optimizedAudioPath}"`).toString().trim();
+    const duration = parseFloat(durationOutput);
+    const durationMinutes = duration / 60;
+    console.log(`音声ファイルの長さ: ${duration}秒 (${durationMinutes.toFixed(1)}分)`);
+
+    // 超大容量ファイル(3GB以上)または長時間(30分超)の場合は分割処理
+    if (stats.size > MAX_DIRECT_PROCESS_SIZE || durationMinutes > 30) {
+      const reason = stats.size > MAX_DIRECT_PROCESS_SIZE ? 
+        `超大容量ファイル(${fileSizeMB.toFixed(2)}MB)` : 
+        `長時間音声(${durationMinutes.toFixed(1)}分)`;
+      console.log(`${reason}のため、チャンク処理を適用します: ${stats.size} バイト`);
       return await processAudioInChunks(optimizedAudioPath);
     } else {
-      // 小さなファイルは直接処理
-      console.log(`ファイルを直接処理します: ${stats.size} バイト`);
+      // 通常サイズのファイルは直接処理
+      console.log(`通常サイズのファイルのため、直接処理します: ${stats.size} バイト`);
       return await transcribeWithGemini(optimizedAudioPath);
     }
   } catch (error) {
