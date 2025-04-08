@@ -98,7 +98,7 @@ export default function LoginPage() {
           <p>デモアカウント:</p>
           <p>管理者: admin@example.com</p>
           <p>一般ユーザー: user@example.com</p>
-          <p>Wadoチーム: wado_team@example.com / w12345677</p>
+          <p>Wadoチーム: wado_team@example.com</p>
         </div>
       </div>
     </div>

@@ -34,7 +34,7 @@ const DEMO_USERS = [
     id: "4",
     name: "Wado Team",
     email: "wado_team@example.com",
-    password: "$2b$10$Ht0Ys.X/QYWVxhE1qdWsZeVl0cN76JQsm5FPOebMRqVt.OEFf5n6e", // "w12345677"
+    password: "$2b$10$0NKObVXzIA4Lm0GMPxk79edKISX0uzWch6c7A0YcH63AAMY.aM7q.", // "w12345677"
     role: "USER",
   },
 ];
