@@ -65,9 +65,9 @@ export class TranscriptionService {
         
         let transcription = '';
         
-        // 大きなファイルの場合は分割処理
-        if (fileSizeMB > 4) {
-          console.log(`ファイルサイズが大きいため、分割処理を実行します`);
+        // 超大容量ファイルの場合のみ分割処理
+        if (fileSizeMB > 3072) { // 3GB = 3072MB
+          console.log(`超大容量ファイル(${fileSizeMB.toFixed(2)}MB)のため、分割処理を実行します`);
           transcription = await this.transcribeWithGeminiChunked(optimizedAudioPath);
         } else {
           console.log(`ファイルサイズが小さいため、直接処理します`);
@@ -448,9 +448,9 @@ export class TranscriptionService {
       const fileSizeMB = stats.size / (1024 * 1024);
       console.log(`最適化された音声ファイルのサイズ: ${fileSizeMB.toFixed(2)} MB`);
       
-      // 大きなファイルの場合は分割処理
-      if (fileSizeMB > 4) {
-        console.log(`ファイルサイズが大きいため、分割処理を実行します`);
+      // 超大容量ファイルの場合のみ分割処理
+      if (fileSizeMB > 3072) { // 3GB = 3072MB
+        console.log(`超大容量ファイル(${fileSizeMB.toFixed(2)}MB)のため、分割処理を実行します`);
         return this.transcribeWithGeminiChunked(optimizedAudioPath);
       }
       
