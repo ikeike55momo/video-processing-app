@@ -23,8 +23,8 @@ const SUMMARY_QUEUE = QUEUE_NAMES.SUMMARY; // Use constant from bull-queue
 // 一時ファイルディレクトリ
 const TMP_DIR = process.env.TMP_DIR || '/tmp';
 
-// 最大ファイルサイズ（バイト単位）- 4MB
-const MAX_DIRECT_PROCESS_SIZE = 4 * 1024 * 1024;
+// 最大ファイルサイズ（バイト単位）- 3GB
+const MAX_DIRECT_PROCESS_SIZE = 3 * 1024 * 1024 * 1024; // 3GB
 
 // チャンクの最大時間（秒）
 const CHUNK_DURATION = 300; // 5分
@@ -382,7 +382,7 @@ async function extractTimestampsWithGemini(transcriptText: string): Promise<any[
 - タイムスタンプの数は適切な量に抑えてください。30分あたり2〜4個程度が目安です。
 - 各タイムスタンプには、その時点から始まる内容を簡潔に表すタイトルを付けてください（元のテキストそのままではなく）。
 - タイトルは短く（5〜15文字程度）、内容を的確に表すものにしてください。
-- 話題の変わり目、新しい議題の開始、重要な発言の開始などの意味のある区切りでタイムスタンプを付与してください。
+- 明確に話題が切り替わる場面にのみタイムスタンプを付与し、過剰な分割は避けてください。
 - 実際の音声内容に基づいて、各セクションの開始時間を数秒早めに設定してください。
 
 文字起こしテキスト:
