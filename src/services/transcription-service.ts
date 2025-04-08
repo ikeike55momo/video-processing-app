@@ -8,6 +8,7 @@ import axios from 'axios';
 import { pipeline } from 'stream/promises';
 import { GetObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
+import pLimit from 'p-limit';
 
 // 高精度文字起こしサービスクラス
 // Gemini FlashとCloud Speech-to-Textを組み合わせて高精度な文字起こしを実現
@@ -625,35 +626,45 @@ export class TranscriptionService {
       const chunkDuration = 180; // 3分 = 180秒
       const chunks = Math.ceil(duration / chunkDuration);
       console.log(`音声を${chunks}チャンクに分割します`);
-      
-      // 各チャンクを処理
-      const transcriptions = [];
-      
-      for (let i = 0; i < chunks; i++) {
+
+      // 同時実行数を5に制限するリミッターを作成
+      const limit = pLimit(5);
+
+      // 各チャンクを並列処理（同時実行数制限付き）
+      const transcriptionPromises = Array.from({ length: chunks }, async (_, i) => { // asyncを追加
         const start = i * chunkDuration;
         const end = Math.min((i + 1) * chunkDuration, duration);
-        console.log(`チャンク${i+1}/${chunks}を処理: ${start}秒 - ${end}秒`);
-        
-        // チャンクを抽出
-        const chunkPath = await this.extractAudioChunk(audioPath, start, end);
-        console.log(`チャンク抽出完了: ${chunkPath}`);
-        
+        let chunkPath = ''; // スコープを広げる
+
+        console.log(`チャンク${i+1}/${chunks}の処理を開始: ${start}秒 - ${end}秒`);
+
         try {
-          // チャンクを処理
-          const chunkTranscription = await this.transcribeChunk(chunkPath, i+1, chunks);
-          transcriptions.push(chunkTranscription);
-          
-          // 一時ファイルを削除
-          if (fs.existsSync(chunkPath)) {
-            fs.unlinkSync(chunkPath);
-            console.log(`チャンク一時ファイルを削除しました: ${chunkPath}`);
-          }
+          // チャンクを抽出
+          chunkPath = await this.extractAudioChunk(audioPath, start, end);
+          console.log(`チャンク${i+1}抽出完了: ${chunkPath}`);
+
+          // チャンクを処理 (p-limitでラップ)
+          const chunkTranscription = await limit(() => this.transcribeChunk(chunkPath, i + 1, chunks));
+          return chunkTranscription; // 成功した場合は文字起こし結果を返す
         } catch (chunkError) {
           console.error(`チャンク${i+1}の処理中にエラーが発生しました:`, chunkError);
-          transcriptions.push(`[チャンク${i+1}の処理中にエラーが発生しました]`);
+          return `[チャンク${i+1}の処理中にエラーが発生しました]`; // エラー時はメッセージを返す
+        } finally {
+          // 一時ファイルを削除 (成功・失敗に関わらず)
+          if (chunkPath && fs.existsSync(chunkPath)) {
+            try {
+              fs.unlinkSync(chunkPath);
+              console.log(`チャンク${i+1}一時ファイルを削除しました: ${chunkPath}`);
+            } catch (cleanupError) {
+              console.warn(`チャンク${i+1}一時ファイルの削除に失敗しました: ${chunkPath}`, cleanupError);
+            }
+          }
         }
-      }
-      
+      });
+
+      // 全てのチャンク処理が完了するのを待つ
+      const transcriptions = await Promise.all(transcriptionPromises);
+
       // 結果を結合
       const combinedTranscription = transcriptions.join('\n\n');
       console.log(`全チャンクの処理が完了しました。結果の長さ: ${combinedTranscription.length}文字`);
