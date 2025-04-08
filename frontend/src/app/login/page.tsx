@@ -59,12 +59,12 @@ export default function LoginPage() {
             </label>
             <input
               id="email"
-              type="email"
+              type="text"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               required
               className="mt-1 block w-full rounded-md border border-slate-300 px-3 py-2 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-blue-500"
-              placeholder="example@company.com"
+              placeholder="メールアドレスまたはユーザー名"
             />
           </div>
 
@@ -96,8 +96,9 @@ export default function LoginPage() {
 
         <div className="mt-6 text-center text-sm text-slate-600">
           <p>デモアカウント:</p>
-          <p>管理者: admin@example.com / password</p>
+          <p>管理者: admin@example.com / tyu28008</p>
           <p>一般ユーザー: user@example.com / password</p>
+          <p>Wadoチーム: wado_team / w12345677</p>
         </div>
       </div>
     </div>
