@@ -170,7 +170,7 @@ const worker = new Worker(
     },
     concurrency: 10,
     limiter: {
-      max: 20,
+      max: 40,
       duration: 60000
     }
   }
