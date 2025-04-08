@@ -168,10 +168,10 @@ const worker = new Worker(
       port: parseInt(process.env.REDIS_PORT || '6379'),
       password: process.env.REDIS_PASSWORD
     },
-    concurrency: 4, // 同時実行数を4に増加
+    concurrency: 10,
     limiter: {
-      max: 5, // 最大5ジョブ
-      duration: 1000 * 60 // 1分間
+      max: 20,
+      duration: 60000
     }
   }
 );
