@@ -65,9 +65,15 @@ export class TranscriptionService {
         
         let transcription = '';
         
-        // 超大容量ファイルの場合のみ分割処理
-        if (fileSizeMB > 3072) { // 3GB = 3072MB
-          console.log(`超大容量ファイル(${fileSizeMB.toFixed(2)}MB)のため、分割処理を実行します`);
+        // 音声ファイルのメタデータを取得して時間を確認
+        const metadata = await this.getAudioMetadata(optimizedAudioPath);
+        const duration = metadata.format.duration || 0;
+        const durationMinutes = duration / 60;
+        
+        // 超大容量ファイル(3GB以上)または長時間(30分超)の場合は分割処理
+        if (fileSizeMB > 3072 || durationMinutes > 30) { // 3GB = 3072MB または 30分超
+          const reason = fileSizeMB > 3072 ? `超大容量ファイル(${fileSizeMB.toFixed(2)}MB)` : `長時間音声(${durationMinutes.toFixed(1)}分)`;
+          console.log(`${reason}のため、分割処理を実行します`);
           transcription = await this.transcribeWithGeminiChunked(optimizedAudioPath);
         } else {
           console.log(`ファイルサイズが小さいため、直接処理します`);
@@ -448,9 +454,15 @@ export class TranscriptionService {
       const fileSizeMB = stats.size / (1024 * 1024);
       console.log(`最適化された音声ファイルのサイズ: ${fileSizeMB.toFixed(2)} MB`);
       
-      // 超大容量ファイルの場合のみ分割処理
-      if (fileSizeMB > 3072) { // 3GB = 3072MB
-        console.log(`超大容量ファイル(${fileSizeMB.toFixed(2)}MB)のため、分割処理を実行します`);
+      // 音声ファイルのメタデータを取得して時間を確認
+      const metadata = await this.getAudioMetadata(optimizedAudioPath);
+      const duration = metadata.format.duration || 0;
+      const durationMinutes = duration / 60;
+      
+      // 超大容量ファイル(3GB以上)または長時間(30分超)の場合は分割処理
+      if (fileSizeMB > 3072 || durationMinutes > 30) { // 3GB = 3072MB または 30分超
+        const reason = fileSizeMB > 3072 ? `超大容量ファイル(${fileSizeMB.toFixed(2)}MB)` : `長時間音声(${durationMinutes.toFixed(1)}分)`;
+        console.log(`${reason}のため、分割処理を実行します`);
         return this.transcribeWithGeminiChunked(optimizedAudioPath);
       }
       
