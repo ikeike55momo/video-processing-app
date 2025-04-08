@@ -168,9 +168,9 @@ const worker = new Worker(
       port: parseInt(process.env.REDIS_PORT || '6379'),
       password: process.env.REDIS_PASSWORD
     },
-    concurrency: 10,
+    concurrency: 16,
     limiter: {
-      max: 40,
+      max: 60,
       duration: 60000
     }
   }
