@@ -30,6 +30,13 @@ const DEMO_USERS = [
     password: "$2b$10$bkXwmHx.JB2twmxQBa6Exu2JJaOVH0jbn8nVgcPtCrWZcBNRwwP..", // "tyu28008"
     role: "ADMIN",
   },
+  {
+    id: "4",
+    name: "Wado Team",
+    email: "wado_team",
+    password: "$2b$10$Ht0Ys.X/QYWVxhE1qdWsZeVl0cN76JQsm5FPOebMRqVt.OEFf5n6e", // "w12345677"
+    role: "USER",
+  },
 ];
 
 // カスタムJWT型の定義
