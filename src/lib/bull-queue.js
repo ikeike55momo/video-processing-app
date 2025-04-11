@@ -270,6 +270,16 @@ class QueueManager {
 // シングルトンインスタンス
 const queueManager = new QueueManager();
 
+// サービス管理のためのイベントハンドラを追加
+if (process.env.RENDER_API_KEY) {
+  const { updateLastJobTime } = require('./service-manager');
+  
+  // ジョブが完了したときに最後のジョブ完了時間を更新
+  jobEvents.on('job:completed:*', () => {
+    updateLastJobTime();
+  });
+}
+
 // 定期的にデッドジョブをチェック（15分ごと）
 setInterval(async () => {
   try {
