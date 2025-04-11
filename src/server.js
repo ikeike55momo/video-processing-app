@@ -1030,6 +1030,12 @@ app.get('/api/job-status/:jobId', async (req, res) => {
   }
 });
 
+// サービス管理の定期実行間隔（ミリ秒）- 10分
+const SERVICE_MANAGEMENT_INTERVAL = 10 * 60 * 1000;
+
+// サービス管理の定期実行
+let serviceManagementInterval = null;
+
 // サーバーを起動
 server.listen(PORT, async () => {
   console.log(`サーバーが起動しました。ポート: ${PORT}`);
@@ -1040,9 +1046,63 @@ server.listen(PORT, async () => {
     const { TranscriptionService } = require(transcriptionServicePath);
     transcriptionService = new TranscriptionService();
     console.log('TranscriptionService初期化完了');
+    
+    // サービス管理の初期化
+    if (process.env.RENDER_API_KEY) {
+      console.log('サービス管理機能を初期化します');
+      const { manageRenderServices } = require('./lib/service-manager');
+      
+      // 初回実行
+      try {
+        await manageRenderServices(process.env.RENDER_API_KEY, process.env.REDIS_URL);
+        console.log('サービス管理の初回実行が完了しました');
+      } catch (serviceError) {
+        console.error('サービス管理の初回実行に失敗しました:', serviceError);
+      }
+      
+      // 定期実行の設定
+      serviceManagementInterval = setInterval(async () => {
+        try {
+          console.log('サービス管理の定期実行を開始します');
+          await manageRenderServices(process.env.RENDER_API_KEY, process.env.REDIS_URL);
+          console.log('サービス管理の定期実行が完了しました');
+        } catch (serviceError) {
+          console.error('サービス管理の定期実行に失敗しました:', serviceError);
+        }
+      }, SERVICE_MANAGEMENT_INTERVAL);
+      
+      console.log(`サービス管理の定期実行を設定しました（間隔: ${SERVICE_MANAGEMENT_INTERVAL / 1000 / 60}分）`);
+    } else {
+      console.log('RENDER_API_KEYが設定されていないため、サービス管理機能は無効です');
+    }
   } catch (error) {
     console.error('TranscriptionServiceの初期化に失敗しました:', error);
   }
+});
+
+// サーバー終了時の処理
+process.on('SIGTERM', () => {
+  console.log('SIGTERMを受信しました。サーバーを終了します...');
+  if (serviceManagementInterval) {
+    clearInterval(serviceManagementInterval);
+    console.log('サービス管理の定期実行を停止しました');
+  }
+  server.close(() => {
+    console.log('サーバーを正常に終了しました');
+    process.exit(0);
+  });
+});
+
+process.on('SIGINT', () => {
+  console.log('SIGINTを受信しました。サーバーを終了します...');
+  if (serviceManagementInterval) {
+    clearInterval(serviceManagementInterval);
+    console.log('サービス管理の定期実行を停止しました');
+  }
+  server.close(() => {
+    console.log('サーバーを正常に終了しました');
+    process.exit(0);
+  });
 });
 
 // モジュールとしてもエクスポート（他のファイルからインポートできるように）
