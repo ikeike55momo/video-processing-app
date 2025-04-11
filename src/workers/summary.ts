@@ -1,6 +1,6 @@
 import * as dotenv from 'dotenv';
 import { PrismaClient, Status } from '@prisma/client';
-import { Job, Worker } from 'bullmq';
+import { Job, Worker, Queue } from 'bullmq';
 import IORedis from 'ioredis';
 import { queueManager, QUEUE_NAMES, JobData } from '../lib/bull-queue';
 import { GoogleGenerativeAI } from '@google/generative-ai'; // Import GoogleGenerativeAI
@@ -183,12 +183,26 @@ const worker = new Worker(QUEUE_NAME, summaryProcessor, {
   }
 });
 
+// アイドル状態検出と自動シャットダウン
+let lastJobTime = Date.now();
+let isProcessingJob = false;
+
+worker.on('active', () => {
+  lastJobTime = Date.now();
+  isProcessingJob = true;
+  console.log(`[${QUEUE_NAME}] Job processing started. Worker active.`);
+});
+
 worker.on('completed', (job: Job, result: any) => {
   console.log(`[${QUEUE_NAME}] Job ${job.id} completed successfully.`);
+  lastJobTime = Date.now();
+  isProcessingJob = false;
 });
 
 worker.on('failed', (job: Job | undefined, error: Error) => {
   console.error(`[${QUEUE_NAME}] Job ${job?.id} failed:`, error);
+  lastJobTime = Date.now();
+  isProcessingJob = false;
 });
 
 worker.on('error', (error: Error) => {
@@ -201,9 +215,38 @@ worker.on('ready', () => {
 
 console.log(`[${QUEUE_NAME}] Worker started. Node version: ${process.version}`);
 
+// アイドル状態を定期的にチェック（5分ごと）
+const IDLE_TIMEOUT = 10 * 60 * 1000; // 10分
+const idleCheckInterval = setInterval(async () => {
+  // 現在のキュー状態を確認
+  try {
+    const queue = new Queue<JobData>(QUEUE_NAME, { connection: workerConnection });
+    const waitingCount = await queue.getWaitingCount();
+    const activeCount = await queue.getActiveCount();
+    const delayedCount = await queue.getDelayedCount();
+    
+    console.log(`[${QUEUE_NAME}] Idle check - Waiting: ${waitingCount}, Active: ${activeCount}, Delayed: ${delayedCount}, Last job: ${Math.floor((Date.now() - lastJobTime) / 1000 / 60)}min ago`);
+    
+    // ジョブがなく、最後のジョブから一定時間経過した場合は自動シャットダウン
+    if (waitingCount === 0 && activeCount === 0 && delayedCount === 0 && !isProcessingJob && (Date.now() - lastJobTime > IDLE_TIMEOUT)) {
+      console.log(`[${QUEUE_NAME}] No jobs for ${IDLE_TIMEOUT/1000/60} minutes. Shutting down worker to save resources.`);
+      clearInterval(idleCheckInterval);
+      await worker.close();
+      await prisma.$disconnect();
+      console.log(`[${QUEUE_NAME}] Worker gracefully shut down due to inactivity.`);
+      process.exit(0);
+    }
+    
+    await queue.close();
+  } catch (error) {
+    console.error(`[${QUEUE_NAME}] Error during idle check:`, error);
+  }
+}, 5 * 60 * 1000); // 5分ごとにチェック
+
 // Graceful shutdown
 process.on('SIGTERM', async () => {
   console.log(`[${QUEUE_NAME}] SIGTERM received, closing worker...`);
+  clearInterval(idleCheckInterval);
   await worker.close();
   await prisma.$disconnect();
   console.log(`[${QUEUE_NAME}] Worker closed.`);
@@ -212,6 +255,7 @@ process.on('SIGTERM', async () => {
 
 process.on('SIGINT', async () => {
   console.log(`[${QUEUE_NAME}] SIGINT received, closing worker...`);
+  clearInterval(idleCheckInterval);
   await worker.close();
   await prisma.$disconnect();
   console.log(`[${QUEUE_NAME}] Worker closed.`);
