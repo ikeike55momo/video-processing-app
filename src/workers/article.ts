@@ -221,33 +221,42 @@ worker.on('ready', () => {
 
 console.log(`[${QUEUE_NAME}] Worker started. Node version: ${process.version}`);
 
-// アイドル状態を定期的にチェック（5分ごと）
-const IDLE_TIMEOUT = 10 * 60 * 1000; // 10分
+// アイドル状態を定期的にチェック（1分ごと）
+const IDLE_TIMEOUT = parseInt(process.env.IDLE_TIMEOUT || '600000'); // デフォルト10分 (ミリ秒)
+const IDLE_CHECK_INTERVAL = 60 * 1000; // 1分 (ミリ秒)
+
+console.log(`[${QUEUE_NAME}] Idle timeout set to ${IDLE_TIMEOUT / 1000 / 60} minutes.`);
+console.log(`[${QUEUE_NAME}] Idle check interval set to ${IDLE_CHECK_INTERVAL / 1000} seconds.`);
+
 const idleCheckInterval = setInterval(async () => {
+  console.log(`[${QUEUE_NAME}] Performing idle check...`);
   // 現在のキュー状態を確認
   try {
     const queue = new Queue<JobData>(QUEUE_NAME, { connection: workerConnection });
     const waitingCount = await queue.getWaitingCount();
     const activeCount = await queue.getActiveCount();
     const delayedCount = await queue.getDelayedCount();
+    const timeSinceLastJob = Date.now() - lastJobTime;
     
-    console.log(`[${QUEUE_NAME}] Idle check - Waiting: ${waitingCount}, Active: ${activeCount}, Delayed: ${delayedCount}, Last job: ${Math.floor((Date.now() - lastJobTime) / 1000 / 60)}min ago`);
+    console.log(`[${QUEUE_NAME}] Idle check - Waiting: ${waitingCount}, Active: ${activeCount}, Delayed: ${delayedCount}, Last job: ${Math.floor(timeSinceLastJob / 1000 / 60)}min ago, Processing: ${isProcessingJob}`);
     
     // ジョブがなく、最後のジョブから一定時間経過した場合は自動シャットダウン
-    if (waitingCount === 0 && activeCount === 0 && delayedCount === 0 && !isProcessingJob && (Date.now() - lastJobTime > IDLE_TIMEOUT)) {
-      console.log(`[${QUEUE_NAME}] No jobs for ${IDLE_TIMEOUT/1000/60} minutes. Shutting down worker to save resources.`);
+    if (waitingCount === 0 && activeCount === 0 && delayedCount === 0 && !isProcessingJob && (timeSinceLastJob > IDLE_TIMEOUT)) {
+      console.log(`[${QUEUE_NAME}] No jobs and idle for ${Math.floor(timeSinceLastJob / 1000 / 60)} minutes (threshold: ${IDLE_TIMEOUT / 1000 / 60} min). Shutting down worker to save resources.`);
       clearInterval(idleCheckInterval);
       await worker.close();
       await prisma.$disconnect();
       console.log(`[${QUEUE_NAME}] Worker gracefully shut down due to inactivity.`);
       process.exit(0);
+    } else {
+      console.log(`[${QUEUE_NAME}] Worker is active or has pending jobs, or idle time is within threshold. Keeping worker alive.`);
     }
     
     await queue.close();
   } catch (error) {
     console.error(`[${QUEUE_NAME}] Error during idle check:`, error);
   }
-}, 5 * 60 * 1000); // 5分ごとにチェック
+}, IDLE_CHECK_INTERVAL);
 
 // Graceful shutdown
 process.on('SIGTERM', async () => {

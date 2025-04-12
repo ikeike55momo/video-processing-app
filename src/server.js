@@ -1073,7 +1073,7 @@ server.listen(PORT, async () => {
       
       console.log(`サービス管理の定期実行を設定しました（間隔: ${SERVICE_MANAGEMENT_INTERVAL / 1000 / 60}分）`);
     } else {
-      console.log('RENDER_API_KEYが設定されていないため、サービス管理機能は無効です');
+      console.warn('RENDER_API_KEYが設定されていないため、サービス管理機能は無効です');
     }
   } catch (error) {
     console.error('TranscriptionServiceの初期化に失敗しました:', error);
