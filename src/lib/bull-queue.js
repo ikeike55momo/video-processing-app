@@ -273,10 +273,16 @@ const queueManager = new QueueManager();
 // サービス管理のためのイベントハンドラを追加
 if (process.env.RENDER_API_KEY) {
   const { updateLastJobTime } = require('./service-manager');
+  const redisClientForUpdate = new IORedis(redisUrl); // 最後のジョブ時間更新用のクライアント
   
   // ジョブが完了したときに最後のジョブ完了時間を更新
-  jobEvents.on('job:completed:*', () => {
-    updateLastJobTime();
+  jobEvents.on('job:completed:*', async () => {
+    await updateLastJobTime(redisClientForUpdate);
+  });
+  
+  // アプリケーション終了時にRedisクライアントを閉じる
+  process.on('exit', () => {
+    redisClientForUpdate.quit();
   });
 }
 

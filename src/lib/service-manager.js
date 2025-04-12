@@ -18,16 +18,17 @@ const WORKER_SERVICE_NAMES = [
 // アイドル時間のしきい値（ミリ秒）- 30分
 const IDLE_THRESHOLD = 30 * 60 * 1000;
 
-// 最後のジョブ完了時間
-let lastJobTime = Date.now();
+// Redisキー
+const LAST_JOB_TIME_KEY = 'app:lastJobTime';
 
 /**
- * ジョブが完了したときに呼び出される関数
- * 最後のジョブ完了時間を更新します
+ * 最後のジョブ完了時間をRedisに保存する
+ * @param {IORedis.Redis} redisClient Redisクライアント
  */
-function updateLastJobTime() {
-  lastJobTime = Date.now();
-  console.log(`最後のジョブ完了時間を更新しました: ${new Date(lastJobTime).toISOString()}`);
+async function updateLastJobTime(redisClient) {
+  const now = Date.now();
+  await redisClient.set(LAST_JOB_TIME_KEY, now.toString());
+  console.log(`最後のジョブ完了時間をRedisに保存しました: ${new Date(now).toISOString()}`);
 }
 
 /**
@@ -122,6 +123,10 @@ async function manageRenderServices(renderApiKey, redisUrl) {
       await queue.close();
     }
     
+    // 最後のジョブ完了時間をRedisから取得
+    const lastJobTimeString = await connection.get(LAST_JOB_TIME_KEY);
+    const lastJobTime = lastJobTimeString ? parseInt(lastJobTimeString, 10) : Date.now(); // 取得できない場合は現在時刻
+    
     // 接続を閉じる
     await connection.quit();
     
@@ -145,16 +150,20 @@ async function manageRenderServices(renderApiKey, redisUrl) {
         }
       }
       
-      // 最後のジョブ完了時間を更新
-      updateLastJobTime();
+      // 最後のジョブ完了時間を更新 (ジョブがある場合は現在時刻に更新)
+      const redisClientForUpdate = new IORedis(redisUrl);
+      await updateLastJobTime(redisClientForUpdate);
+      await redisClientForUpdate.quit();
+      
     } else {
       console.log('アクティブなジョブが見つかりませんでした。アイドル状態を確認します...');
-      console.log(`最後のジョブ完了時間: ${new Date(lastJobTime).toISOString()}`);
+      console.log(`最後のジョブ完了時間 (Redisから取得): ${new Date(lastJobTime).toISOString()}`);
       console.log(`現在の時間: ${new Date().toISOString()}`);
-      console.log(`経過時間: ${Math.floor((Date.now() - lastJobTime) / 1000 / 60)}分`);
+      const idleDuration = Date.now() - lastJobTime;
+      console.log(`経過時間: ${Math.floor(idleDuration / 1000 / 60)}分`);
       
       // アイドル時間が閾値を超えた場合はサービスを停止
-      if (Date.now() - lastJobTime > IDLE_THRESHOLD) {
+      if (idleDuration > IDLE_THRESHOLD) {
         console.log(`アイドル時間が閾値（${IDLE_THRESHOLD / 1000 / 60}分）を超えました。サービスを停止します...`);
         
         // ワーカーサービスを停止
