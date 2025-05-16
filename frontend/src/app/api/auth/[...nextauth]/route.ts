@@ -10,19 +10,19 @@ const handler = NextAuth({
         password: { label: "Password", type: "password", placeholder: "password" }
       },
       async authorize(credentials) {
-        console.log('credentials:', credentials);
-        // 固定アカウント・パスワード
-        const users = [
-          { id: "1", name: "ikeike55momo@gmail.com", password: "123456" },
-          { id: "2", name: "wado-team@sample.com", password: "12345677" }
-        ];
-        const user = users.find(
-          u => u.name === credentials?.username && u.password === credentials?.password
-        );
-        if (user) {
-          return { id: user.id, name: user.name };
-        }
-        return null;
+        throw new Error("credentials_debug: " + JSON.stringify(credentials));
+        // // 固定アカウント・パスワード
+        // const users = [
+        //   { id: "1", name: "ikeike55momo@gmail.com", password: "123456" },
+        //   { id: "2", name: "wado-team@sample.com", password: "12345677" }
+        // ];
+        // const user = users.find(
+        //   u => u.name === credentials?.username && u.password === credentials?.password
+        // );
+        // if (user) {
+        //   return { id: user.id, name: user.name };
+        // }
+        // return null;
       }
     })
   ],
