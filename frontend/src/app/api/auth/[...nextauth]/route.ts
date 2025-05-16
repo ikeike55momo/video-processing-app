@@ -6,12 +6,12 @@ const handler = NextAuth({
     CredentialsProvider({
       name: "Credentials",
       credentials: {
-        username: { label: "Username", type: "text", placeholder: "username" },
-        password: { label: "Password", type: "password", placeholder: "password" }
+        email: { label: "メールアドレス", type: "email", placeholder: "email" },
+        password: { label: "パスワード", type: "password", placeholder: "password" }
       },
       async authorize(credentials) {
         if (
-          credentials?.username === "ikeike55momo@gmail.com" &&
+          credentials?.email === "ikeike55momo@gmail.com" &&
           credentials?.password === "123456"
         ) {
           return { id: "1", name: "ikeike55momo", email: "ikeike55momo@gmail.com" };
