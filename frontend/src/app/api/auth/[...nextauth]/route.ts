@@ -10,6 +10,7 @@ const handler = NextAuth({
         password: { label: "Password", type: "password", placeholder: "password" }
       },
       async authorize(credentials) {
+        console.log('credentials:', credentials);
         // 固定アカウント・パスワード
         const users = [
           { id: "1", name: "ikeike55momo@gmail.com", password: "123456" },
