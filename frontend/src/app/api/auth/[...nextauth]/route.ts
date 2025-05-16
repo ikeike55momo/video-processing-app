@@ -12,8 +12,8 @@ const handler = NextAuth({
       async authorize(credentials) {
         // 固定アカウント・パスワード
         const users = [
-          { id: "1", name: "ikeike55momo", password: "123456" },
-          { id: "2", name: "wado-team", password: "12345677" }
+          { id: "1", name: "ikeike55momo@gmail.com", password: "123456" },
+          { id: "2", name: "wado-team@sample.com", password: "12345677" }
         ];
         const user = users.find(
           u => u.name === credentials?.username && u.password === credentials?.password
