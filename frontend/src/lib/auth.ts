@@ -4,6 +4,8 @@ import { compare } from "bcrypt";
 import prisma from "@/lib/prisma";
 import { JWT } from "next-auth/jwt";
 import { Session } from "next-auth";
+import { NEXTAUTH_SECRET } from "@/lib/auth-env";
+import "@/lib/auth-env";
 
 // 本番環境では実際のユーザーデータベースと連携する必要があります
 // 現在はデモ用の固定ユーザーを使用しています
@@ -43,8 +45,8 @@ type CustomJWT = JWT & {
   role?: string;
 };
 
-// 環境変数からサイトURLを取得
-const SITE_URL = process.env.NEXTAUTH_URL || 'https://video-processing-frontend.onrender.com';
+// Initialize environment fallbacks for NextAuth
+import "@/lib/auth-env";
 
 export const authOptions: NextAuthOptions = {
   providers: [
@@ -110,7 +112,8 @@ export const authOptions: NextAuthOptions = {
   pages: {
     signIn: "/login",
   },
-  secret: process.env.NEXTAUTH_SECRET || "your-secret-key-change-in-production",
+  secret: NEXTAUTH_SECRET,
+  trustHost: true,
   cookies: {
     sessionToken: {
       name: `next-auth.session-token`,
@@ -118,7 +121,7 @@ export const authOptions: NextAuthOptions = {
         httpOnly: true,
         sameSite: 'lax',
         path: '/',
-        secure: true
+        secure: process.env.NODE_ENV === 'production'
       }
     }
   },

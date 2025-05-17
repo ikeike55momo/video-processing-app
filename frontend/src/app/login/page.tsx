@@ -96,7 +96,7 @@ export default function LoginPage() {
 
         <div className="mt-6 text-center text-sm text-slate-600">
           <p>デモアカウント:</p>
-          <p>管理者: admin@example.com / password</p>
+          <p>管理者: admin@example.com / tyu28008</p>
           <p>一般ユーザー: user@example.com / password</p>
         </div>
       </div>

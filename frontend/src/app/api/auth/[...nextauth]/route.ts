@@ -5,6 +5,7 @@ import { compare } from "bcrypt";
 import prisma from "@/lib/prisma";
 import { JWT } from "next-auth/jwt";
 import { Session } from "next-auth";
+import { NEXTAUTH_SECRET } from "@/lib/auth-env";
 
 // 本番環境では実際のユーザーデータベースと連携する必要があります
 // 現在はデモ用の固定ユーザーを使用しています
@@ -82,7 +83,8 @@ const authOptions: NextAuthOptions = {
   session: {
     strategy: "jwt" as const,
   },
-  secret: process.env.NEXTAUTH_SECRET,
+  secret: NEXTAUTH_SECRET,
+  trustHost: true,
   pages: {
     signIn: "/login",
   },
