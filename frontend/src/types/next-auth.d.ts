@@ -25,6 +25,7 @@ declare module "next-auth/jwt" {
    * JWT トークンの型を拡張して role プロパティを追加
    */
   interface JWT {
+    // id?: string; // next-auth.d.tsのJWT拡張にidを追加。CustomAppJWTと重複する可能性があるので一旦コメントアウト。必要なら戻す。
     role?: string;
   }
 }
