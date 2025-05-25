@@ -54,7 +54,7 @@ interface AppUser extends NextAuthUser {
   // id is inherited from NextAuthUser (which is an alias for User from 'next-auth')
 }
 
-export const authOptions: NextAuthOptions = {
+const authOptions: NextAuthOptions = {
   providers: [
     CredentialsProvider({
       name: "Credentials",
