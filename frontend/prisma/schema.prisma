@@ -1,0 +1,45 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
+// コネクションプールの設定
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["metrics"]
+  // コネクションプールの設定
+  engineType      = "binary"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+  // Vercelのサーバーレス環境向けの設定
+  relationMode = "prisma"
+}
+
+model Record {
+  id             String    @id @default(uuid())
+  file_url       String
+  transcript_text String?   @db.Text
+  timestamps_json String?   @db.Text
+  summary_text   String?   @db.Text
+  article_text   String?   @db.Text
+  error          String?   @db.Text
+  status         Status    @default(UPLOADED)
+  created_at     DateTime  @default(now())
+  deleted_at     DateTime?
+
+  @@map("records")
+}
+
+enum Status {
+  UPLOADED
+  PROCESSING
+  TRANSCRIBED
+  SUMMARIZED
+  DONE
+  ERROR
+}

@@ -1,0 +1,171 @@
+services:
+  # WebサービスとしてのAPIサービス
+  - type: web
+    name: video-processing-app
+    env: node
+    nodeVersion: 18
+    plan: pro
+    buildCommand: npm install && npx prisma generate --schema=./prisma/schema.prisma && npm run build
+    startCommand: npm start
+    rootDir: .
+    autoDeploy: true
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: "10000"
+      - key: DATABASE_URL
+        value: "postgresql://wado_wado_user:U5YqVgZ8xL4OaqGGybLqdJOs4ZwSIWqG@dpg-cve55ldrie7s73e158c0-a/wado_wado"
+      - key: DIRECT_URL
+        value: "postgresql://wado_wado_user:U5YqVgZ8xL4OaqGGybLqdJOs4ZwSIWqG@dpg-cve55ldrie7s73e158c0-a/wado_wado"
+      - key: REDIS_URL
+        value: "rediss://red-cvfejt7noe9s73bgj2lg:wT2eJVSMILamu48qyO2nunbkfjAo91k0@singapore-keyvalue.render.com:6379"
+      - key: R2_ENDPOINT
+        sync: false
+      - key: R2_ACCESS_KEY_ID
+        sync: false
+      - key: R2_SECRET_ACCESS_KEY
+        sync: false
+      - key: R2_BUCKET_NAME
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: OPENROUTER_API_KEY
+        sync: false
+      - key: ALLOWED_ORIGINS
+        value: "https://video-processing-frontend.onrender.com,https://vpm.ririaru-stg.cloud,https://api.ririaru-stg.cloud"
+      - key: FRONTEND_URL
+        value: "https://vpm.ririaru-stg.cloud"
+      - key: API_URL
+        value: "https://api.ririaru-stg.cloud"
+    healthCheckPath: /api/healthcheck
+
+  # フロントエンドアプリケーション（完全に新しい名前で作成）
+  - type: web
+    name: video-frontend-nextjs-app
+    env: node
+    nodeVersion: 18
+    plan: standard
+    buildCommand: cd frontend && apt-get update && apt-get install -y ffmpeg && npm install && npm run build
+    startCommand: cd frontend && npm start
+    rootDir: .
+    autoDeploy: true
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: "3000"
+      - key: DATABASE_URL
+        value: "postgresql://wado_wado_user:U5YqVgZ8xL4OaqGGybLqdJOs4ZwSIWqG@dpg-cve55ldrie7s73e158c0-a/wado_wado"
+      - key: DIRECT_URL
+        value: "postgresql://wado_wado_user:U5YqVgZ8xL4OaqGGybLqdJOs4ZwSIWqG@dpg-cve55ldrie7s73e158c0-a/wado_wado"
+      - key: NEXTAUTH_URL
+        value: "https://vpm.ririaru-stg.cloud"
+      - key: NEXTAUTH_SECRET
+        sync: false
+      - key: NEXT_PUBLIC_API_URL
+        value: "https://api.ririaru-stg.cloud"
+      - key: R2_ENDPOINT
+        sync: false
+      - key: R2_ACCESS_KEY_ID
+        sync: false
+      - key: R2_SECRET_ACCESS_KEY
+        sync: false
+      - key: R2_BUCKET_NAME
+        sync: false
+      - key: ALLOWED_ORIGINS
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: GEMINI_MODEL
+        sync: false
+      - key: OPENROUTER_API_KEY
+        sync: false
+      - key: REDIS_URL
+        value: "rediss://red-cvfejt7noe9s73bgj2lg:wT2eJVSMILamu48qyO2nunbkfjAo91k0@singapore-keyvalue.render.com:6379"
+
+  # バックグラウンドワーカー（文字起こし処理）
+  - type: worker
+    name: transcription-worker
+    env: node
+    nodeVersion: 18
+    plan: pro
+    buildCommand: npm install && npx prisma generate --schema=./prisma/schema.prisma && npm run build
+    startCommand: npm run start:transcription
+    rootDir: .
+    autoDeploy: true
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        value: "postgresql://wado_wado_user:U5YqVgZ8xL4OaqGGybLqdJOs4ZwSIWqG@dpg-cve55ldrie7s73e158c0-a/wado_wado"
+      - key: DIRECT_URL
+        value: "postgresql://wado_wado_user:U5YqVgZ8xL4OaqGGybLqdJOs4ZwSIWqG@dpg-cve55ldrie7s73e158c0-a/wado_wado"
+      - key: REDIS_URL
+        value: "rediss://red-cvfejt7noe9s73bgj2lg:wT2eJVSMILamu48qyO2nunbkfjAo91k0@singapore-keyvalue.render.com:6379"
+      - key: R2_ENDPOINT
+        sync: false
+      - key: R2_ACCESS_KEY_ID
+        sync: false
+      - key: R2_SECRET_ACCESS_KEY
+        sync: false
+      - key: R2_BUCKET_NAME
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: WORKER_TYPE
+        value: transcription
+
+  # 要約ワーカー
+  - type: worker
+    name: summary-worker
+    env: node
+    nodeVersion: 18
+    plan: standard
+    buildCommand: npm install && npx prisma generate --schema=./prisma/schema.prisma && npm run build
+    startCommand: npm run start:summary
+    rootDir: .
+    autoDeploy: true
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        value: "postgresql://wado_wado_user:U5YqVgZ8xL4OaqGGybLqdJOs4ZwSIWqG@dpg-cve55ldrie7s73e158c0-a/wado_wado"
+      - key: DIRECT_URL
+        value: "postgresql://wado_wado_user:U5YqVgZ8xL4OaqGGybLqdJOs4ZwSIWqG@dpg-cve55ldrie7s73e158c0-a/wado_wado"
+      - key: REDIS_URL
+        value: "rediss://red-cvfejt7noe9s73bgj2lg:wT2eJVSMILamu48qyO2nunbkfjAo91k0@singapore-keyvalue.render.com:6379"
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: WORKER_TYPE
+        value: summary
+
+  # 記事生成ワーカー
+  - type: worker
+    name: article-worker
+    env: node
+    nodeVersion: 18
+    plan: standard
+    buildCommand: npm install && npx prisma generate --schema=./prisma/schema.prisma && npm run build
+    startCommand: npm run start:article
+    rootDir: .
+    autoDeploy: true
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        value: "postgresql://wado_wado_user:U5YqVgZ8xL4OaqGGybLqdJOs4ZwSIWqG@dpg-cve55ldrie7s73e158c0-a/wado_wado"
+      - key: DIRECT_URL
+        value: "postgresql://wado_wado_user:U5YqVgZ8xL4OaqGGybLqdJOs4ZwSIWqG@dpg-cve55ldrie7s73e158c0-a/wado_wado"
+      - key: REDIS_URL
+        value: "rediss://red-cvfejt7noe9s73bgj2lg:wT2eJVSMILamu48qyO2nunbkfjAo91k0@singapore-keyvalue.render.com:6379"
+      - key: OPENROUTER_API_KEY
+        sync: false
+      - key: WORKER_TYPE
+        value: article
+
+  # Redisキュー
+  - type: redis
+    name: video-processing-queue
+    plan: standard
+    ipAllowList: [] # すべてのIPからのアクセスを許可
